@@ -8,11 +8,7 @@ typedef struct { int kind; bool selected, hovered; } retort_control_paint;
 static void paint_control(cui_ctx *ui, cui_node *n, void *raw) {
     retort_control_paint *p = raw;
     cui_rect r = n->rect;
-    if (p->kind == 1) {
-        cui_draw_rect(ui, (cui_rect){r.x + r.w - 1, r.y, 1, r.h}, CUI_CORNERS(0), CUI_C(ui, BORDER_SUBTLE));
-        if (p->selected)
-            cui_draw_rect(ui, (cui_rect){r.x + 1, r.y + 11, 2, r.h - 22}, CUI_CORNERS(1), CUI_C(ui, ACCENT));
-    } else if (p->kind == 2 && (p->selected || p->hovered)) {
+    if (p->kind == 2 && (p->selected || p->hovered)) {
         cui_draw_rect(ui, (cui_rect){r.x + 3, r.y + 5, r.w - 6, r.h - 10}, CUI_CORNERS(3), p->selected ? CUI_C(ui, ACTIVE) : CUI_C(ui, HOVER));
     } else if (p->kind == 0 && p->selected) {
         cui_draw_rect(ui, (cui_rect){r.x, r.y + 7, 2, r.h - 14}, CUI_CORNERS(1), CUI_C(ui, ACCENT));
@@ -30,15 +26,14 @@ bool retort_control_begin(cui_ctx *ui, const char *key, bool selected, float wid
     box.gap = 8; box.pad_x = kind == 0 ? 6 : (kind == 3 && width > 0 && width <= 36) ? 0 : 10;
     if (kind == 3) box.justify = CUI_JUSTIFY_CENTER;
     box.radius = kind == 3 || kind == 0 ? 3 : 0;
-    if (kind == 1 && selected) box.bg = CUI_C(ui, SURFACE);
-    else if (kind == 0 && selected) box.bg = CUI_C(ui, ACTIVE);
+    if (kind == 0 && selected) box.bg = CUI_C(ui, ACTIVE);
     else if (kind == 3 && selected) box.bg = CUI_C(ui, ACTIVE);
     else if (hit.hovered && kind != 2) box.bg = CUI_C(ui, HOVER);
     if (hit.focus_visible) { box.border = 1; box.border_color = CUI_C(ui, FOCUS_RING); }
     cui_box_begin(ui, &box);
     int at = ui->last_node;
     cui__mark_interactive(ui, at, CUI_IF_FOCUSABLE);
-    if (kind == 1 || kind == 2 || (kind == 0 && selected)) {
+    if (kind == 2 || (kind == 0 && selected)) {
         retort_control_paint *p = CUI_PAINT_DATA(ui, retort_control_paint);
         p->kind = kind; p->selected = selected; p->hovered = hit.hovered;
         ui->nodes[at].paint = paint_control;
@@ -136,8 +131,7 @@ bool retort_select_ex(cui_ctx *ui, const char *key, const char *const *items, in
     return changed;
 }
 
-bool retort_reveal(cui_ctx *ui, const char *key, cui_id target, bool horizontal) {
-    cui_id id = cui_make_id(ui, key);
+bool retort_reveal(cui_ctx *ui, cui_id id, cui_id target, bool horizontal) {
     cui_rect viewport = cui__prev_rect(ui, id), item = cui__prev_rect(ui, target);
     if (viewport.w <= 0 || viewport.h <= 0 || item.w <= 0 || item.h <= 0) return false;
     cui_scroll_state *st = cui_state(ui, id, sizeof *st);

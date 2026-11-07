@@ -72,6 +72,8 @@ pub fn main(init: std.process.Init) !void {
     }
     app.read_clipboard = readClipboard;
     persist.load(&app) catch |e| app.toast(.danger, "Could not load workspace", @errorName(e));
+    @import("ui/workspace.zig").layout = app.prefs.editor_layout;
+    @import("ui/workspace.zig").column_ratio = app.prefs.column_split;
     shell.sidebar_ratio = app.prefs.sidebar_width / @max(640, app.prefs.window_width);
     w.arena = .init(gpa);
     defer w.arena.deinit();

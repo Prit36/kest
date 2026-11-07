@@ -109,6 +109,7 @@ pub const App = struct {
     history: history_mod.History,
     history_dirty: bool = false,
     log: log_mod.Log,
+    activity: @import("../ui/activity.zig").Activity = .{},
     tabs: std.ArrayList(*Tab) = .empty,
     active: usize = 0,
     next_tab_uid: u64 = 1,
@@ -205,6 +206,7 @@ pub const App = struct {
         a.vars_arena.deinit();
         a.history.deinit();
         a.history_visible.deinit(a.gpa);
+        a.activity.deinit(a.gpa);
         a.log.deinit();
         a.toaster.deinit();
         a.filter.deinit();

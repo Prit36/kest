@@ -111,3 +111,13 @@ reset-button visibility and actual reset/recovery of loopback history. It runs i
 dark/light mode at the minimum sidebar width and inside the 640x420 sheet.
 Snapshots include `-history-empty`, `-history-filtered` and
 `-history-compact-filtered` beside the normal workspace captures.
+
+## CUI 1.1 follow-up
+
+The current application uses native CUI document tabs, tree table, path bar and
+activity console. The original custom document-strip painter has been removed.
+Native tabs retain request method/name, stable identity, unsaved state, close
+confirmation and overflow reveal, and add keyboard/mouse reordering. The path bar
+reveals collections and folders; layout choice and column divider position now
+persist. Markdown preview uses the new renderer within a 256 KiB bound. See
+[CUI 1.1 update](cui-1.1-update.md) for integration details and validation.

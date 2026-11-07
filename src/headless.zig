@@ -62,8 +62,11 @@ pub fn run(app: *App, test_mode: bool, snapshot: ?[]const u8, width: f32, height
         if (test_mode) try @import("ui_snapshots.zig").suite(ui, sw, app, path, frame);
     }
 }
-fn expect(condition: bool) !void {
-    if (!condition) return error.SelfTestFailed;
+fn expect(src: std.builtin.SourceLocation, condition: bool) !void {
+    if (!condition) {
+        std.debug.print("Check failed at {s}:{d}\n", .{ src.file, src.line });
+        return error.SelfTestFailed;
+    }
 }
 fn chord(ui: *c.cui_ctx, app: *App, key: c.cui_key, mods: c_int) void {
     c.cui_input_key(ui, key, true, mods);
@@ -77,35 +80,35 @@ fn tests(ui: *c.cui_ctx, app: *App) !void {
     const count = app.tabs.items.len;
     frame(ui, app);
     chord(ui, app, c.CUI_KEY_N, c.CUI_MOD_PRIMARY);
-    try expect(app.tabs.items.len == count + 1);
+    try expect(@src(), app.tabs.items.len == count + 1);
     const t = app.current().?;
     t.url.set("http://127.0.0.1:1/test?one=two");
     t.syncParamsFromUrl();
-    try expect(t.params.rows.items.len == 1);
+    try expect(@src(), t.params.rows.items.len == 1);
     t.params.rows.items[0].value.set("changed");
     t.syncUrlFromParams();
-    try expect(std.mem.indexOf(u8, t.url.text(), "changed") != null);
+    try expect(@src(), std.mem.indexOf(u8, t.url.text(), "changed") != null);
     t.body_kind = .json;
     t.pane = .body;
     t.body.setText("{\"answer\":42}");
     commands.formatBody(app, t, 2);
-    try expect(std.mem.indexOfScalar(u8, t.body.text(), '\n') != null);
-    try expect(t.body.undoEdit());
-    try expect(std.mem.eql(u8, t.body.text(), "{\"answer\":42}"));
+    try expect(@src(), std.mem.indexOfScalar(u8, t.body.text(), '\n') != null);
+    try expect(@src(), t.body.undoEdit());
+    try expect(@src(), std.mem.eql(u8, t.body.text(), "{\"answer\":42}"));
     const collection = tree.newCollection(app, "CUI self-test") orelse return error.AllocationFailed;
     tree.saveTabAs(app, t, collection, "Round trip");
     app.store.sync();
-    try expect(t.link != null);
+    try expect(@src(), t.link != null);
     persist.touchTab(app, t);
     persist.flush(app);
     app.store.sync();
     const env = tree.addEnvironment(app, "Loopback") orelse return error.AllocationFailed;
     _ = try env.table.add(.{ .key = "base", .value = "http://127.0.0.1" });
     commands.setActiveEnv(app, env);
-    try expect(app.activeVars().len == 1);
+    try expect(@src(), app.activeVars().len == 1);
     const old_sidebar = app.prefs.sidebar_open;
     chord(ui, app, c.CUI_KEY_B, c.CUI_MOD_PRIMARY);
-    try expect(app.prefs.sidebar_open != old_sidebar);
+    try expect(@src(), app.prefs.sidebar_open != old_sidebar);
     // Every request and response mode must build and lay out at minimum size.
     c.cui_set_viewport(ui, 640, 420, 1);
     app.prefs.sidebar_open = false;
@@ -132,15 +135,15 @@ fn workspaceUx(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]c
     app.prefs.dark = true;
     frame(ui, app);
     // The native app uses the same motion policy as this software context.
-    try expect(c.cui_theme_get(ui).*.motion == 0);
+    try expect(@src(), c.cui_theme_get(ui).*.motion == 0);
     const dark = c.cui_token_color(ui, c.CUI_TOKEN_SURFACE);
     app.prefs.dark = false;
     frame(ui, app);
     const light = c.cui_token_color(ui, c.CUI_TOKEN_SURFACE);
-    try expect(light.r > dark.r and c.cui_theme_get(ui).*.motion == 0);
+    try expect(@src(), light.r > dark.r and c.cui_theme_get(ui).*.motion == 0);
     app.prefs.dark = true;
     frame(ui, app);
-    try expect(c.cui_token_color(ui, c.CUI_TOKEN_SURFACE).r == dark.r);
+    try expect(@src(), c.cui_token_color(ui, c.CUI_TOKEN_SURFACE).r == dark.r);
 
     t.params.clear();
     t.pane = .params;
@@ -150,9 +153,9 @@ fn workspaceUx(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]c
     for (0..3) |_| frame(ui, app);
     const composer = tabRect(ui, t, "request-composer");
     const url_field = tabRect(ui, t, "url");
-    try expect(composer.x >= 0 and composer.x + composer.w <= 640);
-    try expect(url_field.w >= 200 and url_field.x + url_field.w < composer.x + composer.w);
-    try expect(t.params.rows.items.len == 0 and t.params.entry != null);
+    try expect(@src(), composer.x >= 0 and composer.x + composer.w <= 640);
+    try expect(@src(), url_field.w >= 200 and url_field.x + url_field.w < composer.x + composer.w);
+    try expect(@src(), t.params.rows.items.len == 0 and t.params.entry != null);
     const new_row = t.params.entry.?;
     c.cui_push_id_int(ui, @intCast(t.uid));
     c.cui_push_id_int(ui, @intCast(new_row.uid));
@@ -162,39 +165,39 @@ fn workspaceUx(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]c
     click(ui, app, blank_key.x + 20, blank_key.y + 16);
     c.cui_input_text(ui, "que");
     frame(ui, app);
-    try expect(t.params.rows.items.len == 1 and t.params.rows.items[0] == new_row);
+    try expect(@src(), t.params.rows.items.len == 1 and t.params.rows.items[0] == new_row);
     c.cui_input_text(ui, "ry");
     frame(ui, app);
-    try expect(std.mem.eql(u8, new_row.key.text(), "query"));
+    try expect(@src(), std.mem.eql(u8, new_row.key.text(), "query"));
     // Focus and cursor survive promoting the insertion row to real data.
     chord(ui, app, c.CUI_KEY_TAB, 0);
     c.cui_input_text(ui, "native");
     frame(ui, app);
-    try expect(std.mem.eql(u8, new_row.value.text(), "native"));
-    try expect(std.mem.indexOf(u8, t.url.text(), "query=native") != null);
+    try expect(@src(), std.mem.eql(u8, new_row.value.text(), "native"));
+    try expect(@src(), std.mem.indexOf(u8, t.url.text(), "query=native") != null);
     for (0..3) |_| frame(ui, app);
     c.cui_push_id_int(ui, @intCast(t.uid));
     c.cui_push_id_int(ui, @intCast(new_row.uid));
     const key_rect = c.cui_get_rect(ui, c.cui_make_id(ui, "key"));
     c.cui_pop_id(ui);
     c.cui_pop_id(ui);
-    try expect(key_rect.h >= 30 and key_rect.y + key_rect.h <= tabRect(ui, t, "response-panel").y);
+    try expect(@src(), key_rect.h >= 30 and key_rect.y + key_rect.h <= tabRect(ui, t, "response-panel").y);
     // Both the populated row and the next insertion row fit at minimum size.
     c.cui_push_id_int(ui, @intCast(t.uid));
     c.cui_push_id_int(ui, @intCast(t.params.entry.?.uid));
     const next_row = c.cui_get_rect(ui, c.cui_make_id(ui, "key"));
     c.cui_pop_id(ui);
     c.cui_pop_id(ui);
-    try expect(next_row.h >= 30 and next_row.y + next_row.h <= tabRect(ui, t, "response-panel").y);
+    try expect(@src(), next_row.h >= 30 and next_row.y + next_row.h <= tabRect(ui, t, "response-panel").y);
     const response_before = tabRect(ui, t, "response-panel");
     const nav = tabRect(ui, t, "toggle-details");
     click(ui, app, nav.x + nav.w / 2, nav.y + nav.h / 2);
-    try expect(t.details_collapsed);
+    try expect(@src(), t.details_collapsed);
     frame(ui, app);
     const response_after = tabRect(ui, t, "response-panel");
-    try expect(response_after.h > response_before.h + 30);
+    try expect(@src(), response_after.h > response_before.h + 30);
     click(ui, app, nav.x + nav.w / 2, nav.y + nav.h / 2);
-    try expect(!t.details_collapsed);
+    try expect(@src(), !t.details_collapsed);
 
     c.cui_set_viewport(ui, 1180, 800, 1);
     app.prefs.sidebar_open = true;
@@ -202,7 +205,7 @@ fn workspaceUx(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]c
     for (0..3) |_| frame(ui, app);
     const request_rect = tabRect(ui, t, "request-panel");
     const response_rect = tabRect(ui, t, "response-panel");
-    try expect(response_rect.x > request_rect.x + request_rect.w - 1 and response_rect.h > 400);
+    try expect(@src(), response_rect.x > request_rect.x + request_rect.w - 1 and response_rect.h > 400);
     if (snapshot) |path| {
         const stem = path[0 .. path.len - std.fs.path.extension(path).len];
         const target = try std.fmt.allocPrint(app.gpa, "{s}-params.png", .{stem});
@@ -216,14 +219,29 @@ fn workspaceUx(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]c
             break;
         }
     };
-    c.cui_push_id(ui, w.z(&root.id));
-    const item = c.cui_get_rect(ui, c.cui_make_id(ui, "collection-item"));
+    @import("ui/sidebar.zig").reveal(app, root);
+    for (0..3) |_| frame(ui, app);
+    c.retort_focus(ui, "collection-rows");
+    chord(ui, app, c.CUI_KEY_LEFT, 0);
+    try expect(@src(), !root.expanded);
+    chord(ui, app, c.CUI_KEY_RIGHT, 0);
+    try expect(@src(), root.expanded);
+    // Click the real path-bar ancestor: it clears a filter and reveals the
+    // collection even when the sidebar had been hidden.
+    app.filter.set("no-such-request");
+    app.rows_dirty = true;
+    app.prefs.sidebar_open = false;
+    for (0..3) |_| frame(ui, app);
+    c.cui_push_id_int(ui, @intCast(t.uid));
+    c.cui_push_id(ui, "request-path");
+    c.cui_push_id_int(ui, 0);
+    const crumb = c.cui_get_rect(ui, c.cui_make_id(ui, "seg"));
     c.cui_pop_id(ui);
-    const expanded = root.expanded;
-    click(ui, app, item.x + 60, item.y + 16);
-    try expect(root.expanded != expanded);
-    chord(ui, app, c.CUI_KEY_ENTER, 0);
-    try expect(root.expanded == expanded);
+    c.cui_pop_id(ui);
+    c.cui_pop_id(ui);
+    try expect(@src(), crumb.w > 0);
+    click(ui, app, crumb.x + crumb.w / 2, crumb.y + crumb.h / 2);
+    try expect(@src(), app.filter.len == 0 and app.prefs.sidebar_open and app.selected == root);
     t.params.clear();
     t.syncUrlFromParams();
     std.debug.print("CUI workspace UX: instant themes, joined composer, direct row entry, continuous typing, Tab to value, URL sync, two visible rows at 640px, response focus, adaptive columns, collection navigation passed\n", .{});
@@ -240,31 +258,31 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     // This is the same shortcut path as the real window.
     chord(ui, app, c.CUI_KEY_ENTER, c.CUI_MOD_PRIMARY);
     try wait(ui, app);
-    try expect(t.shown != null and t.shown.?.resp.status == 200);
-    try expect(std.mem.indexOf(u8, t.shown.?.resp.preview.items, "needle") != null);
+    try expect(@src(), t.shown != null and t.shown.?.resp.status == 200);
+    try expect(@src(), std.mem.indexOf(u8, t.shown.?.resp.preview.items, "needle") != null);
     try @import("ui_interaction_tests.zig").response(ui, app, frame, click);
     t.response.pretty_mode = .tree;
     inline for (std.meta.tags(@import("app/tab.zig").ResponsePane)) |pane| {
         t.response.pane = pane;
         frame(ui, app);
     }
-    try expect(t.response.tree != null);
+    try expect(@src(), t.response.tree != null);
     const expanded_rows = t.response.tree.?.rows.items.len;
     try t.response.tree.?.setAll(app.gpa, true);
-    try expect(t.response.tree.?.rows.items.len < expanded_rows);
+    try expect(@src(), t.response.tree.?.rows.items.len < expanded_rows);
     try t.response.tree.?.setAll(app.gpa, false);
     t.response.pretty_mode = .text;
     t.response.pane = .pretty;
     frame(ui, app);
-    try expect(t.response.formatted != null);
+    try expect(@src(), t.response.formatted != null);
     t.response.pretty_mode = .minified;
     frame(ui, app);
-    try expect(std.mem.indexOfScalar(u8, t.response.formatted.?, '\n') == null);
+    try expect(@src(), std.mem.indexOfScalar(u8, t.response.formatted.?, '\n') == null);
     t.response.pane = .raw;
     t.response.code_raw.search_open = true;
     t.response.code_raw.query.set("needle");
     t.response.code_raw.research(t.shown.?.resp.preview.items);
-    try expect(t.response.code_raw.matches.items.len == 1);
+    try expect(@src(), t.response.code_raw.matches.items.len == 1);
     t.response.code_raw.search_open = false;
     // Actual pointer and text events, entirely inside CUI's context.
     t.pane = .body;
@@ -278,21 +296,21 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     const body_id = c.cui_make_id(ui, "body-editor");
     c.cui_pop_id(ui);
     const body_rect = c.cui_get_rect(ui, body_id);
-    try expect(body_rect.w > 100 and body_rect.h > 30);
+    try expect(@src(), body_rect.w > 100 and body_rect.h > 30);
     click(ui, app, body_rect.x + 62, body_rect.y + 15);
     chord(ui, app, c.CUI_KEY_A, c.CUI_MOD_PRIMARY);
     c.cui_input_text(ui, "{\"typed\":true}");
     frame(ui, app);
-    try expect(std.mem.eql(u8, t.body.text(), "{\"typed\":true}"));
+    try expect(@src(), std.mem.eql(u8, t.body.text(), "{\"typed\":true}"));
     chord(ui, app, c.CUI_KEY_Z, c.CUI_MOD_PRIMARY);
-    try expect(std.mem.eql(u8, t.body.text(), "{}"));
+    try expect(@src(), std.mem.eql(u8, t.body.text(), "{}"));
     // POST body travels through the request builder and transport.
     t.method.set("POST");
     t.url.set(try server.url(w.arena.allocator(), "/echo"));
     t.body.setText("{\"sent\":true}");
     chord(ui, app, c.CUI_KEY_ENTER, c.CUI_MOD_PRIMARY);
     try wait(ui, app);
-    try expect(std.mem.indexOf(u8, t.shown.?.resp.preview.items, "{\"sent\":true}") != null);
+    try expect(@src(), std.mem.indexOf(u8, t.shown.?.resp.preview.items, "{\"sent\":true}") != null);
     // Queue an export, then clear the response immediately. The writer pins it.
     const export_path = try std.fs.path.join(app.gpa, &.{ app.store.path, "exported-response.txt" });
     defer app.gpa.free(export_path);
@@ -301,38 +319,54 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     app.store.sync();
     const exported = try std.Io.Dir.cwd().readFileAlloc(app.io, export_path, app.gpa, .limited(65536));
     defer app.gpa.free(exported);
-    try expect(std.mem.indexOf(u8, exported, "sent") != null);
+    try expect(@src(), std.mem.indexOf(u8, exported, "sent") != null);
     t.method.set("GET");
     t.body_kind = .none;
     t.url.set(try server.url(w.arena.allocator(), "/bytes/9437184"));
     commands.send(app, t);
     try wait(ui, app);
-    try expect(t.shown.?.resp.spill_path != null);
+    try expect(@src(), t.shown.?.resp.spill_path != null);
     try @import("app/export_jobs.zig").response(app.store, export_path, t.shown.?);
     commands.clearResponse(t);
     app.store.sync();
     const saved_stat = try std.Io.Dir.cwd().statFile(app.io, export_path, .{});
-    try expect(saved_stat.size == 9437184);
+    try expect(@src(), saved_stat.size == 9437184);
     t.url.set(try server.url(w.arena.allocator(), "/hang"));
     commands.send(app, t);
     commands.cancel(t);
     try wait(ui, app);
-    try expect(t.shown.?.resp.stop == .canceled);
+    try expect(@src(), t.shown.?.resp.stop == .canceled);
     t.url.set(try server.url(w.arena.allocator(), "/html"));
     commands.send(app, t);
     try wait(ui, app);
     t.response.pane = .preview;
     frame(ui, app);
-    try expect(t.response.stripped != null and std.mem.indexOf(u8, t.response.stripped.?, "Loopback preview") != null);
+    try expect(@src(), t.response.stripped != null and std.mem.indexOf(u8, t.response.stripped.?, "Loopback preview") != null);
+    t.url.set(try server.url(w.arena.allocator(), "/markdown"));
+    commands.send(app, t);
+    try wait(ui, app);
+    try expect(@src(), @import("ui/response.zig").isMarkdown(&t.shown.?.resp));
+    t.response.pane = .preview;
+    for (0..4) |_| frame(ui, app);
+    try expect(@src(), tabRect(ui, t, "markdown-preview").h > 50);
+    const markdown_bytes = try app.gpa.dupe(u8, t.shown.?.resp.preview.items);
+    defer app.gpa.free(markdown_bytes);
+    frame(ui, app);
+    try expect(@src(), std.mem.eql(u8, markdown_bytes, t.shown.?.resp.preview.items));
+    // Oversized markup stays on the bounded, virtualized editor path.
+    try t.shown.?.resp.preview.resize(app.gpa, 256 * 1024 + 1);
+    @memset(t.shown.?.resp.preview.items, 'x');
+    for (0..3) |_| frame(ui, app);
+    try expect(@src(), tabRect(ui, t, "text-preview").h > 30);
     t.url.set(try server.url(w.arena.allocator(), "/png"));
     commands.send(app, t);
     try wait(ui, app);
     t.response.pane = .preview;
     frame(ui, app);
-    try expect(t.response.image != 0 and t.response.image_width == 1);
+    try expect(@src(), t.response.image != 0 and t.response.image_width == 1);
     // Validate real import + saved request files + a reload of the workspace.
     @import("app/import_ops.zig").previewText(app, "curl -X POST http://127.0.0.1/echo -H 'Content-Type: application/json' -d '{\"hello\":1}'", "test.curl");
-    try expect(app.preview != null);
+    try expect(@src(), app.preview != null);
     @import("app/import_ops.zig").accept(app);
     app.modal_open = false;
     persist.flush(app);
@@ -341,8 +375,8 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     var restored = App.init(app.gpa, app.io, app.store, app.client, app.tmp_dir, noWake, noSchedule);
     defer restored.deinit();
     try persist.load(&restored);
-    try expect(restored.collections.items.len == app.collections.items.len and restored.envs.items.len == app.envs.items.len);
-    try expect(restored.tabs.items.len > 0);
+    try expect(@src(), restored.collections.items.len == app.collections.items.len and restored.envs.items.len == app.envs.items.len);
+    try expect(@src(), restored.tabs.items.len > 0);
     // Finish with real JSON on show, also used by the optional screenshot.
     t.url.set(try server.url(w.arena.allocator(), "/json"));
     t.syncParamsFromUrl();
@@ -354,11 +388,11 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     c.cui_set_viewport(ui, 640, 420, 1);
     for (0..4) |_| frame(ui, app);
     const json_rect = tabRect(ui, t, "json-rows");
-    try expect(json_rect.h >= 60 and json_rect.y + json_rect.h <= 420);
+    try expect(@src(), json_rect.h >= 60 and json_rect.y + json_rect.h <= 420);
     chord(ui, app, c.CUI_KEY_B, c.CUI_MOD_PRIMARY);
-    try expect(shell.narrow_open);
+    try expect(@src(), shell.narrow_open);
     chord(ui, app, c.CUI_KEY_B, c.CUI_MOD_PRIMARY);
-    try expect(!shell.narrow_open);
+    try expect(@src(), !shell.narrow_open);
     c.cui_set_viewport(ui, 1180, 800, 1);
     for (0..4) |_| frame(ui, app);
     app.prefs.sidebar_open = true;
@@ -371,8 +405,8 @@ fn noSchedule(_: *App, _: u64) void {}
 fn performance(ui: *c.cui_ctx, app: *App) !void {
     // Let transient toast deadlines expire, then require an entirely idle UI.
     for (0..800) |_| frame(ui, app);
-    try expect(!c.cui_needs_redraw(ui));
-    try expect(c.cui_next_wakeup(ui) < 0);
+    try expect(@src(), !c.cui_needs_redraw(ui));
+    try expect(@src(), c.cui_next_wakeup(ui) < 0);
     const t = app.current().?;
     const previous = try app.gpa.dupe(u8, t.body.text());
     defer app.gpa.free(previous);
@@ -393,7 +427,31 @@ fn performance(ui: *c.cui_ctx, app: *App) !void {
     }
     std.mem.sort(u64, &times, {}, std.sort.asc(u64));
     std.debug.print("CUI build/layout/paint 4 MiB single line: median {d:.3} ms, p99 {d:.3} ms (200 frames); idle redraw=false, wakeup<0\n", .{ @as(f64, @floatFromInt(times[100])) / 1e6, @as(f64, @floatFromInt(times[198])) / 1e6 });
+    try nativeEditorSample(app, payload);
     t.body.setText(previous);
     t.body_kind = .none;
     t.pane = .params;
+}
+
+// Keep the upstream editor under measurement before adopting it for large HTTP
+// documents. An isolated context prevents it changing the app's editor state.
+fn nativeEditorSample(app: *App, payload: []const u8) !void {
+    const sw = c.cui_sw_create() orelse return error.RendererFailed;
+    defer c.cui_sw_destroy(sw);
+    const ui = c.cui_create(&.{ .renderer = c.cui_sw_iface(sw), .theme = c.CUI_THEME_DARK }) orelse return error.ContextFailed;
+    defer c.cui_destroy(ui);
+    c.cui_set_viewport(ui, 800, 500, 1);
+    c.cui_set_reduced_motion(ui, true);
+    const text = try app.gpa.dupeSentinel(u8, payload, 0);
+    defer app.gpa.free(text);
+    var times: [8]u64 = undefined;
+    for (&times) |*slot| {
+        const start = std.Io.Clock.Timestamp.now(app.io, .awake);
+        c.cui_begin_frame(ui, 1.0 / 60.0);
+        _ = c.cui_code_editor_ex(ui, "upstream-editor", text.ptr, text.len + 1, &.{ .height = -1, .read_only = true });
+        c.cui_end_frame(ui);
+        slot.* = @intCast(start.untilNow(app.io).raw.toNanoseconds());
+    }
+    std.mem.sort(u64, &times, {}, std.sort.asc(u64));
+    std.debug.print("CUI 1.1 native editor, isolated 4 MiB single line: median {d:.3} ms (8 frames)\n", .{@as(f64, @floatFromInt(times[4])) / 1e6});
 }

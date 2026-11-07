@@ -13,19 +13,20 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag != .windows) @panic("The CUI host is currently Windows-only; the Zig engine remains portable.");
     const dep = b.dependency("cui", .{});
     const bindings = b.addTranslateC(.{ .root_source_file = b.path("src/host.h"), .target = target, .optimize = optimize });
-    bindings.addIncludePath(dep.path("CUI-145407d7296554a1f2a2909fcc4769d75774716f/include"));
+    bindings.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/include"));
     const cui = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true });
-    cui.addIncludePath(dep.path("CUI-145407d7296554a1f2a2909fcc4769d75774716f/include"));
-    cui.addIncludePath(dep.path("CUI-145407d7296554a1f2a2909fcc4769d75774716f/src"));
-    cui.addIncludePath(dep.path("CUI-145407d7296554a1f2a2909fcc4769d75774716f/"));
-    cui.addCSourceFiles(.{ .root = dep.path("CUI-145407d7296554a1f2a2909fcc4769d75774716f/"), .files = &.{
-        "src/cui_core.c",               "src/cui_theme.c",            "src/cui_draw.c",         "src/cui_text.c",
-        "src/cui_layout.c",             "src/cui_widgets.c",          "src/cui_controls.c",     "src/cui_textedit.c",
-        "src/cui_overlay.c",            "src/cui_data.c",             "src/cui_actions.c",      "src/cui_disclosure.c",
-        "src/cui_code.c",               "src/cui_tools.c",            "src/cui_hex.c",          "src/cui_chrome.c",
-        "src/cui_charts.c",             "src/cui_image.c",            "src/cui_font_data.c",    "src/cui_inflate.c",
-        "src/render/cui_render_sw.c",   "src/render/cui_render_gl.c", "src/platform/cui_app.c", "src/platform/cui_dialogs.c",
-        "src/platform/cui_app_win32.c",
+    cui.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/include"));
+    cui.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/src"));
+    cui.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/"));
+    cui.addCSourceFiles(.{ .root = dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/"), .files = &.{
+        "src/cui_core.c",         "src/cui_theme.c",            "src/cui_draw.c",               "src/cui_text.c",
+        "src/cui_layout.c",       "src/cui_widgets.c",          "src/cui_controls.c",           "src/cui_textedit.c",
+        "src/cui_overlay.c",      "src/cui_data.c",             "src/cui_actions.c",            "src/cui_disclosure.c",
+        "src/cui_extras.c",       "src/cui_grid.c",             "src/cui_treetable.c",          "src/cui_markdown.c",
+        "src/cui_editor.c",       "src/cui_diff.c",             "src/cui_code.c",               "src/cui_tools.c",
+        "src/cui_hex.c",          "src/cui_chrome.c",           "src/cui_charts.c",             "src/cui_image.c",
+        "src/cui_font_data.c",    "src/cui_inflate.c",          "src/render/cui_render_sw.c",   "src/render/cui_render_gl.c",
+        "src/platform/cui_app.c", "src/platform/cui_dialogs.c", "src/platform/cui_app_win32.c",
     }, .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/host.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/controls.c"), .flags = c_flags });
@@ -38,10 +39,10 @@ pub fn build(b: *std.Build) void {
     const exe = appExecutable(b, "kest", target, optimize, cui_lib, cui_bindings, diagnostics);
     b.installArtifact(exe);
     b.getInstallStep().dependOn(&b.addInstallFile(b.path("LICENSE"), "licenses/Retort-MIT.txt").step);
-    b.getInstallStep().dependOn(&b.addInstallFile(dep.path("CUI-145407d7296554a1f2a2909fcc4769d75774716f/LICENSE"), "licenses/CUI-MIT.txt").step);
-    b.getInstallStep().dependOn(&b.addInstallFile(dep.path("CUI-145407d7296554a1f2a2909fcc4769d75774716f/THIRD_PARTY.md"), "licenses/CUI-THIRD-PARTY.md").step);
+    b.getInstallStep().dependOn(&b.addInstallFile(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/LICENSE"), "licenses/CUI-MIT.txt").step);
+    b.getInstallStep().dependOn(&b.addInstallFile(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/THIRD_PARTY.md"), "licenses/CUI-THIRD-PARTY.md").step);
     for ([_][]const u8{ "Inter", "Geist", "Lucide" }) |font|
-        b.getInstallStep().dependOn(&b.addInstallFile(dep.path(b.fmt("CUI-145407d7296554a1f2a2909fcc4769d75774716f/assets/fonts/LICENSE-{s}.txt", .{font})), b.fmt("licenses/LICENSE-{s}.txt", .{font})).step);
+        b.getInstallStep().dependOn(&b.addInstallFile(dep.path(b.fmt("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/assets/fonts/LICENSE-{s}.txt", .{font})), b.fmt("licenses/LICENSE-{s}.txt", .{font})).step);
     const run = b.addRunArtifact(exe);
     run.addPassthruArgs();
     b.step("run", "Open Kest").dependOn(&run.step);

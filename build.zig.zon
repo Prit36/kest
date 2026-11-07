@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .cui = .{
-            .url = "https://codeload.github.com/yappologistic/CUI/tar.gz/145407d7296554a1f2a2909fcc4769d75774716f",
-            .hash = "N-V-__8AAOy7mwFhtyBlrRef6cwz29bGmt2SsKyyZ7zFmE_i",
+            .url = "https://codeload.github.com/yappologistic/CUI/tar.gz/d0383c4d3c00b7769f6b11cefdf581e1800f2da3",
+            .hash = "N-V-__8AAAvIzwGFmvWNs5W_gYNnIwAZQ2XyiKLakN74-QB-",
         },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src", "tests", "assets", "docs", "tools", "README.md", "LICENSE" },

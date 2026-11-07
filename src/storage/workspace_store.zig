@@ -19,12 +19,16 @@ pub const OpenTab = struct {
 };
 
 /// Plain data; `open_tabs` and `active_env` live in an arena or the app.
+pub const EditorLayout = enum { auto, columns, stacked };
+
 pub const Prefs = struct {
     dark: bool = true,
     sidebar_width: f32 = 280,
     sidebar_open: bool = true,
     /// The request pane's share of the workspace's height.
     split: f32 = 0.36,
+    editor_layout: EditorLayout = .auto,
+    column_split: f32 = 0.42,
     log_open: bool = false,
     autosave: bool = true,
     retention: u32 = history.default_retention,
@@ -55,6 +59,8 @@ pub fn parsePrefs(a: Allocator, text: []const u8) !Prefs {
     p.autosave = json.boolean(v, "autosave") orelse p.autosave;
     if (json.int(v, "sidebarWidth")) |w| p.sidebar_width = std.math.clamp(@as(f32, @floatFromInt(w)), 180, 640);
     if (json.int(v, "splitPercent")) |s| p.split = std.math.clamp(@as(f32, @floatFromInt(s)) / 100, 0.1, 0.9);
+    if (json.str(v, "editorLayout")) |value| p.editor_layout = std.meta.stringToEnum(EditorLayout, value) orelse .auto;
+    if (json.int(v, "columnSplitPercent")) |value| p.column_split = std.math.clamp(@as(f32, @floatFromInt(value)) / 100, 0.2, 0.8);
     if (json.int(v, "retention")) |r| p.retention = @intCast(std.math.clamp(r, 1, 100_000));
     if (json.int(v, "windowWidth")) |w| p.window_width = std.math.clamp(@as(f32, @floatFromInt(w)), 640, 8000);
     if (json.int(v, "windowHeight")) |h| p.window_height = std.math.clamp(@as(f32, @floatFromInt(h)), 420, 8000);
@@ -86,6 +92,8 @@ fn writePrefs(s: *std.json.Stringify, p: Prefs) !void {
     try json.field(s, "sidebarOpen", p.sidebar_open);
     try json.field(s, "sidebarWidth", @as(i64, @intFromFloat(p.sidebar_width)));
     try json.field(s, "splitPercent", @as(i64, @intFromFloat(p.split * 100)));
+    try json.field(s, "editorLayout", @tagName(p.editor_layout));
+    try json.field(s, "columnSplitPercent", @as(i64, @intFromFloat(p.column_split * 100)));
     try json.field(s, "logOpen", p.log_open);
     try json.field(s, "autosave", p.autosave);
     try json.field(s, "retention", p.retention);
@@ -148,9 +156,11 @@ test "preferences round trip, and forgive what's wrong" {
     const a = ar.allocator();
     const env = col.newId(t.io);
     const req = col.newId(t.io);
-    const text = try prefsJson(a, .{ .dark = false, .sidebar_width = 333, .split = 0.6, .retention = 50, .active_env = env, .autosave = false, .open_tabs = &.{ .{ .collection = req, .request = req }, .{ .draft = env } }, .active_tab = 1 });
+    const text = try prefsJson(a, .{ .dark = false, .sidebar_width = 333, .split = 0.6, .editor_layout = .stacked, .column_split = 0.55, .retention = 50, .active_env = env, .autosave = false, .open_tabs = &.{ .{ .collection = req, .request = req }, .{ .draft = env } }, .active_tab = 1 });
     const p = try parsePrefs(a, text);
     try t.expect(!p.dark);
+    try t.expectEqual(EditorLayout.stacked, p.editor_layout);
+    try t.expectApproxEqAbs(@as(f32, 0.55), p.column_split, 0.001);
     try t.expect(!p.autosave);
     try t.expectEqual(@as(f32, 333), p.sidebar_width);
     try t.expectEqual(@as(u32, 50), p.retention);
@@ -163,6 +173,9 @@ test "preferences round trip, and forgive what's wrong" {
     try t.expectEqual(@as(u32, 1), odd.retention);
     try t.expect(odd.active_env == null);
     try t.expectEqual(@as(usize, 0), odd.open_tabs.len);
+    const invalid_layout = try parsePrefs(a, "{\"editorLayout\":\"invalid\",\"columnSplitPercent\":999}");
+    try t.expectEqual(EditorLayout.auto, invalid_layout.editor_layout);
+    try t.expectEqual(@as(f32, 0.8), invalid_layout.column_split);
     try t.expectError(error.Malformed, parsePrefs(a, "not json"));
 }
 

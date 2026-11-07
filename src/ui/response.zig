@@ -122,6 +122,27 @@ fn tree(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) void {
 }
 
 fn preview(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) void {
+    if (isMarkdown(resp)) {
+        if (resp.preview.items.len == 0) {
+            w.empty(ui, "Empty Markdown response", "The response body has no content.");
+            return;
+        }
+        // Markdown lays out the entire document. Keep large responses on the
+        // virtualized text path rather than parsing megabytes on every frame.
+        if (resp.preview.items.len <= 256 * 1024) {
+            c.cui_scroll_begin(ui, &.{ .id = "markdown-preview", .height = w.fill, .width = w.fill, .pad = 16 });
+            const result = c.cui_markdown_ex(ui, "response-markdown", resp.preview.items.ptr, &.{ .length = @intCast(resp.preview.items.len), .size = 13 });
+            if (result.link) |link| {
+                const url = std.mem.span(link);
+                if (std.ascii.startsWithIgnoreCase(url, "https://") or std.ascii.startsWithIgnoreCase(url, "http://")) {
+                    if (!platform.headless) _ = c.cui_app_open_url(link);
+                } else app.toast(.info, "Link", "Only HTTP and HTTPS links can be opened from response previews.");
+            }
+            c.cui_scroll_end(ui);
+            return;
+        }
+        w.muted(ui, "Large Markdown response shown as text (preview limit: 256 KiB).");
+    }
     switch (resp.class()) {
         .html => {
             if (t.response.stripped == null) t.response.stripped = strip(app.gpa, resp.preview.items) catch null;
@@ -176,4 +197,10 @@ pub fn save(app: *App, resp: *response.Response) void {
         return;
     };
     app.toast(.info, "Save queued", std.fs.path.basename(path));
+}
+
+pub fn isMarkdown(resp: *const response.Response) bool {
+    const end = std.mem.indexOfScalar(u8, resp.content_type, ';') orelse resp.content_type.len;
+    const mime = std.mem.trim(u8, resp.content_type[0..end], " \t");
+    return std.ascii.eqlIgnoreCase(mime, "text/markdown") or std.ascii.eqlIgnoreCase(mime, "text/x-markdown");
 }

@@ -11,7 +11,19 @@ const col = @import("../core/collection.zig");
 const dialogs = @import("dialogs.zig");
 var revealed_request: u64 = 0;
 var revealed_link: col.Id = @splat(0);
+var active_link: col.Id = @splat(0);
 var reveal_pending = false;
+
+pub fn reveal(app: *App, node: *col.Node) void {
+    app.filter.clear();
+    app.selected = node;
+    var ancestor: ?*col.Node = node;
+    while (ancestor) |n| : (ancestor = n.parent) n.expanded = true;
+    app.rows_dirty = true;
+    revealed_link = node.id;
+    revealed_request = if (app.current()) |t| t.uid else 0;
+    reveal_pending = true;
+}
 
 pub fn view(ui: *c.cui_ctx, app: *App) void {
     const size = c.cui_viewport_size(ui);
@@ -77,7 +89,7 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
     }
     w.end(ui);
     if (app.current()) |t| {
-        const link_changed = if (t.link) |link| !std.mem.eql(u8, &revealed_link, &link.request) else false;
+        const link_changed = if (t.link) |link| !std.mem.eql(u8, &active_link, &link.request) else false;
         if ((revealed_request != t.uid or link_changed) and app.filter.len == 0) {
             revealed_request = t.uid;
             if (t.link) |link| for (app.collections.items) |root| {
@@ -85,6 +97,7 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
                     var ancestor = node.parent;
                     while (ancestor) |parent| : (ancestor = parent.parent) parent.expanded = true;
                     app.rows_dirty = true;
+                    active_link = link.request;
                     revealed_link = link.request;
                     reveal_pending = true;
                     break;
@@ -99,56 +112,83 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
         emptyEnd(ui);
         return;
     }
-    var first: c_int = 0;
-    var last: c_int = 0;
-    c.cui_virtual_list_begin(ui, "collection-rows", @intCast(rows.len), 28, w.fill, &first, &last);
-    defer c.cui_virtual_list_end(ui);
-    if (reveal_pending) {
-        const viewport = c.cui_get_rect(ui, c.cui_make_id(ui, "collection-rows"));
-        if (viewport.h > 0) {
-            if (app.current().?.link) |link| for (rows, 0..) |r, i| {
-                if (std.mem.eql(u8, &r.node.id, &link.request)) {
-                    // Show context above the request, without scrolling each frame.
-                    c.cui_scroll_to(ui, "collection-rows", @max(0, @as(f32, @floatFromInt(i)) * 28 - viewport.h / 3));
-                    break;
-                }
-            };
-            reveal_pending = false;
-            c.cui_request_redraw(ui);
+    // Project the existing filtered/expanded rows into CUI's tree model.
+    // Collapsed children load from the cached collection model on the next frame.
+    const allocator = w.arena.allocator();
+    const nodes = allocator.alloc(c.cui_tree_node, rows.len) catch return;
+    const stack = allocator.alloc(c_int, rows.len + 1) catch return;
+    @memset(stack, -1);
+    var cursor: c_int = -1;
+    for (rows, 0..) |r, i| {
+        const depth: usize = @min(r.depth, rows.len);
+        const parent = if (depth > 0) stack[depth - 1] else -1;
+        nodes[i] = .{ .parent = parent, .first_child = -1, .next_sibling = -1, .flags = 0 };
+        if (r.node.children.items.len > 0) nodes[i].flags |= c.CUI_TREE_HAS_CHILDREN;
+        if (r.node.expanded or app.filter.len > 0) nodes[i].flags |= c.CUI_TREE_OPEN;
+        if (app.selected == r.node) {
+            nodes[i].flags |= c.CUI_TREE_SELECTED;
+            cursor = @intCast(i);
+        }
+        if (stack[depth] >= 0 and nodes[@intCast(stack[depth])].parent == parent)
+            nodes[@intCast(stack[depth])].next_sibling = @intCast(i);
+        if (parent >= 0 and nodes[@intCast(parent)].first_child < 0)
+            nodes[@intCast(parent)].first_child = @intCast(i);
+        stack[depth] = @intCast(i);
+        if (depth + 1 < stack.len) stack[depth + 1] = -1;
+        if (reveal_pending and std.mem.eql(u8, &r.node.id, &revealed_link)) {
+            cursor = @intCast(i);
+            app.selected = r.node;
+            nodes[i].flags |= c.CUI_TREE_SELECTED;
         }
     }
-    for (@as(usize, @intCast(first))..@as(usize, @intCast(last))) |i| {
-        const r = rows[i];
-        const n = r.node;
+    const columns = [_]c.cui_grid_column{
+        .{ .title = "Collection / request", .width = @max(140, c.cui_get_rect(ui, c.cui_make_id(ui, "collection-browser")).w - 42) },
+        .{ .title = "", .width = 38, .fixed = true },
+    };
+    c.cui_tree_table_begin_ex(ui, "collection-rows", &columns, columns.len, nodes.ptr, @intCast(nodes.len), &.{
+        .height = w.fill,
+        .width = w.fill,
+        .row_height = 30,
+        .guides = true,
+        .cursor = &cursor,
+    });
+    while (true) {
+        const index = c.cui_tree_table_row(ui);
+        if (index < 0) break;
+        const n = rows[@intCast(index)].node;
+        const icon = if (n.kind == .request) c.CUI_ICON_FILE else if (n.kind == .collection) c.CUI_ICON_BOX else c.CUI_ICON_FOLDER;
+        c.cui_tree_table_name(ui, if (n.kind == .request) w.fmt("{s}  {s}", .{ n.method, n.name }) else w.z(n.name), icon);
         c.cui_push_id(ui, w.z(&n.id));
-        w.row(ui, .{ .height = w.px(28), .pad_left = 6 + @as(f32, @floatFromInt(@min(r.depth, 12))) * 14, .width = w.fill });
-        const current = app.current();
-        const active = if (current) |request_tab| if (request_tab.link) |link| std.mem.eql(u8, &link.request, &n.id) else false else false;
-        const clicked = c.retort_control_begin(ui, "collection-item", active, -1, 28, 0);
-        if (n.kind == .request) w.text(ui, n.method, .{ .font = c.CUI_FONT_MONO, .size = 10, .width = w.px(38), .color = w.methodColor(n.method), .nowrap = true }) else {
-            c.cui_icon(ui, if (n.expanded) c.CUI_ICON_CHEVRON_DOWN else c.CUI_ICON_CHEVRON_RIGHT, 12, w.color(c.CUI_TOKEN_TEXT_MUTED));
-            c.cui_icon(ui, if (n.kind == .collection) c.CUI_ICON_BOX else c.CUI_ICON_FOLDER, 13, w.color(c.CUI_TOKEN_TEXT_SECONDARY));
-        }
-        w.text(ui, n.name, .{ .size = 12, .width = w.fill, .nowrap = true, .font = if (n.kind == .request) c.CUI_FONT_BODY else c.CUI_FONT_MEDIUM });
-        c.retort_item_end(ui);
-        if (clicked) {
-            app.selected = n;
-            if (n.kind == .request) commands.openRequest(app, n) else {
-                n.expanded = !n.expanded;
-                app.rows_dirty = true;
-            }
-        }
         if (c.cui_context_menu_begin(ui, "node-menu")) {
             nodeMenu(ui, app, n);
             c.cui_context_menu_end(ui);
         }
+        c.cui_data_grid_cell(ui);
         if (c.retort_dropdown_begin(ui, "Item actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_START })) {
             nodeMenu(ui, app, n);
             c.cui_menu_end(ui);
         }
-        w.end(ui);
         c.cui_pop_id(ui);
     }
+    const events = c.cui_tree_table_end(ui);
+    reveal_pending = false;
+    for (rows, nodes) |r, node| {
+        if (app.filter.len == 0 and r.node.expanded != (node.flags & c.CUI_TREE_OPEN != 0)) {
+            r.node.expanded = node.flags & c.CUI_TREE_OPEN != 0;
+            app.rows_dirty = true;
+        }
+    }
+    if (events.selection_changed and cursor >= 0) {
+        app.selected = rows[@intCast(cursor)].node;
+        if (app.selected.?.kind == .request) commands.openRequest(app, app.selected.?);
+    }
+    if (events.activated >= 0) commands.openRequest(app, rows[@intCast(events.activated)].node);
+    if (app.rows_dirty) c.cui_request_redraw(ui);
+}
+
+fn collectionLabel(raw: ?*anyopaque, index: c_int) callconv(.c) [*c]const u8 {
+    const rows: [*]const col.Row = @ptrCast(@alignCast(raw.?));
+    return w.z(rows[@intCast(index)].node.name);
 }
 
 fn nodeMenu(ui: *c.cui_ctx, app: *App, n: *col.Node) void {

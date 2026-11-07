@@ -1,8 +1,8 @@
 # Kest
 
 A native HTTP client, evolved from Retort in a separate, independently buildable folder.
-The original NanoUI application is untouched. The interface uses CUI 1.0.0,
-pinned to commit `145407d7296554a1f2a2909fcc4769d75774716f`; networking, validation,
+The original NanoUI application is untouched. The interface uses CUI 1.1.0,
+pinned to commit `d0383c4d3c00b7769f6b11cefdf581e1800f2da3`; networking, validation,
 collections, environment resolution and persistence remain in Zig 0.17.0.
 There is no browser engine, telemetry, account or runtime package manager.
 
@@ -11,7 +11,7 @@ There is no browser engine, telemetry, account or runtime package manager.
 On Windows x86-64, with Zig 0.17.0 on PATH:
 
 ```powershell
-cd retort-cui
+cd kest
 zig build -Doptimize=ReleaseFast
 zig build run -Doptimize=ReleaseFast
 ```
@@ -42,11 +42,17 @@ Ctrl+J toggles activity; Ctrl+Tab and Ctrl+Shift+Tab cycle requests;
 Ctrl+Shift+P opens the command palette, including saved requests.
 
 The [Kest workspace](docs/ui-redesign.md) uses T3 Code's neutral dark/light palettes, a compact
-collection tree, flat document tabs, a joined method/URL composer and direct-entry parameter tables.
+collection tree table, reorderable document tabs, a joined method/URL composer and direct-entry parameter tables.
 Type into the empty final row to add a value; Tab moves between cells.
 Wide windows put request and response side by side. Smaller windows stack them;
 the Layout menu also offers an explicit choice. Responses open as formatted code,
 with JSON tree/raw/minified modes in the format menu and headers in a table.
+CUI's document tabs support dragging and Shift+Left/Right to reorder a focused tab;
+unsaved tabs still ask before closing. Click a breadcrumb to reveal its collection
+or folder. Ctrl+J opens the searchable activity console with level filters, Follow,
+Copy and Clear; its input is the existing redacted log. Markdown responses have a
+formatted Preview tab (up to 256 KiB; larger documents use the virtualized text
+viewer). Layout choice and side-by-side divider position persist across restarts.
 All transitions are instant. The request chevron focuses the response.
 Below 840 px the collection browser opens as an overlay. The minimum window is
 640x420. Row menus and right-click expose collection organization/export actions.
@@ -89,7 +95,8 @@ These flags require `-Ddiagnostics=true`; normal distribution builds omit them.
 
 The existing `tests/performance/startup.ps1` runs the native window on a private
 Windows desktop. See [verified coverage](docs/supported_features.md),
-[migration analysis](docs/migration.md) and [measurements](docs/performance.md).
+[migration analysis](docs/migration.md) and [measurements](docs/performance.md). The [CUI 1.1 update](docs/cui-1.1-update.md)
+records component choices, compatibility work and validation.
 
 ## Icon
 

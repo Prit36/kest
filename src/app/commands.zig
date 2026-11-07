@@ -45,6 +45,16 @@ pub fn activate(app: *App, i: usize) void {
     persist.prefsChanged(app);
 }
 
+/// Move a document without changing which request owns the active state.
+pub fn moveTab(app: *App, from: usize, to: usize) void {
+    if (from >= app.tabs.items.len or to >= app.tabs.items.len or from == to) return;
+    const active = app.current();
+    const tab = app.tabs.orderedRemove(from);
+    app.tabs.insertAssumeCapacity(to, tab);
+    if (active) |t| app.active = std.mem.indexOfScalar(*Tab, app.tabs.items, t).?;
+    persist.prefsChanged(app);
+}
+
 fn indexOfTab(app: *const App, t: *const Tab) ?usize {
     return std.mem.indexOfScalar(*Tab, app.tabs.items, @constCast(t));
 }

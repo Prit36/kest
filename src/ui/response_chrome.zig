@@ -11,7 +11,7 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     defer w.end(ui);
     if (w.action(ui, "response-body", "Response", null, t.response.pane == .pretty or t.response.pane == .raw, 0, 36, 2)) t.response.pane = .pretty;
     if (w.action(ui, "response-headers", "Headers", null, t.response.pane == .headers, 0, 36, 2)) t.response.pane = .headers;
-    if (resp != null and (resp.?.class() == .image or resp.?.class() == .html)) {
+    if (resp != null and (resp.?.class() == .image or resp.?.class() == .html or @import("response.zig").isMarkdown(resp.?))) {
         if (w.action(ui, "response-preview", "Preview", null, t.response.pane == .preview, 0, 36, 2)) t.response.pane = .preview;
     }
     c.cui_spacer(ui);

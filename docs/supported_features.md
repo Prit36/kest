@@ -1,6 +1,6 @@
 # Kest: verified coverage
 
-This checklist applies only to `retort-cui`. The original application's checklist
+This checklist applies to Kest with CUI 1.1.0. The original application's checklist
 does not establish coverage for this interface.
 
 **T** = run in engine/HTTP tests. **U** = run through the CUI headless harness.
@@ -32,8 +32,8 @@ does not establish coverage for this interface.
 | Inset pane tabs and document/collection selection markers | Dark/light S; existing pointer/keyboard interaction checks U |
 | Separate code syntax palette and flat primary actions | JSON/body S; mode and editing checks U |
 | Reduced motion throughout the native interface | Enabled for every context/frame; motion=0 U; settled wakeup check U |
-| Flat document tabs, new/close and overflow reveal | Pointer new/close and active-tab reveal U; duplicate/save command coverage retained |
-| Resizable sidebar; adaptive side-by-side/stacked request-response split | Both layouts S; width-based adaptation U; divider dragging W; explicit layout picker W |
+| Native document tabs, new/close, reorder and overflow reveal | Pointer new/close, active-tab reveal, Shift+arrow reorder and dirty-close confirmation U; mouse dragging W |
+| Resizable sidebar; adaptive side-by-side/stacked request-response split | Both layouts S; width-based adaptation U; layout/split preferences round-trip T; divider dragging W; explicit layout picker W |
 | Hide/restore request details to focus on response | Actual chevron clicks and response height U; focused response S |
 | Narrow workspace sheet at 640×420 | Toggle U; compact and unobstructed workspace images S |
 | Request Params/Body/Headers and settings control | Actual pane/body-type clicks U; params/body/settings S |
@@ -48,11 +48,14 @@ does not establish coverage for this interface.
 | Binary hex view | U with a real 9 MiB loopback response |
 | PNG/JPEG response image | PNG decode U, aspect-preserving canvas; JPEG compiled, not exercised |
 | HTML text preview | U with a real loopback response |
+| Markdown response preview | Real loopback Markdown U; response bytes retained; oversized markup falls back to virtualized text U |
+| Native activity console | Bounded ring, redacted adapter, search input, Clear and hidden/reopen U; level filters/Follow/OS copy W; console S |
+| Native collection tree table and path bar | Keyboard collapse/expand and pointer breadcrumb reveal/filter reset U; selection and row menus retained; type-ahead compiled |
 | Copy body/headers/JSON values and cURL | W; system clipboard intentionally never touched |
 | Native file import/upload/save dialogs | W; dialogs never opened on the developer desktop |
 | Sidebar empty-state inset, wrapping and non-overlap | Dark/light and 210px/compact-sheet U; history captures S |
 | Reset history search/method/status filters | Actual click and recovery of real loopback history U |
-| Collection/history/environment browser and row menus | All S; collection pointer/keyboard activation and ancestor reveal U; forty-collection lazy-menu regression U; other row-menu actions W |
+| Collection/history/environment browser and row menus | All S; collection keyboard expansion and ancestor reveal U; forty-collection lazy-menu regression U; other row-menu actions W |
 | Environment selection and variables | Engine T; actual picker choices U; bounded scrollable menu including duplicate names; compact variables dialog S |
 | Import preview, warnings and duplicate detection | Core T; cURL preview/accept U |
 | Repeated name-dialog focus, Create/Rename and Enter | Actual typing/Enter across repeated opens U |
@@ -72,4 +75,4 @@ does not establish coverage for this interface.
 - No claim that every original UI test has been ported. Current runs contain
   71 engine tests, 17 HTTP tests and the additional executable CUI harness.
 - Original limitations continue: no HTTP/2, cookie persistence, proxies, browser
-  HTML rendering, or tree drag/drop. Scope exclusions in the root AGENTS.md apply.
+  HTML rendering, or tree drag/drop. These features are outside the current scope.

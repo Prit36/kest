@@ -14,6 +14,7 @@ pub const Log = struct {
     entries: [capacity]?Entry = @splat(null),
     /// How many were ever added; the newest is at `(total - 1) % capacity`.
     total: usize = 0,
+    generation: u64 = 0,
 
     pub fn init(gpa: Allocator) Log {
         return .{ .gpa = gpa };
@@ -42,6 +43,7 @@ pub const Log = struct {
     }
 
     pub fn clear(l: *Log) void {
+        l.generation +%= 1;
         for (&l.entries) |*e| {
             if (e.*) |x| l.gpa.free(x.text);
             e.* = null;

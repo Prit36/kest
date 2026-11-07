@@ -123,18 +123,9 @@ fn status(ui: *c.cui_ctx, app: *App, width: f32) void {
     c.cui_status_bar_end(ui);
 }
 fn log(ui: *c.cui_ctx, app: *App) void {
-    w.column(ui, .{ .height = w.px(105), .pad_x = 12, .gap = 4 });
-    defer w.end(ui);
-    w.muted(ui, "ACTIVITY");
-    c.cui_scroll_begin(ui, &.{ .id = "log", .height = w.fill, .gap = 2 });
-    var i = app.log.count();
-    while (i > 0) {
-        i -= 1;
-        const entry = app.log.at(i);
-        w.text(ui, entry.text, .{ .font = c.CUI_FONT_MONO, .size = 11, .nowrap = true, .color = w.color(if (entry.level == .err) c.CUI_TOKEN_DANGER else c.CUI_TOKEN_TEXT_SECONDARY) });
-    }
-    c.cui_scroll_end(ui);
+    @import("activity.zig").view(ui, app);
 }
+
 fn settings(app: *App) void {
     app.retention_text.set(w.fmt("{d}", .{app.prefs.retention}));
     app.modal = .settings;

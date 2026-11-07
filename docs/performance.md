@@ -8,10 +8,24 @@ Zig uses `ReleaseFast`, and CUI, both renderers, the host and image decoder use
 These are observed runs, not guarantees or a direct comparison with the
 original renderer. The machine's OS caches were warm.
 
-## Current speed-focused distribution
+## CUI 1.1 distribution
 
-The recommended command is `zig build -Doptimize=ReleaseFast`. The production
-Kest executable is 2,437,120 bytes; executable size is not the optimization
+The current production executable is 2,570,240 bytes. Debug and ReleaseFast
+checks pass, including the native component integration harness. The final
+ReleaseFast 200-frame 4 MiB sample measured 0.177 ms median and 0.365 ms p99;
+settled redraw was false and no wakeup was scheduled. The isolated upstream
+editor measurement and its limitations are recorded in the
+[CUI 1.1 update](cui-1.1-update.md).
+
+Three native private-desktop runs of the current build measured 151.4 / 129.8 /
+129.8 ms to first idle, 58.3 / 57.5 / 57.5 MiB working set and 0.000% normalized
+idle CPU over three seconds per run. All exited 0. These observations are not a
+controlled comparison against the earlier revisions below.
+
+## Earlier speed-focused distribution (before CUI 1.1)
+
+The recommended command is `zig build -Doptimize=ReleaseFast`. That revision's
+Kest executable was 2,437,120 bytes; executable size is not the optimization
 target. The reviewed build is `zig-out/bin/kest.exe`. Its Windows product name,
 description and original filename were checked, and its embedded 32px K icon
 was extracted and verified. The source ICO contains 16/20/24/32/40/48/64/128/256px

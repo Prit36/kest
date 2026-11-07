@@ -1,5 +1,8 @@
 # Migration analysis
 
+The current dependency is CUI 1.1.0. See the [component update](cui-1.1-update.md)
+for the native document tabs, tree table, path bar, activity console and Markdown preview.
+
 ## What changed
 
 Retort already separated its HTTP engine and data formats from its UI. Rewriting
@@ -34,13 +37,13 @@ See the [workspace redesign](ui-redesign.md) for reference analysis, spacing,
 motion policy and the added interaction checks.
 
 - A quiet top bar contains the app identity, environment and global actions.
-- Document tabs show the method and unsaved state and handle close requests.
+- CUI document tabs show the method and unsaved state, reorder, scroll and report close requests.
 - Collections, history and environments share a searchable workspace sidebar.
 - CUI owns splitters, menus, dialogs, command palette, focus and theme colors.
 - At narrow widths the sidebar becomes a sheet, preserving editor space.
 - Response status, duration and bytes share a compact footer below the viewer.
 - JSON opens as formatted code in the virtualized canvas editor; a format menu also provides the virtualized tree, minified and raw views.
-- Activity remains bounded and uses only `core/log.zig`'s redacted output.
+- The CUI log console stays bounded and uses only `core/log.zig`'s redacted output.
 
 ## Performance boundaries
 
@@ -91,5 +94,5 @@ testing. No developer screen, keyboard or system clipboard was used during this
 migration. The real native window is checked only on a private desktop.
 
 Sources inspected: the checked-in NanoUI v0.12.0 package; Retort's feature and
-architecture documents; the pinned [CUI source](https://github.com/yappologistic/CUI/tree/145407d7296554a1f2a2909fcc4769d75774716f)
+architecture documents; the pinned [CUI source](https://github.com/yappologistic/CUI/tree/d0383c4d3c00b7769f6b11cefdf581e1800f2da3)
 and its app, component, layout, editor, canvas and renderer implementations.

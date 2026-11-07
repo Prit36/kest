@@ -18,7 +18,7 @@ bool retort_control_begin(cui_ctx *ui, const char *id, bool selected, float widt
 int retort_flat_input(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_input_opts *opts, bool cell);
 bool retort_menu_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts, float width, cui_color color);
 bool retort_dropdown_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts);
-bool retort_reveal(cui_ctx *ui, const char *scroll_id, cui_id target, bool horizontal);
+bool retort_reveal(cui_ctx *ui, cui_id scroll_id, cui_id target, bool horizontal);
 void retort_focus(cui_ctx *ui, const char *id);
 bool retort_button_ex(cui_ctx *ui, const char *label, const cui_button_opts *opts);
 bool retort_select_ex(cui_ctx *ui, const char *id, const char *const *items, int count, int *index, const cui_select_opts *opts);
