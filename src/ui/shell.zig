@@ -72,12 +72,8 @@ fn topbar(ui: *c.cui_ctx, app: *App, width: f32) void {
         toggleSidebar(ui, app);
     }
     @import("brand.zig").view(ui);
-    if (width >= 900) {
-        w.muted(ui, "/");
-        w.text(ui, "Workspace", .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
-    }
     c.cui_spacer(ui);
-    if (w.menu(ui, w.fmt("{s}###active-environment", .{if (app.active_env) |e| e.name else "No environment"}), if (width < 800) 160 else 185, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
+    if (w.iconMenu(ui, w.fmt("{s}###active-environment", .{if (app.active_env) |e| e.name else "No environment"}), c.CUI_ICON_DATABASE, if (width < 800) 170 else 200, w.color(if (app.active_env != null) c.CUI_TOKEN_FOREGROUND else c.CUI_TOKEN_TEXT_MUTED))) {
         c.cui_menu_label(ui, "ACTIVE ENVIRONMENT");
         if (c.cui_menu_item_ex(ui, "No environment", &.{ .checked = app.active_env == null })) commands.setActiveEnv(app, null);
         if (app.envs.items.len > 0) {
@@ -114,14 +110,14 @@ fn status(ui: *c.cui_ctx, app: *App, width: f32) void {
     c.cui_status_bar_begin(ui, "status", &.{});
     if (app.current()) |t| {
         c.cui_status_bar_text_ex(ui, if (t.running()) "Sending request..." else "Ready", &.{});
-        c.cui_status_bar_spacer(ui);
-        if (width >= 800) c.cui_status_bar_text_ex(ui, "Ctrl Shift P  Commands", &.{});
     }
+    c.cui_status_bar_spacer(ui);
+    if (width >= 800) c.cui_status_bar_text_ex(ui, "Ctrl+Shift+P  Commands", &.{});
     if (c.cui_status_bar_item_ex(ui, "Log", &.{ .icon = c.CUI_ICON_SQUARE_TERMINAL })) {
         app.prefs.log_open = !app.prefs.log_open;
         persist.prefsChanged(app);
     }
-    c.cui_status_bar_text_ex(ui, "Ctrl Enter  Send", &.{});
+    c.cui_status_bar_text_ex(ui, "Ctrl+Enter  Send", &.{});
     c.cui_status_bar_end(ui);
 }
 fn log(ui: *c.cui_ctx, app: *App) void {

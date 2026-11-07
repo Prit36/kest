@@ -23,6 +23,25 @@ void kest_collection_style(cui_ctx *ui, const char *key, cui_color background) {
             break;
         }
     }
+    /* A single-column browser needs no column title. Collapse the grid's sticky
+     * header and the leaf reserving its place, leaving a small top inset. */
+    cui_id head = id ^ 0x4EADu;
+    for (int i = ui->node_count - 1; i >= 0; i--) {
+        cui_node *n = &ui->nodes[i];
+        if (n->id != head) continue;
+        n->h = CUI_PX(0); n->bg.a = 0; n->paint = NULL; n->paint_data = NULL;
+        n->flags |= CUI_NF_CLIP;
+        int holder = n->parent;
+        if (holder < 0) break;
+        for (int j = i + 1; j < ui->node_count; j++) {
+            cui_node *leaf = &ui->nodes[j];
+            if (leaf->parent == ui->nodes[holder].parent && j > holder) {
+                leaf->h = CUI_PX(4);
+                break;
+            }
+        }
+        break;
+    }
 }
 
 void kest_collection_name(cui_ctx *ui, const char *name, const char *method, const char *icon, cui_color color) {

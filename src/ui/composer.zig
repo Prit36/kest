@@ -11,7 +11,7 @@ const url = @import("../utils/url.zig");
 const methods = [_][]const u8{ "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS" };
 
 pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab) void {
-    w.column(ui, .{ .id = "composer-area", .width = w.fill, .pad_x = 14, .pad_y = 10, .gap = 5 });
+    w.column(ui, .{ .id = "composer-area", .width = w.fill, .pad_x = 14, .pad_top = 8, .pad_bottom = 10, .gap = 5 });
     defer w.end(ui);
     w.row(ui, .{ .id = "request-composer", .gap = 8, .height = w.px(38), .width = w.fill });
     w.row(ui, .{ .id = "url-group", .width = w.fill, .height = w.fill, .border = 1, .border_color = w.color(c.CUI_TOKEN_BORDER_STRONG), .radius = 4, .clip = true, .pad_x = 2 });

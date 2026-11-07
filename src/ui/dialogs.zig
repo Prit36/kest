@@ -80,14 +80,23 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
         },
         .move_to => targets(ui, app, true),
         .environment => if (app.editing_env) |e| {
-            w.text(ui, e.name, .{ .font = c.CUI_FONT_MEDIUM });
-            w.column(ui, .{ .height = w.px(@max(130, @min(280, c.cui_viewport_size(ui).y - 270))) });
+            w.row(ui, .{ .width = w.fill, .gap = 8 });
+            c.cui_icon(ui, c.CUI_ICON_DATABASE, 15, w.color(if (app.active_env == e) c.CUI_TOKEN_ACCENT else c.CUI_TOKEN_TEXT_MUTED));
+            w.text(ui, e.name, .{ .font = c.CUI_FONT_MEDIUM, .width = w.fill, .nowrap = true });
+            if (app.active_env == e) w.text(ui, "Active", .{ .size = 12, .font = c.CUI_FONT_MEDIUM, .color = w.color(c.CUI_TOKEN_SUCCESS), .nowrap = true }) else if (w.button(ui, "Use this environment", .{ .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_SECONDARY })) commands.setActiveEnv(app, e);
+            w.end(ui);
+            // Fit the table to its rows (title, header, rows, insertion row),
+            // bounded by the window, rather than reserving a fixed empty block.
+            const rows: f32 = @floatFromInt(e.table.rows.items.len + 1);
+            const title_row: f32 = if (c.cui_viewport_size(ui).y < 600) 0 else 28;
+            const wanted = title_row + 14 + 8 + 29 + rows * 33 + 2;
+            w.column(ui, .{ .height = w.px(@max(100, @min(wanted, @min(320, c.cui_viewport_size(ui).y - 250)))) });
             if (request.table(ui, &e.table, false)) {
                 app.vars_dirty = true;
                 persist.saveEnv(app, e);
             }
             w.end(ui);
-            if (app.active_env == e) w.muted(ui, "This environment is active") else if (w.button(ui, "Use this environment", .{ .size = c.CUI_SIZE_SM })) commands.setActiveEnv(app, e);
+            w.text(ui, "Use {{name}} in URLs, headers and bodies. Changes save as you type.", .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_MUTED), .width = w.fill });
         },
         .settings => {
             if (c.cui_switch_ex(ui, "Save edits automatically", &app.prefs.autosave, &.{})) persist.prefsChanged(app);

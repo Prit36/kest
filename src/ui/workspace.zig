@@ -99,6 +99,7 @@ fn documents(ui: *c.cui_ctx, app: *App) void {
     if (c.kest_dropdown_begin(ui, "Request actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END })) {
         if (app.current()) |t| actions(ui, app, t);
         c.cui_menu_separator(ui);
+        c.cui_menu_label(ui, "LAYOUT");
         layoutMenu(ui, app);
         c.cui_menu_end(ui);
     }
@@ -108,7 +109,7 @@ fn documents(ui: *c.cui_ctx, app: *App) void {
 }
 
 fn context(ui: *c.cui_ctx, app: *App, t: *Tab) void {
-    w.row(ui, .{ .height = w.px(34), .pad_x = 14, .gap = 8, .width = w.fill });
+    w.row(ui, .{ .height = w.px(30), .pad_x = 14, .pad_top = 6, .gap = 6, .width = w.fill });
     defer w.end(ui);
     const col = @import("../core/collection.zig");
     var ancestors: std.ArrayList(*col.Node) = .empty;
@@ -129,6 +130,7 @@ fn context(ui: *c.cui_ctx, app: *App, t: *Tab) void {
         .icon = c.CUI_ICON_FOLDER,
         .size = c.CUI_SIZE_SM,
         .no_edit = true,
+        .width = w.px(pathWidth(ui, segments.items)),
     });
     if (path.clicked >= 0) {
         const i: usize = @intCast(path.clicked);
@@ -143,12 +145,26 @@ fn context(ui: *c.cui_ctx, app: *App, t: *Tab) void {
     }
     if (w.action(ui, "rename-request", "", c.CUI_ICON_PENCIL, false, 26, 26, 3)) dialogs.askName(app, .{ .rename_tab = t }, t.name);
     c.cui_tooltip(ui, "Rename request");
-    c.cui_spacer(ui);
-    if (t.dirty) w.text(ui, "Unsaved", .{ .size = 11, .color = w.color(c.CUI_TOKEN_ACCENT) });
-    if (w.menu(ui, "Layout", 96, w.color(c.CUI_TOKEN_TEXT_MUTED))) {
-        layoutMenu(ui, app);
-        c.cui_menu_end(ui);
+    if (t.dirty) {
+        w.text(ui, "Unsaved changes", .{ .size = 11, .color = w.color(c.CUI_TOKEN_WARNING), .nowrap = true });
+        c.cui_tooltip(ui, "Save with Ctrl+S");
     }
+    c.cui_spacer(ui);
+}
+
+// The path bar fills by default, which reads as an empty input. Size it to its
+// segments instead; long paths still collapse their middle segments.
+fn pathWidth(ui: *c.cui_ctx, segments: []const [*:0]const u8) f32 {
+    // Mirrors CUI's own fit test: 10/4px insets, a 22px icon, 8px segment
+    // padding and 18px separators with 2px gaps; the current segment is medium.
+    var total: f32 = 10 + 4 + 2 + 22 + 8;
+    for (segments, 0..) |segment, i| {
+        const label = std.mem.span(segment);
+        const font = if (i + 1 == segments.len) c.CUI_FONT_MEDIUM else c.CUI_FONT_BODY;
+        total += c.cui_measure_text(ui, font, 13, label.ptr, @intCast(label.len)).width + 16 + 2;
+        if (i > 0) total += 18 + 4;
+    }
+    return @min(total, @max(160, c.cui_viewport_size(ui).x * 0.45));
 }
 
 fn layoutMenu(ui: *c.cui_ctx, app: *App) void {

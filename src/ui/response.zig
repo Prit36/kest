@@ -28,7 +28,6 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     }
     content(ui, app, t, resp);
     w.end(ui);
-    @import("response_chrome.zig").footer(ui, app, t, resp);
 }
 
 fn content(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) void {

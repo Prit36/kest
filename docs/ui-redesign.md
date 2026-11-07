@@ -65,8 +65,9 @@ and right-click. History and environment rows use the same control geometry.
 Responses open as formatted, syntax-colored code with line numbers. The response
 format menu provides tree, minified and raw views. Response headers have a table
 with per-row copying. Preview is directly available for images and HTML; other
-preview modes remain in the menu. A compact footer groups status, duration, size,
-find, copy and save actions. It replaces several stacked response toolbars.
+preview modes remain in the menu. Status, duration and size sit in the response
+tab row beside the format menu, with find, copy and save when the panel is wide
+enough (all three stay in the response menu).
 
 Dialogs use concrete Create/Save/Move actions. Name dialogs accept Enter and
 focus their field on repeated opens. Environment/settings changes already save

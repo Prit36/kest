@@ -256,13 +256,15 @@ fn history(ui: *c.cui_ctx, app: *App) void {
         const e = app.history.entries.items[index];
         c.cui_push_id_int(ui, @intCast(index));
         const clicked = c.kest_control_begin(ui, "history-entry", false, -1, 54, 0);
-        w.column(ui, .{ .width = w.fill, .gap = 5, .pad_x = 4 });
+        w.column(ui, .{ .width = w.fill, .gap = 4, .pad_x = 4 });
         w.row(ui, .{ .width = w.fill, .gap = 8 });
-        w.text(ui, e.method, .{ .size = 10, .font = c.CUI_FONT_MONO, .color = w.methodColor(e.method) });
-        c.cui_spacer(ui);
-        w.text(ui, w.fmt("{s}  /  {d} ms", .{ if (e.status == 0) "Failed" else w.fmt("{d}", .{e.status}), e.time_ms }), .{ .size = 10, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
+        w.text(ui, e.method, .{ .width = w.px(36), .size = 10, .font = c.CUI_FONT_MONO, .nowrap = true, .color = w.methodColor(e.method) });
+        w.text(ui, displayUrl(e.url), .{ .size = 12, .nowrap = true, .width = w.fill });
         w.end(ui);
-        w.text(ui, e.url, .{ .size = 12, .nowrap = true, .width = w.fill });
+        w.row(ui, .{ .width = w.fill, .gap = 6, .pad_left = 44 });
+        w.text(ui, if (e.status == 0) "Failed" else w.fmt("{d}", .{e.status}), .{ .size = 11, .font = c.CUI_FONT_MEDIUM, .nowrap = true, .color = w.statusColor(e.status) });
+        w.text(ui, w.fmt("{d} ms", .{e.time_ms}), .{ .size = 11, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
+        w.end(ui);
         w.end(ui);
         c.kest_item_end(ui);
         c.cui_tooltip(ui, w.z(e.url));
@@ -280,7 +282,20 @@ fn history(ui: *c.cui_ctx, app: *App) void {
         c.cui_pop_id(ui);
     }
     c.cui_virtual_list_end(ui);
-    if (w.button(ui, "Clear history", .{ .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_GHOST })) commands.confirm(app, .clear_history, "Clear history?", "Request history will be deleted.", "Clear");
+    c.cui_separator(ui);
+    w.row(ui, .{ .width = w.fill, .pad_left = 10, .pad_right = 6, .pad_y = 6 });
+    w.muted(ui, w.fmt("{d} of {d} requests", .{ app.history_visible.items.len, app.history.entries.items.len }));
+    c.cui_spacer(ui);
+    if (w.button(ui, "Clear", .{ .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_GHOST, .icon = c.CUI_ICON_TRASH_2, .tooltip = "Clear request history" })) commands.confirm(app, .clear_history, "Clear history?", "Request history will be deleted.", "Clear");
+    w.end(ui);
+}
+
+// History rows already show the method; drop the scheme so the host and path fit.
+fn displayUrl(value: []const u8) []const u8 {
+    inline for (.{ "https://", "http://" }) |scheme| {
+        if (std.ascii.startsWithIgnoreCase(value, scheme)) return value[scheme.len..];
+    }
+    return value;
 }
 
 fn environments(ui: *c.cui_ctx, app: *App) void {
@@ -294,11 +309,12 @@ fn environments(ui: *c.cui_ctx, app: *App) void {
     for (app.envs.items) |e| {
         c.cui_push_id(ui, w.z(&e.id));
         const clicked = c.kest_control_begin(ui, "environment-entry", e == app.active_env, -1, 54, 0);
-        c.cui_icon(ui, c.CUI_ICON_DATABASE, 15, w.color(c.CUI_TOKEN_TEXT_MUTED));
+        c.cui_icon(ui, c.CUI_ICON_DATABASE, 15, w.color(if (e == app.active_env) c.CUI_TOKEN_ACCENT else c.CUI_TOKEN_TEXT_MUTED));
         w.column(ui, .{ .width = w.fill, .gap = 4 });
-        w.text(ui, e.name, .{ .size = 12, .nowrap = true, .width = w.fill });
-        w.text(ui, w.fmt("{d} variable{s}{s}", .{ e.table.rows.items.len, if (e.table.rows.items.len == 1) "" else "s", if (e == app.active_env) "  /  Active" else "" }), .{ .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
+        w.text(ui, e.name, .{ .size = 12, .font = if (e == app.active_env) c.CUI_FONT_MEDIUM else c.CUI_FONT_BODY, .nowrap = true, .width = w.fill });
+        w.text(ui, w.fmt("{d} variable{s}", .{ e.table.rows.items.len, if (e.table.rows.items.len == 1) "" else "s" }), .{ .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
         w.end(ui);
+        if (e == app.active_env) w.text(ui, "Active", .{ .size = 11, .font = c.CUI_FONT_MEDIUM, .nowrap = true, .color = w.color(c.CUI_TOKEN_SUCCESS) });
         c.kest_item_end(ui);
         if (clicked) {
             app.editing_env = e;
@@ -316,7 +332,12 @@ fn environments(ui: *c.cui_ctx, app: *App) void {
         c.cui_pop_id(ui);
     }
     c.cui_scroll_end(ui);
-    if (w.button(ui, "New environment", .{ .icon = c.CUI_ICON_PLUS, .size = c.CUI_SIZE_SM })) dialogs.askName(app, .new_env, "");
+    c.cui_separator(ui);
+    w.row(ui, .{ .width = w.fill, .pad_left = 10, .pad_right = 6, .pad_y = 6 });
+    w.muted(ui, w.fmt("{d} environment{s}", .{ app.envs.items.len, if (app.envs.items.len == 1) "" else "s" }));
+    c.cui_spacer(ui);
+    if (w.button(ui, "New", .{ .icon = c.CUI_ICON_PLUS, .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_GHOST, .tooltip = "New environment" })) dialogs.askName(app, .new_env, "");
+    w.end(ui);
 }
 
 // Caller may append a real action, then closes the content with emptyEnd.

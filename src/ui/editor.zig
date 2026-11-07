@@ -7,12 +7,22 @@ const code = @import("code_state.zig");
 const hl = @import("../utils/highlight.zig");
 const State = code.State;
 const design = @import("design.zig");
-const Paint = struct { state: *State, source: []const u8, lang: hl.Lang, focused: bool, char_w: f32 };
+const Paint = struct { state: *State, source: []const u8, lang: hl.Lang, focused: bool, char_w: f32, gutter: f32 };
 const line_h = 20;
 // Use the same font advance for text, token origins, hit testing and caret.
 fn cellWidth(ui: *c.cui_ctx) f32 {
     return c.cui_measure_text(ui, c.CUI_FONT_MONO, 13, "M", 1).width;
 }
+// The gutter fits the widest line number, so short documents keep code close
+// to their numbers and long ones never overlap. Code starts 12px after it.
+fn gutterWidth(ui: *c.cui_ctx, lines: usize) f32 {
+    var digits: f32 = 1;
+    var n = lines;
+    while (n >= 10) : (n /= 10) digits += 1;
+    const digit_w = c.cui_measure_text(ui, c.CUI_FONT_MONO, 12, "0", 1).width;
+    return @round(@max(2, digits) * digit_w + 20);
+}
+const code_gap = 12;
 
 pub fn view(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8, read_only: bool, lang: hl.Lang) bool {
     const char_w = cellWidth(ui);
@@ -32,7 +42,8 @@ pub fn view(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8,
         s.indexed_len = source.len;
     }
     s.scroll_y = @max(0, s.scroll_y - c.kest_editor_scroll(ui, identity) * line_h * 3);
-    const paint = Paint{ .state = s, .source = source, .lang = lang, .focused = focused, .char_w = char_w };
+    const gutter = gutterWidth(ui, s.index.count());
+    const paint = Paint{ .state = s, .source = source, .lang = lang, .focused = focused, .char_w = char_w, .gutter = gutter };
     const result = c.cui_canvas(ui, id, w.fill, w.fill, draw, &paint, @sizeOf(Paint));
     c.kest_editor_register(ui, identity);
     const rect = result.rect;
@@ -42,7 +53,7 @@ pub fn view(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8,
         if (s.index.count() > 0) {
             const row_at = @min(row_n, s.index.count() - 1);
             const bounds = s.index.bounds(source, row_at);
-            const col: usize = @intFromFloat(@max(0, @round((m.x - rect.x - 56 + s.scroll_x) / char_w)));
+            const col: usize = @intFromFloat(@max(0, @round((m.x - rect.x - gutter - code_gap + s.scroll_x) / char_w)));
             var pos = @min(bounds[0] + col, bounds[1]);
             while (pos > bounds[0] and pos < source.len and source[pos] & 0xc0 == 0x80) pos -= 1;
             s.moveTo(pos, c.cui_key_mods(ui) & c.CUI_MOD_SHIFT != 0 or s.selecting);
@@ -94,7 +105,7 @@ fn keys(ui: *c.cui_ctx, s: *State, source_in: []const u8, read_only: bool) void 
 }
 
 fn search(ui: *c.cui_ctx, s: *State, source: []const u8) void {
-    w.row(ui, .{ .gap = 6, .pad_x = 8 });
+    w.row(ui, .{ .gap = 6, .pad_x = 8, .pad_y = 6, .width = w.fill });
     defer w.end(ui);
     if (w.field(ui, "find", &s.query, .{ .placeholder = "Find in document", .width = w.fill, .size = c.CUI_SIZE_SM })) s.research(source);
     s.refreshSearch(source);
@@ -109,6 +120,7 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     const p: *const Paint = @ptrCast(@alignCast(raw.?));
     const s = p.state;
     const char_w = p.char_w;
+    const gutter = p.gutter;
     if (s.index.count() == 0) return;
     const visible: f32 = @max(1, rect.h - 16);
     const total: f32 = @floatFromInt(s.index.count() * line_h);
@@ -120,14 +132,14 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         const row_i = s.index.rowOf(@min(s.caret, p.source.len));
         const caret_col: f32 = @as(f32, @floatFromInt(s.caret -| s.index.bounds(p.source, row_i)[0])) * char_w;
         if (caret_col < s.scroll_x) s.scroll_x = caret_col;
-        if (caret_col > s.scroll_x + @max(20, rect.w - 72)) s.scroll_x = caret_col - @max(20, rect.w - 72);
+        if (caret_col > s.scroll_x + @max(20, rect.w - gutter - code_gap - 16)) s.scroll_x = caret_col - @max(20, rect.w - gutter - code_gap - 16);
         s.reveal = false;
     }
     c.cui_push_clip(ui, rect);
     defer c.cui_pop_clip(ui);
     c.cui_draw_rect(ui, rect, .{}, w.color(c.CUI_TOKEN_SURFACE));
-    c.cui_draw_rect(ui, .{ .x = rect.x, .y = rect.y, .w = 44, .h = rect.h }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
-    c.cui_draw_line(ui, .{ .x = rect.x + 44, .y = rect.y }, .{ .x = rect.x + 44, .y = rect.y + rect.h }, 1, w.color(c.CUI_TOKEN_BORDER_SUBTLE));
+    c.cui_draw_rect(ui, .{ .x = rect.x, .y = rect.y, .w = gutter, .h = rect.h }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
+    c.cui_draw_line(ui, .{ .x = rect.x + gutter, .y = rect.y }, .{ .x = rect.x + gutter, .y = rect.y + rect.h }, 1, w.color(c.CUI_TOKEN_BORDER_SUBTLE));
     const first: usize = @intFromFloat(@floor(s.scroll_y / line_h));
     const count: usize = @intFromFloat(@ceil(visible / line_h) + 2);
     const last = @min(s.index.count(), first + count);
@@ -138,14 +150,14 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         const entire_row = s.index.row(p.source, i);
         var col_lo = @min(entire_row.len, @as(usize, @intFromFloat(@floor(s.scroll_x / char_w))));
         while (col_lo > 0 and col_lo < entire_row.len and entire_row[col_lo] & 0xc0 == 0x80) col_lo -= 1;
-        const visible_cols: usize = @intFromFloat(@ceil(@max(1, rect.w - 56) / char_w) + 2);
+        const visible_cols: usize = @intFromFloat(@ceil(@max(1, rect.w - gutter - code_gap) / char_w) + 2);
         var col_hi = @min(entire_row.len, col_lo + visible_cols);
         while (col_hi > col_lo and col_hi < entire_row.len and entire_row[col_hi] & 0xc0 == 0x80) col_hi -= 1;
         const row_text = entire_row[col_lo..col_hi];
         const y = rect.y + 8 + @as(f32, @floatFromInt(i * line_h)) - s.scroll_y;
-        const x = rect.x + 56 - s.scroll_x;
+        const x = rect.x + gutter + code_gap - s.scroll_x;
         const text_x = x + @as(f32, @floatFromInt(col_lo)) * char_w;
-        if (p.focused and active_row == i) c.cui_draw_rect(ui, .{ .x = rect.x + 45, .y = y, .w = @max(0, rect.w - 45), .h = line_h }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
+        if (p.focused and active_row == i) c.cui_draw_rect(ui, .{ .x = rect.x + gutter + 1, .y = y, .w = @max(0, rect.w - gutter - 1), .h = line_h }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
         if (sel[1] > bounds[0] and sel[0] < bounds[1]) {
             const lo = @max(sel[0], bounds[0]) - bounds[0];
             const hi = @min(sel[1], bounds[1]) - bounds[0];
@@ -153,7 +165,8 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         }
         var number: [16]u8 = undefined;
         const label = std.fmt.bufPrint(&number, "{d}", .{s.index.lineNumber(i)}) catch "";
-        c.cui_draw_text(ui, c.CUI_FONT_MONO, 12, .{ .x = rect.x + 10, .y = y + 1 }, w.color(c.CUI_TOKEN_TEXT_MUTED), label.ptr, @intCast(label.len));
+        const label_w = c.cui_measure_text(ui, c.CUI_FONT_MONO, 12, label.ptr, @intCast(label.len)).width;
+        c.cui_draw_text(ui, c.CUI_FONT_MONO, 12, .{ .x = rect.x + gutter - 10 - label_w, .y = y + 1 }, w.color(if (p.focused and active_row == i) c.CUI_TOKEN_TEXT_SECONDARY else c.CUI_TOKEN_TEXT_MUTED), label.ptr, @intCast(label.len));
         var tokens: [hl.max_tokens]hl.Token = undefined;
         const n = hl.tokens(row_text, p.lang, &tokens);
         var at: usize = 0;

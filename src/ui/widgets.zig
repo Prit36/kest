@@ -71,6 +71,9 @@ pub fn action(ui: *c.cui_ctx, id: [*:0]const u8, label: []const u8, glyph: ?[*:0
 pub fn menu(ui: *c.cui_ctx, label: []const u8, width: f32, tint: c.cui_color) bool {
     return c.kest_menu_begin(ui, z(label), &.{ .variant = c.CUI_BUTTON_GHOST, .width = 180 }, width, tint);
 }
+pub fn iconMenu(ui: *c.cui_ctx, label: []const u8, glyph: [*:0]const u8, width: f32, tint: c.cui_color) bool {
+    return c.kest_menu_begin(ui, z(label), &.{ .variant = c.CUI_BUTTON_GHOST, .width = 220, .icon = glyph }, width, tint);
+}
 pub fn select(ui: *c.cui_ctx, id: [*:0]const u8, items: []const []const u8, index: *c_int, width: c.cui_size) bool {
     const labels = arena.allocator().alloc([*:0]const u8, items.len) catch unreachable;
     for (items, labels) |label, *dest| dest.* = z(label);
@@ -94,6 +97,9 @@ pub fn empty(ui: *c.cui_ctx, title: [*:0]const u8, detail: [*:0]const u8) void {
 }
 pub fn methodColor(method: []const u8) c.cui_color {
     return color(if (std.mem.eql(u8, method, "GET") or std.mem.eql(u8, method, "HEAD")) c.CUI_TOKEN_SUCCESS else if (std.mem.eql(u8, method, "POST")) c.CUI_TOKEN_WARNING else if (std.mem.eql(u8, method, "DELETE")) c.CUI_TOKEN_DANGER else if (std.mem.eql(u8, method, "PUT")) c.CUI_TOKEN_INFO else c.CUI_TOKEN_TEXT_SECONDARY);
+}
+pub fn statusColor(status: u16) c.cui_color {
+    return color(if (status >= 200 and status < 300) c.CUI_TOKEN_SUCCESS else if (status >= 300 and status < 400) c.CUI_TOKEN_INFO else if (status >= 400 or status == 0) c.CUI_TOKEN_DANGER else c.CUI_TOKEN_WARNING);
 }
 pub fn bytes(value: u64) [:0]const u8 {
     if (value < 1024) return fmt("{d} B", .{value});
