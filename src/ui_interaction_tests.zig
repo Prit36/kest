@@ -61,14 +61,27 @@ pub fn run(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime click: a
     try expect(@src(), !original.editing_method and std.mem.eql(u8, original.method.text(), "GET"));
 
     try tap(@src(), ui, app, rect(ui, uid, "pane-body"), click);
-    try expect(@src(), original.pane == .body);
+    try expect(@src(), original.pane == .body and original.pane_chosen and app.prefs_dirty);
+    const dirty_before_navigation = original.dirty;
+    chord(ui, app, c.CUI_KEY_RIGHT, 0);
+    try expect(@src(), original.pane == .headers);
+    chord(ui, app, c.CUI_KEY_RIGHT, 0);
+    try expect(@src(), original.pane == .settings);
+    chord(ui, app, c.CUI_KEY_RIGHT, 0);
+    try expect(@src(), original.pane == .params);
+    chord(ui, app, c.CUI_KEY_END, 0);
+    try expect(@src(), original.pane == .settings);
+    chord(ui, app, c.CUI_KEY_HOME, 0);
+    try expect(@src(), original.pane == .params);
+    chord(ui, app, c.CUI_KEY_RIGHT, 0);
+    try expect(@src(), original.pane == .body and original.dirty == dirty_before_navigation);
     try tap(@src(), ui, app, rect(ui, uid, "###body-kind"), click);
     try tap(@src(), ui, app, menuRect(ui, uid, "###body-kind", "JSON"), click);
     try expect(@src(), original.pane == .body and original.body_kind == .json);
     const toolbar = rect(ui, uid, "body-toolbar");
     const format = rect(ui, uid, "format-body");
     try expect(@src(), format.w > 0 and format.x + format.w <= toolbar.x + toolbar.w);
-    try tap(@src(), ui, app, rect(ui, uid, "request-options"), click);
+    try tap(@src(), ui, app, rect(ui, uid, "pane-settings"), click);
     try expect(@src(), original.pane == .settings);
     try tap(@src(), ui, app, rect(ui, uid, "pane-params"), click);
 
@@ -148,7 +161,55 @@ pub fn run(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime click: a
     original.body_kind = .none;
     for (0..4) |_| frame(ui, app);
     try activity(ui, app, frame, click, chord);
+    try shellControls(ui, app, frame, click, chord);
     std.debug.print("CUI controls: method/custom method, body selector, environment picker, repeated dialog focus/Enter, tab overflow/reveal and close passed\n", .{});
+}
+
+fn shellControls(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime click: anytype, comptime chord: anytype) !void {
+    const old_mode = app.mode;
+    const old_sidebar = app.prefs.sidebar_open;
+    const old_log = app.prefs.log_open;
+    defer {
+        app.mode = old_mode;
+        app.prefs.sidebar_open = old_sidebar;
+        app.prefs.log_open = old_log;
+        c.cui_set_viewport(ui, 1180, 800, 1);
+    }
+    c.cui_set_viewport(ui, 1180, 800, 1);
+    app.prefs.sidebar_open = true;
+    app.mode = .collections;
+    for (0..4) |_| frame(ui, app);
+    for ([_][*:0]const u8{ "History", "Environments", "Collections" }, 0..) |label, i| {
+        try tap(@src(), ui, app, rect(ui, null, "###sidebar-navigation"), click);
+        try tap(@src(), ui, app, menuRect(ui, null, "###sidebar-navigation", label), click);
+        try expect(@src(), @backingInt(app.mode) == (i + 1) % 3);
+    }
+    const header = rect(ui, null, "sidebar-toolbar");
+    click(ui, app, header.x + header.w - 20, header.y + header.h / 2);
+    try tap(@src(), ui, app, menuRect(ui, null, "Collection actions", "Import cURL..."), click);
+    try expect(@src(), app.modal_open and app.modal == .import_curl);
+    chord(ui, app, c.CUI_KEY_ESCAPE, 0);
+    app.modal_open = false;
+    app.modal = .none;
+    for ([_]f32{ 640, 1180 }) |width| {
+        c.cui_set_viewport(ui, width, 800, 1);
+        for (0..4) |_| frame(ui, app);
+        const toolbar = rect(ui, null, "global-toolbar");
+        inline for (.{ "activity-toggle", "command-search" }) |key| {
+            const action = rect(ui, null, key);
+            try expect(@src(), action.w >= 28 and action.x >= toolbar.x and action.x + action.w <= toolbar.x + toolbar.w);
+        }
+        const before = app.prefs.log_open;
+        try tap(@src(), ui, app, rect(ui, null, "activity-toggle"), click);
+        try expect(@src(), app.prefs.log_open != before);
+        try tap(@src(), ui, app, rect(ui, null, "activity-toggle"), click);
+        try expect(@src(), app.prefs.log_open == before);
+        try tap(@src(), ui, app, rect(ui, null, "command-search"), click);
+        try expect(@src(), app.palette_open);
+        chord(ui, app, c.CUI_KEY_ESCAPE, 0);
+        try expect(@src(), !app.palette_open);
+    }
+    std.debug.print("CUI shell: header navigation/import, compact/wide commands and activity controls, footer-free workspace passed\n", .{});
 }
 
 pub fn response(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime click: anytype) !void {
@@ -157,12 +218,24 @@ pub fn response(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime cli
     try tap(@src(), ui, app, rect(ui, t.uid, "response-headers"), click);
     try expect(@src(), t.response.pane == .headers and t.shown.?.resp.headers.items.len > 0);
     try expect(@src(), rect(ui, t.uid, "response-header-rows").h > 50);
+    c.cui_input_key(ui, c.CUI_KEY_LEFT, true, 0);
+    frame(ui, app);
+    c.cui_input_key(ui, c.CUI_KEY_LEFT, false, 0);
+    frame(ui, app);
+    try expect(@src(), t.response.pane == .pretty);
+    c.cui_input_key(ui, c.CUI_KEY_END, true, 0);
+    frame(ui, app);
+    c.cui_input_key(ui, c.CUI_KEY_END, false, 0);
+    frame(ui, app);
+    try expect(@src(), t.response.pane == .headers);
     try tap(@src(), ui, app, rect(ui, t.uid, "response-body"), click);
     try tap(@src(), ui, app, rect(ui, t.uid, "###response-format"), click);
     try tap(@src(), ui, app, menuRect(ui, t.uid, "###response-format", "JSON tree"), click);
+    try @import("response_test_support.zig").settle(ui, app, frame);
     try expect(@src(), t.response.pretty_mode == .tree and t.response.tree != null);
     try tap(@src(), ui, app, rect(ui, t.uid, "###response-format"), click);
     try tap(@src(), ui, app, menuRect(ui, t.uid, "###response-format", "Minified JSON"), click);
+    try @import("response_test_support.zig").settle(ui, app, frame);
     try expect(@src(), t.response.pretty_mode == .minified and std.mem.indexOfScalar(u8, t.response.formatted.?, '\n') == null);
     try tap(@src(), ui, app, rect(ui, t.uid, "###response-format"), click);
     try tap(@src(), ui, app, menuRect(ui, t.uid, "###response-format", "Raw text"), click);

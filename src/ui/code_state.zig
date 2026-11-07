@@ -17,6 +17,7 @@ const Edit = struct {
     caret_before: usize,
     anchor_before: usize,
     caret_after: usize,
+    anchor_after: usize,
 
     fn size(e: Edit) usize {
         return e.removed.len + e.inserted.len;
@@ -29,6 +30,9 @@ pub const State = struct {
     caret: usize = 0,
     anchor: usize = 0,
     marked: ?[2]usize = null,
+    marked_version: u64 = 0,
+    marked_caret: usize = 0,
+    marked_ptr: usize = 0,
     /// Bumped by each change to the text.
     version: u64 = 1,
     indexed_version: u64 = 0,
@@ -36,8 +40,26 @@ pub const State = struct {
     indexed_ptr: usize = 0,
     indexed_len: usize = 0,
     index: lines.Index = .{},
+    index_generation: u64 = 0,
+    syntax_generation: u64 = 0,
+    continued_strings: std.ArrayList(@import("../utils/highlight.zig").CrossRowString) = .empty,
     scroll_x: f32 = 0,
     scroll_y: f32 = 0,
+    /// Response-only immutable spatial index; editable bodies use index above.
+    geometry: ?@import("../core/text_layout.zig").Layout = null,
+    layout_job: ?*@import("../app/response_prepare.zig").Job = null,
+    layout_config: ?@import("../core/text_layout.zig").Config = null,
+    layout_failure: bool = false,
+    layout_ptr: usize = 0,
+    layout_len: usize = 0,
+    layout_visible: bool = false,
+    layout_pending: bool = false,
+    precise_x: f64 = 0,
+    precise_goal: ?f64 = null,
+    scroll_drag: enum { none, horizontal, vertical } = .none,
+    drag_offset: f32 = 0,
+    layout_fallback: ?*State = null,
+    layout_fallback_offset: usize = 0,
     /// The caret moved or the text changed: bring the caret into view.
     reveal: bool = false,
     /// Show this byte at the next frame (a search result).
@@ -45,6 +67,10 @@ pub const State = struct {
     selecting: bool = false,
     /// Where Up and Down aim, as a byte column.
     goal_col: ?usize = null,
+    /// Raw body editor preferences; these never change request bytes.
+    word_wrap: bool = false,
+    tab_moves_focus: bool = false,
+    goal_x: ?f32 = null,
     undo: std.ArrayList(Edit) = .empty,
     redo: std.ArrayList(Edit) = .empty,
     undo_bytes: usize = 0,
@@ -59,20 +85,66 @@ pub const State = struct {
     searched_version: u64 = 0,
     searched_ptr: usize = 0,
     searched_len: usize = 0,
+    search_job: ?*@import("../app/response_prepare.zig").Job = null,
+    search_index: ?@import("../core/response_search.zig").Index = null,
+    search_key: [@import("../core/response_search.zig").max_query]u8 = undefined,
+    search_key_len: usize = 0,
+    search_case: bool = false,
+    search_key_case: bool = false,
+    search_visible: bool = false,
+    search_pending: bool = false,
+    search_failure: ?enum { query_limit, input_limit, unavailable } = null,
+    search_page_start: u32 = 0,
+    search_selected: u32 = 0,
+    search_target: ?u32 = null,
 
     pub fn init(gpa: Allocator) State {
         return .{ .gpa = gpa };
     }
 
     pub fn deinit(s: *State) void {
+        s.clearResponseSearch();
+        s.clearLayout();
+        if (s.layout_fallback) |fallback| {
+            fallback.deinit();
+            s.gpa.destroy(fallback);
+        }
         s.buffer.deinit();
         s.query.deinit();
         s.index.deinit(s.gpa);
+        s.continued_strings.deinit(s.gpa);
         s.matches.deinit(s.gpa);
         s.clearStack(&s.undo);
         s.clearStack(&s.redo);
         s.undo.deinit(s.gpa);
         s.redo.deinit(s.gpa);
+    }
+
+    pub fn clearResponseSearch(s: *State) void {
+        if (s.search_job) |job| job.abandon();
+        s.search_job = null;
+        if (s.search_index) |*index| index.deinit(s.gpa);
+        s.search_index = null;
+        s.matches.clearRetainingCapacity();
+        s.search_pending = false;
+        s.search_failure = null;
+        s.search_target = null;
+        s.search_selected = 0;
+        s.search_page_start = 0;
+    }
+
+    pub fn clearLayout(s: *State) void {
+        if (s.layout_job) |job| job.abandon();
+        s.layout_job = null;
+        if (s.geometry) |*geometry| geometry.deinit(s.gpa);
+        s.geometry = null;
+        s.layout_config = null;
+        s.layout_failure = false;
+        s.layout_pending = false;
+        s.layout_ptr = 0;
+        s.layout_len = 0;
+        s.precise_goal = null;
+        s.scroll_drag = .none;
     }
 
     fn clearStack(s: *State, stack: *std.ArrayList(Edit)) void {
@@ -89,6 +161,7 @@ pub const State = struct {
 
     /// Replaces everything, forgetting undo: a tab loaded, a body reset.
     pub fn setText(s: *State, value: []const u8) void {
+        if (!s.buffer.reserve(value.len)) return;
         _ = s.buffer.replace(0, s.buffer.text().len, value);
         s.buffer.want_caret = null;
         s.caret = 0;
@@ -103,11 +176,15 @@ pub const State = struct {
 
     /// An edit that undo can take back: a Format, say.
     pub fn replaceAll(s: *State, value: []const u8) void {
-        s.caret = 0;
-        s.anchor = s.buffer.text().len;
-        s.replaceSelection(value, false);
+        const version = s.version;
+        s.change(0, s.buffer.text().len, value, false);
+        if (s.version == version) return;
         s.caret = 0;
         s.anchor = 0;
+        if (s.undo.items.len > 0) {
+            s.undo.items[s.undo.items.len - 1].caret_after = 0;
+            s.undo.items[s.undo.items.len - 1].anchor_after = 0;
+        }
         s.reveal = true;
     }
 
@@ -127,6 +204,7 @@ pub const State = struct {
     }
 
     fn change(s: *State, lo: usize, hi: usize, t: []const u8, typed: bool) void {
+        if (!s.buffer.reserve(s.buffer.len - (hi - lo) + t.len)) return;
         const before = s.buffer.text();
         const removed = before[lo..hi];
         if (removed.len == 0 and t.len == 0) return;
@@ -139,12 +217,13 @@ pub const State = struct {
                     @memcpy(grown[last.inserted.len..], t);
                     last.inserted = grown;
                     last.caret_after = lo + t.len;
+                    last.anchor_after = lo + t.len;
                     s.undo_bytes += t.len;
                     joined = true;
                 } else |_| {}
             }
         }
-        if (!joined) s.record(lo, removed, t);
+        if (!joined and !s.record(lo, removed, t)) return;
         if (s.buffer.replace(lo, hi, t) != t.len) return;
         s.clearStack(&s.redo);
         s.caret = lo + t.len;
@@ -153,14 +232,17 @@ pub const State = struct {
         s.touched();
     }
 
-    fn record(s: *State, lo: usize, removed: []const u8, t: []const u8) void {
-        const r = s.gpa.dupe(u8, removed) catch return;
-        const ins = s.gpa.dupe(u8, t) catch return s.gpa.free(r);
-        const e: Edit = .{ .at = lo, .removed = r, .inserted = ins, .caret_before = s.caret, .anchor_before = s.anchor, .caret_after = lo + t.len };
+    fn record(s: *State, lo: usize, removed: []const u8, t: []const u8) bool {
+        const r = s.gpa.dupe(u8, removed) catch return false;
+        const ins = s.gpa.dupe(u8, t) catch {
+            s.gpa.free(r);
+            return false;
+        };
+        const e: Edit = .{ .at = lo, .removed = r, .inserted = ins, .caret_before = s.caret, .anchor_before = s.anchor, .caret_after = lo + t.len, .anchor_after = lo + t.len };
         s.undo.append(s.gpa, e) catch {
             s.gpa.free(r);
             s.gpa.free(ins);
-            return;
+            return false;
         };
         s.undo_bytes += e.size();
         // Always keeps the newest edit, however large.
@@ -170,22 +252,26 @@ pub const State = struct {
             s.gpa.free(old.removed);
             s.gpa.free(old.inserted);
         }
+        return true;
     }
 
     fn touched(s: *State) void {
         s.version += 1;
         s.reveal = true;
         s.goal_col = null;
+        s.goal_x = null;
+        s.precise_goal = null;
     }
 
     pub fn undoEdit(s: *State) bool {
+        if (s.undo.items.len == 0) return false;
+        const next = s.undo.items[s.undo.items.len - 1];
+        if (!s.buffer.reserve(s.buffer.len - next.inserted.len + next.removed.len)) return false;
+        s.redo.ensureUnusedCapacity(s.gpa, 1) catch return false;
         const e = s.undo.pop() orelse return false;
         _ = s.buffer.replace(e.at, e.at + e.inserted.len, e.removed);
         s.undo_bytes -= e.size();
-        s.redo.append(s.gpa, e) catch {
-            s.gpa.free(e.removed);
-            s.gpa.free(e.inserted);
-        };
+        s.redo.appendAssumeCapacity(e);
         s.caret = e.caret_before;
         s.anchor = e.anchor_before;
         s.typing = false;
@@ -194,15 +280,16 @@ pub const State = struct {
     }
 
     pub fn redoEdit(s: *State) bool {
+        if (s.redo.items.len == 0) return false;
+        const next = s.redo.items[s.redo.items.len - 1];
+        if (!s.buffer.reserve(s.buffer.len - next.removed.len + next.inserted.len)) return false;
+        s.undo.ensureUnusedCapacity(s.gpa, 1) catch return false;
         const e = s.redo.pop() orelse return false;
         _ = s.buffer.replace(e.at, e.at + e.removed.len, e.inserted);
-        s.undo.append(s.gpa, e) catch {
-            s.gpa.free(e.removed);
-            s.gpa.free(e.inserted);
-        };
+        s.undo.appendAssumeCapacity(e);
         s.undo_bytes += e.size();
         s.caret = e.caret_after;
-        s.anchor = e.caret_after;
+        s.anchor = e.anchor_after;
         s.typing = false;
         s.touched();
         return true;
@@ -214,6 +301,8 @@ pub const State = struct {
         if (!extend) s.anchor = to;
         s.typing = false;
         s.reveal = true;
+        s.goal_x = null;
+        s.precise_goal = null;
     }
 
     /// Runs one editing command against `from`, which is the buffer unless
@@ -254,27 +343,86 @@ pub const State = struct {
             .delete_to_line_start => s.change(lineStart(from, c), c, "", false),
             .delete_to_line_end => s.change(c, lineEnd(from, c), "", false),
             .insert_newline, .insert_line_break => s.newline(from, c),
-            .insert_tab => s.replaceSelection("  ", false),
+            .insert_tab => s.indent(false),
             else => {},
         }
     }
 
     /// A new line at the indent of this one, one deeper after an opener.
     pub fn newline(s: *State, from: []const u8, c: usize) void {
-        const start = lineStart(from, c);
+        const at = @min(c, s.selection()[0]);
+        const start = lineStart(from, at);
         var e = start;
-        while (e < c and (from[e] == ' ' or from[e] == '\t')) e += 1;
-        var buf: [130]u8 = undefined;
-        buf[0] = '\n';
-        const n = @min(e - start, 120);
-        @memcpy(buf[1..][0..n], from[start..][0..n]);
-        var len = n + 1;
-        if (c > 0 and (from[c - 1] == '{' or from[c - 1] == '[')) {
-            buf[len] = ' ';
-            buf[len + 1] = ' ';
-            len += 2;
+        while (e < at and (from[e] == ' ' or from[e] == '\t')) e += 1;
+        const crlf = std.mem.indexOf(u8, from, "\r\n") != null;
+        const nl: []const u8 = if (crlf) "\r\n" else "\n";
+        const deeper = at > 0 and (from[at - 1] == '{' or from[at - 1] == '[');
+        const hi = @min(s.selection()[1], from.len);
+        const paired = deeper and hi < from.len and ((from[at - 1] == '{' and from[hi] == '}') or (from[at - 1] == '[' and from[hi] == ']'));
+        var out: std.ArrayList(u8) = .empty;
+        defer out.deinit(s.gpa);
+        out.appendSlice(s.gpa, nl) catch return;
+        out.appendSlice(s.gpa, from[start..e]) catch return;
+        if (deeper) out.appendSlice(s.gpa, "  ") catch return;
+        const caret = at + out.items.len;
+        if (paired) {
+            out.appendSlice(s.gpa, nl) catch return;
+            out.appendSlice(s.gpa, from[start..e]) catch return;
         }
-        s.replaceSelection(buf[0..len], false);
+        const version = s.version;
+        s.replaceSelection(out.items, false);
+        if (version != s.version) {
+            s.caret = caret;
+            s.anchor = caret;
+            if (s.undo.items.len > 0) {
+                s.undo.items[s.undo.items.len - 1].caret_after = caret;
+                s.undo.items[s.undo.items.len - 1].anchor_after = caret;
+            }
+        }
+    }
+
+    /// One undoable indentation edit, retaining selection direction and lines.
+    pub fn indent(s: *State, outdent: bool) void {
+        const from = s.text();
+        const sel = s.selection();
+        if (!outdent and sel[0] == sel[1]) {
+            s.replaceSelection("  ", false);
+            return;
+        }
+        const lo = lineStart(from, sel[0]);
+        const last = if (sel[1] > sel[0] and sel[1] == lineStart(from, sel[1])) sel[1] - 1 else sel[1];
+        const hi = lineEndRaw(from, last);
+        var out: std.ArrayList(u8) = .empty;
+        defer out.deinit(s.gpa);
+        var caret = s.caret;
+        var anchor = s.anchor;
+        var at = lo;
+        while (at <= hi) {
+            const end = @min(hi, lineEndRaw(from, at));
+            var removed: usize = 0;
+            if (outdent) {
+                if (at < end and from[at] == '\t') {
+                    removed = 1;
+                } else while (removed < 2 and at + removed < end and from[at + removed] == ' ') : (removed += 1) {}
+            } else out.appendSlice(s.gpa, "  ") catch return;
+            if (s.caret >= at) caret = if (outdent) caret - @min(removed, s.caret - at) else caret + 2;
+            if (s.anchor >= at) anchor = if (outdent) anchor - @min(removed, s.anchor - at) else anchor + 2;
+            out.appendSlice(s.gpa, from[at + removed .. end]) catch return;
+            if (end == hi) break;
+            out.append(s.gpa, '\n') catch return;
+            at = end + 1;
+        }
+        if (std.mem.eql(u8, out.items, from[lo..hi])) return;
+        const version = s.version;
+        s.change(lo, hi, out.items, false);
+        if (version != s.version) {
+            s.caret = caret;
+            s.anchor = anchor;
+            if (s.undo.items.len > 0) {
+                s.undo.items[s.undo.items.len - 1].caret_after = caret;
+                s.undo.items[s.undo.items.len - 1].anchor_after = anchor;
+            }
+        }
     }
 
     /// Finds `query` again if it or the text changed.
@@ -306,6 +454,7 @@ pub const State = struct {
 pub fn prevChar(s: []const u8, i_in: usize) usize {
     var i = @min(i_in, s.len);
     if (i == 0) return 0;
+    if (i >= 2 and s[i - 2] == '\r' and s[i - 1] == '\n') return i - 2;
     i -= 1;
     while (i > 0 and (s[i] & 0xc0) == 0x80) i -= 1;
     return i;
@@ -314,6 +463,7 @@ pub fn prevChar(s: []const u8, i_in: usize) usize {
 pub fn nextChar(s: []const u8, i_in: usize) usize {
     var i = i_in;
     if (i >= s.len) return s.len;
+    if (i + 1 < s.len and s[i] == '\r' and s[i + 1] == '\n') return i + 2;
     i += 1;
     while (i < s.len and (s[i] & 0xc0) == 0x80) i += 1;
     return i;
@@ -343,6 +493,11 @@ pub fn lineStart(s: []const u8, i: usize) usize {
 }
 
 pub fn lineEnd(s: []const u8, i: usize) usize {
+    const end = lineEndRaw(s, i);
+    return if (end < s.len and end > 0 and s[end - 1] == '\r') end - 1 else end;
+}
+
+fn lineEndRaw(s: []const u8, i: usize) usize {
     return std.mem.indexOfScalarPos(u8, s, @min(i, s.len), '\n') orelse s.len;
 }
 

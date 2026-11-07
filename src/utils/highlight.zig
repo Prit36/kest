@@ -1,6 +1,5 @@
-//! Colors for one row of text at a time: nothing is parsed beyond what's on
-//! screen, so a large payload costs what its visible rows cost. A row cut from
-//! the middle of a string is colored as well as it can be from the row alone.
+//! Bounded per-row highlighting. JSON also caches strings crossing visual rows
+//! when the source/wrap index changes, retaining color through view cuts.
 const std = @import("std");
 
 pub const Kind = enum { plain, key, string, number, keyword, punct, tag, attr, comment, variable };
@@ -8,6 +7,58 @@ pub const Lang = enum { plain, json, xml };
 pub const Token = struct { start: u32, end: u32, kind: Kind };
 
 pub const max_tokens = 256;
+
+/// Only strings crossing visual rows are retained, never every JSON token.
+pub const CrossRowString = struct { row: u32, start: u32, end: u32, kind: Kind };
+
+pub fn jsonContinuations(a: std.mem.Allocator, source: []const u8, starts: []const u32, out: *std.ArrayList(CrossRowString)) !void {
+    out.clearRetainingCapacity();
+    errdefer out.clearRetainingCapacity();
+    var at: usize = 0;
+    var row: usize = 0;
+    while (at < source.len and starts.len > 0) {
+        const token = @import("json.zig").nextToken(source, at);
+        if (token.kind == .eof or token.end <= at) break;
+        at = token.end;
+        while (row + 1 < starts.len and starts[row + 1] <= token.start) row += 1;
+        if (source[token.start] != '"' or row + 1 >= starts.len or token.end <= starts[row + 1]) continue;
+        var end = token.end;
+        while (end < source.len and std.ascii.isWhitespace(source[end])) end += 1;
+        const kind: Kind = if (end < source.len and source[end] == ':') .key else .string;
+        var r = row;
+        while (r < starts.len and starts[r] < token.end) : (r += 1) try out.append(a, .{ .row = @intCast(r), .start = @intCast(token.start), .end = @intCast(token.end), .kind = kind });
+    }
+}
+
+/// Highlight a bounded row while retaining strings across soft/hard view cuts.
+pub fn jsonRow(source: []const u8, start: usize, end: usize, row: u32, spans: []const CrossRowString, out: []Token) usize {
+    var first: usize = 0;
+    var last = spans.len;
+    while (first < last) {
+        const mid = first + (last - first) / 2;
+        if (spans[mid].row < row) first = mid + 1 else last = mid;
+    }
+    var after = first;
+    while (after < spans.len and spans[after].row == row) after += 1;
+    const crossing = spans[first..after];
+    var skip: usize = 0;
+    var n: usize = 0;
+    if (crossing.len > 0 and crossing[0].start < start and out.len > 0) {
+        skip = @min(end, crossing[0].end) - start;
+        out[0] = .{ .start = 0, .end = @intCast(skip), .kind = crossing[0].kind };
+        n = 1;
+    }
+    const count = tokens(source[start + skip .. end], .json, out[n..]);
+    for (out[n .. n + count]) |*token| {
+        token.start += @intCast(skip);
+        token.end += @intCast(skip);
+        for (crossing) |span| if (span.start == start + token.start) {
+            token.kind = span.kind;
+            break;
+        };
+    }
+    return n + count;
+}
 
 /// Fills `out`, returns how many; tokens are in order and don't overlap.
 /// A row with more tokens than that keeps its first `out.len`.
@@ -162,4 +213,26 @@ test "a full buffer keeps the first tokens" {
     var buf: [2]Token = undefined;
     try t.expectEqual(@as(usize, 2), tokens("[1,2,3,4]", .json, &buf));
     try t.expectEqual(@as(usize, 0), tokens("anything", .plain, &buf));
+}
+
+test "wrapped JSON strings and keys retain their colors and escaped quotes" {
+    const source = "{\"very long key\":\"value \\\" continues longer\",\"x\":1}";
+    var index: @import("lines.zig").Index = .{ .wrap_at = 10, .prefer_words = true };
+    defer index.deinit(t.allocator);
+    try index.build(t.allocator, source);
+    var spans: std.ArrayList(CrossRowString) = .empty;
+    defer spans.deinit(t.allocator);
+    try jsonContinuations(t.allocator, source, index.starts.items, &spans);
+    try t.expect(spans.items.len >= 4);
+    var buf: [16]Token = undefined;
+    for (spans.items) |span| {
+        const bounds = index.bounds(source, span.row);
+        const n = jsonRow(source, bounds[0], bounds[1], span.row, spans.items, &buf);
+        var found = false;
+        for (buf[0..n]) |token| if (token.kind == span.kind and bounds[0] + token.start < span.end) {
+            found = true;
+            break;
+        };
+        try t.expect(found);
+    }
 }

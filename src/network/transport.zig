@@ -76,6 +76,11 @@ pub const Result = struct {
 
 pub const validHeader = check.validHeader;
 pub const user_agent = "kest/0.0.1";
+pub const default_headers = [_]Header{
+    .{ .name = "User-Agent", .value = user_agent },
+    .{ .name = "Accept", .value = "*/*" },
+    .{ .name = "Accept-Encoding", .value = "gzip, deflate" },
+};
 const max_head = 256 * 1024;
 const socket_buffer = 64 * 1024;
 const max_idle_connections = 4;
@@ -485,9 +490,7 @@ fn writeHead(a: Allocator, x: Client.Exchange) ![]u8 {
     try out.print(a, "{s} {s} HTTP/1.1\r\n", .{ x.method, target });
     const custom = x.headers;
     if (!check.hasHeader(custom, "host")) try out.print(a, "Host: {s}\r\n", .{x.parts.authority});
-    if (!check.hasHeader(custom, "user-agent")) try out.print(a, "User-Agent: {s}\r\n", .{user_agent});
-    if (!check.hasHeader(custom, "accept")) try out.appendSlice(a, "Accept: */*\r\n");
-    if (!check.hasHeader(custom, "accept-encoding")) try out.appendSlice(a, "Accept-Encoding: gzip, deflate\r\n");
+    for (default_headers) |header| if (!check.hasHeader(custom, header.name)) try out.print(a, "{s}: {s}\r\n", .{ header.name, header.value });
     for (custom) |h| {
         if (x.drop_sensitive and check.isSensitive(h.name)) continue;
         // After a redirect to GET, the body's headers are out of place.
@@ -508,6 +511,11 @@ fn bodyLength(io: Io, body: []const BodyPart, result: *Result) !u64 {
                 result.detail = @errorName(e);
                 return error.Failed;
             };
+            if (st.kind != .file) {
+                result.failure = .file;
+                result.detail = "Not a regular file";
+                return error.Failed;
+            }
             total += st.size;
         },
     };

@@ -91,6 +91,64 @@ test "HEAD has headers and no body" {
     try t.expectEqualStrings("text/plain", j.resp.content_type);
 }
 
+test "received header order, duplicate case and literal wire lines survive" {
+    var e: Env = .{};
+    try e.init();
+    defer e.deinit();
+    const j = try e.send(.{ .url = e.url("/headers") });
+    defer j.destroy();
+    const headers = j.resp.headers.items;
+    try t.expectEqual(@as(usize, 6), headers.len);
+    try t.expectEqualStrings("Set-Cookie", headers[0].name);
+    try t.expectEqualStrings("set-cookie", headers[1].name);
+    try t.expectEqualStrings("a=1; Path=/", headers[0].value);
+    try t.expectEqualStrings("b=2; Path=/", headers[1].value);
+    try t.expectEqualStrings("exact", j.resp.header("x-ows").?);
+    try t.expectEqualStrings("X-OWS:\t  exact  \t", headers[2].raw_line);
+    try t.expectEqualStrings("", headers[3].value);
+    try t.expectEqualStrings("value###literal", headers[4].value);
+    try t.expect(std.mem.startsWith(u8, j.resp.raw_headers, "Set-Cookie: a=1; Path=/\r\nset-cookie: b=2; Path=/\r\n"));
+}
+
+test "completed workers publish whole-body content detection without changing bytes" {
+    var e: Env = .{};
+    try e.init();
+    defer e.deinit();
+    const cases = [_]struct { []const u8, lib.response.ContentClass, []const u8 }{
+        .{ "malformed", .text, "{\"broken\":[1,]}" },
+        .{ "invalid-escape", .text, "{\"s\":\"\\q\"}" },
+        .{ "fragment", .text, "GET /echo\nContent-Type: application/json\n\n{\"n\":1.10}" },
+        .{ "scalar", .json, "42" },
+        .{ "binary-markdown", .binary, "# title\x00unreadable" },
+    };
+    for (cases) |case| {
+        const path = try std.fmt.allocPrint(e.arena.allocator(), "/content/{s}", .{case[0]});
+        const j = try e.send(.{ .url = e.url(path) });
+        defer j.destroy();
+        try t.expect(j.resp.content_info != null);
+        try t.expectEqual(case[1], j.resp.class());
+        try t.expectEqualStrings(case[2], body(j));
+    }
+    for ([_][]const u8{ "large-json", "late-invalid", "late-nul" }, [_]lib.response.ContentClass{ .json, .text, .binary }) |name, kind| {
+        const path = try std.fmt.allocPrint(e.arena.allocator(), "/content/{s}", .{name});
+        const j = try e.send(.{ .url = e.url(path) });
+        defer j.destroy();
+        try t.expectEqual(lib.response.Stop.complete, j.resp.stop);
+        try t.expectEqual(@as(usize, 2 * 1024 * 1024), body(j).len);
+        try t.expectEqual(kind, j.resp.content_info.?.kind);
+        try t.expectEqual(kind, j.resp.class());
+        if (kind == .text) try t.expectEqual(@as(usize, body(j).len - 1), j.resp.info().json_problem.?.offset);
+    }
+    // The complete preview "{}" must not masquerade as the complete document
+    // when the rest of the received body lives in the spill file.
+    const prefix = try e.sendOpts(.{ .url = e.url("/content/large-json") }, .{ .spill_dir = e.spill, .memory_limit = 2 });
+    defer prefix.destroy();
+    try t.expectEqualStrings("{}", body(prefix));
+    try t.expect(prefix.resp.isPartial() and prefix.resp.spill_path != null);
+    try t.expectEqual(lib.response.ContentClass.text, prefix.resp.class());
+    try t.expect(prefix.resp.info().json_incomplete);
+}
+
 test "headers and a JSON body arrive; repeated response headers are kept" {
     var e: Env = .{};
     try e.init();

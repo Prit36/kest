@@ -126,7 +126,7 @@ pub fn prepare(a: Allocator, io: std.Io, r: req.Request, vars: []const Var, prob
     };
 }
 
-fn basename(path: []const u8) []const u8 {
+pub fn basename(path: []const u8) []const u8 {
     const i = std.mem.lastIndexOfAny(u8, path, "/\\") orelse return path;
     return path[i + 1 ..];
 }
@@ -143,7 +143,7 @@ fn quoteField(a: Allocator, s: []const u8) ![]const u8 {
     return out.items;
 }
 
-fn guessType(path: []const u8) []const u8 {
+pub fn guessType(path: []const u8) []const u8 {
     const types = [_]struct { []const u8, []const u8 }{
         .{ ".json", "application/json" }, .{ ".xml", "application/xml" },
         .{ ".txt", "text/plain" },        .{ ".csv", "text/csv" },

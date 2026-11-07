@@ -17,6 +17,7 @@ pub fn capture(ui: *c.cui_ctx, sw: *c.cui_sw_renderer, app: *App, path: []const 
 pub fn suite(ui: *c.cui_ctx, sw: *c.cui_sw_renderer, app: *App, path: []const u8, comptime frame: anytype) !void {
     const t = app.current().?;
     const old_pane = t.pane;
+    const old_response_collapsed = t.response_collapsed;
     const old_kind = t.body_kind;
     const old_mode = app.mode;
     const old_dark = app.prefs.dark;
@@ -30,6 +31,7 @@ pub fn suite(ui: *c.cui_ctx, sw: *c.cui_sw_renderer, app: *App, path: []const u8
         t.pane = old_pane;
         t.body_kind = old_kind;
         t.details_collapsed = false;
+        t.response_collapsed = old_response_collapsed;
         app.mode = old_mode;
         app.prefs.dark = old_dark;
         app.prefs.log_open = old_log_open;
@@ -42,11 +44,12 @@ pub fn suite(ui: *c.cui_ctx, sw: *c.cui_sw_renderer, app: *App, path: []const u8
         c.cui_set_viewport(ui, old_size.x, old_size.y, 1);
     }
     const stem = path[0 .. path.len - std.fs.path.extension(path).len];
-    const scenes = [_][]const u8{ "body", "settings", "history", "variables", "focus", "light", "minimum", "sidebar", "response-headers", "stacked", "body-minimum", "environment-editor", "activity", "multipart", "multipart-minimum", "activity-minimum" };
+    const scenes = [_][]const u8{ "body", "settings", "history", "variables", "focus", "light", "minimum", "sidebar", "response-headers", "stacked", "body-minimum", "environment-editor", "activity", "multipart", "multipart-minimum", "activity-minimum", "focus-request" };
     for (scenes, 0..) |scene, i| {
         t.pane = old_pane;
         t.body_kind = old_kind;
         t.details_collapsed = false;
+        t.response_collapsed = false;
         app.mode = old_mode;
         app.prefs.dark = old_dark;
         app.prefs.log_open = old_log_open;
@@ -95,6 +98,11 @@ pub fn suite(ui: *c.cui_ctx, sw: *c.cui_sw_renderer, app: *App, path: []const u8
                 t.pane = .body;
                 t.body_kind = .multipart;
                 app.prefs.log_open = true;
+            },
+            16 => {
+                t.response_collapsed = true;
+                t.pane = .body;
+                t.body_kind = .json;
             },
             else => unreachable,
         }

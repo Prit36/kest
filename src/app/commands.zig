@@ -17,7 +17,7 @@ const Tab = tab_mod.Tab;
 const Allocator = std.mem.Allocator;
 
 pub fn newTab(app: *App) ?*Tab {
-    if (app.tabs.items.len >= 64) {
+    if (app.tabs.items.len >= tab_mod.max_open_tabs) {
         app.toast(.warning, "Tab limit reached", "Close a request before opening another (64 tabs maximum).");
         return null;
     }
@@ -63,15 +63,36 @@ fn indexOfTab(app: *const App, t: *const Tab) ?usize {
 pub fn requestClose(app: *App, t: *Tab) void {
     persist.flushTab(app, t, false);
     if (t.dirty or (t.link == null and t.has_draft)) {
-        var buf: [200]u8 = undefined;
-        confirm(app, .{ .close_tab = t }, "Discard changes?", std.fmt.bufPrint(&buf, "\"{s}\" has changes that haven't been saved.", .{t.name}) catch "", "Discard");
+        var buf: [512]u8 = undefined;
+        confirm(app, .{ .close_tab = t }, "Save changes?", std.fmt.bufPrint(&buf, "\"{s}\" has changes that haven't been saved. Save them before closing, or discard them.", .{t.name}) catch "This request has changes that haven't been saved.", "Discard");
         return;
     }
     closeNow(app, t);
 }
 
+/// The Save choice when closing a tab with edits: a saved request writes
+/// and closes; an unsaved one asks where to save and closes once it has.
+pub fn saveAndClose(app: *App, t: *Tab) void {
+    if (indexOfTab(app, t) == null) return;
+    if (t.link == null) {
+        app.close_after_save = t;
+        beginSaveAs(app, t);
+        return;
+    }
+    const link = t.link.?;
+    persist.flushTab(app, t, true);
+    // Closing drops the only in-memory copy, so wait for this write to land
+    // and keep the tab if it failed (the shell then reports it and marks the
+    // request changed again).
+    app.store.sync();
+    var buf: [cs.path_len]u8 = undefined;
+    if (app.store.lastFailureIs(cs.requestPath(&buf, &link.collection, &link.request))) return;
+    if (!t.dirty) closeNow(app, t);
+}
+
 pub fn closeNow(app: *App, t: *Tab) void {
     const i = indexOfTab(app, t) orelse return;
+    if (app.close_after_save == t) app.close_after_save = null;
     if (t.job) |j| {
         // The job finishes on its own; nothing refers to this tab after this.
         j.user_data = null;
@@ -106,6 +127,10 @@ pub fn openRequest(app: *App, n: *col.Node) void {
     for (app.tabs.items, 0..) |t, i| if (t.link) |l| {
         if (std.mem.eql(u8, &l.request, &n.id)) return activate(app, i);
     };
+    if (app.tabs.items.len >= tab_mod.max_open_tabs) {
+        app.toast(.warning, "Tab limit reached", "Close a request before opening another (64 tabs maximum).");
+        return;
+    }
     var ar = std.heap.ArenaAllocator.init(app.gpa);
     defer ar.deinit();
     const a = ar.allocator();
@@ -131,7 +156,6 @@ pub fn openRequest(app: *App, n: *col.Node) void {
     t.saved_hash = persist.hashOf(text);
     var buf: [cs.path_len]u8 = undefined;
     t.file_mtime = app.store.mtime(cs.requestPath(&buf, &c.id, &n.id));
-    t.pane = paneFor(named);
     app.tabs.append(app.gpa, t) catch {
         t.destroy();
         return;
@@ -140,17 +164,10 @@ pub fn openRequest(app: *App, n: *col.Node) void {
     persist.prefsChanged(app);
 }
 
-fn paneFor(r: req.Request) tab_mod.RequestPane {
-    if (r.body_kind != .none) return .body;
-    if (r.params.len > 0) return .params;
-    return if (r.headers.len > 0) .headers else .params;
-}
-
 /// Opens a copy of `r` with no home yet (history, an import).
 pub fn openUnsaved(app: *App, r: req.Request) ?*Tab {
     const t = newTab(app) orelse return null;
     t.fromRequest(r) catch return t;
-    t.pane = paneFor(r);
     t.touched = true;
     t.dirty = true;
     persist.scheduleFlush(app);
@@ -203,21 +220,39 @@ fn onProgress(ctx: ?*anyopaque, _: *http_client.Job) void {
 
 pub fn send(app: *App, t: *Tab) void {
     if (t.job != null) return;
+    if (!@import("../network/header_check.zig").validMethod(std.mem.trim(u8, t.method.text(), " "))) {
+        startFailed(app, t, .method, "Enter a valid HTTP method");
+        logLine(app, .err, "Not sent: invalid HTTP method", .{});
+        return;
+    }
     var ar = std.heap.ArenaAllocator.init(app.gpa);
     defer ar.deinit();
     const a = ar.allocator();
-    const r = t.toRequest(a) catch return;
+    const r = t.toRequest(a) catch {
+        startFailed(app, t, .memory, "Not enough memory to prepare this request");
+        return;
+    };
     var problem: prepare.Problem = .{};
     const job = http_client.start(app.gpa, app.io, app.client, r, app.activeVars(), .{ .ctx = app, .on_done = onDone, .on_progress = onProgress }, .{ .spill_dir = app.tmp_dir, .memory_limit = app.memory_limit, .user_data = t }, a, &problem) catch |e| {
         const message: []const u8 = if (problem.message.len > 0) problem.message else @errorName(e);
-        app.toast(.danger, "Not sent", message);
+        const failure: @import("../core/response_status.zig").StartFailure = switch (e) {
+            error.InvalidUrl => .url,
+            error.InvalidHeader => .header,
+            error.OutOfMemory => .memory,
+            error.ConcurrencyUnavailable => .busy,
+        };
+        startFailed(app, t, failure, message);
         logLine(app, .err, "Not sent: {s}", .{message});
         return;
     };
     t.job = job;
-    if (t.shown) |old| old.destroy();
-    t.shown = null;
-    t.response.reset();
+    // Keep the last immutable response readable while this job runs. The UI
+    // labels it previous; only the new job supplies current progress metadata.
+    discardEmptyFailure(t);
+    t.start_failure = .none;
+    app.gpa.free(t.start_failure_text);
+    t.start_failure_text = &.{};
+    t.response.error_details_open = false;
     app.gpa.free(t.unresolved_note);
     t.unresolved_note = &.{};
     if (job.unresolved.len > 0) t.unresolved_note = std.mem.join(app.gpa, ", ", job.unresolved) catch &.{};
@@ -230,6 +265,26 @@ pub fn send(app: *App, t: *Tab) void {
     }
     const safe = log_mod.redactUrl(a, job.out.url) catch "";
     logLine(app, .info, "{s} {s}", .{ job.out.method, safe });
+}
+
+fn startFailed(app: *App, t: *Tab, failure: @import("../core/response_status.zig").StartFailure, message: []const u8) void {
+    discardEmptyFailure(t);
+    t.start_failure = failure;
+    app.gpa.free(t.start_failure_text);
+    t.start_failure_text = &.{};
+    tab_mod.setOwned(app.gpa, &t.start_failure_text, message) catch {};
+    t.response.error_details_open = false;
+    if (t.response_collapsed) app.toast(.danger, "Not sent", message);
+    app.wake();
+}
+
+fn discardEmptyFailure(t: *Tab) void {
+    const old = t.shown orelse return;
+    if (old.resp.status == 0 and old.resp.preview.items.len == 0) {
+        old.destroy();
+        t.shown = null;
+        t.response.reset();
+    }
 }
 
 pub fn cancel(t: *Tab) void {
@@ -255,11 +310,18 @@ pub fn drainDone(app: *App) void {
 }
 
 fn finished(app: *App, job: *http_client.Job) void {
+    // File metadata is advisory. A completed send invalidates cached checks;
+    // an open file panel/inspector refreshes from its next ordinary frame.
+    for (job.out.body) |part| switch (part) {
+        .file => |path| app.uploads.invalidate(path),
+        .bytes => {},
+    };
     const t: *Tab = if (job.user_data) |u| @ptrCast(@alignCast(u)) else {
         job.destroy();
         return;
     };
     t.job = null;
+    if (t.shown) |old| old.destroy();
     t.shown = job;
     t.response.reset();
     const r = &job.resp;
@@ -280,12 +342,15 @@ fn finished(app: *App, job: *http_client.Job) void {
     if (r.status != 0) {
         logLine(app, if (r.stop == .complete) .info else .warn, "{d} {s} in {d} ms, {d} bytes, {d} redirects, connection {s}", .{ r.status, r.reason, r.time_ms, r.total.load(.monotonic), r.redirects, if (r.reused_connection) "reused" else "new" });
     }
-    if (r.error_text.len > 0) logLine(app, .err, "{s}", .{r.error_text});
+    if (r.error_text.len > 0) logLine(app, if (r.stop == .canceled) .info else if (r.stop == .timed_out) .warn else .err, "{s}", .{r.error_text});
 }
 
 pub fn clearResponse(t: *Tab) void {
     if (t.shown) |j| j.destroy();
     t.shown = null;
+    t.start_failure = .none;
+    t.gpa.free(t.start_failure_text);
+    t.start_failure_text = &.{};
     t.response.reset();
 }
 
@@ -366,18 +431,35 @@ pub fn decodeUrl(app: *App, t: *Tab) void {
 }
 
 pub fn bodyProblem(app: *App, t: *Tab) void {
-    if (t.body_problem_version == t.body.version) return;
+    const vars = app.activeVars();
+    if (t.body_problem_version == t.body.version and t.body_problem_kind == t.body_kind and t.body_problem_vars == app.vars_version) return;
     t.body_problem_version = t.body.version;
+    t.body_problem_kind = t.body_kind;
+    t.body_problem_vars = app.vars_version;
+    t.body_problem_pending = false;
     t.body_problem_at = null;
     tab_mod.setOwned(app.gpa, &t.body_problem_text, "") catch return;
-    if (t.body_kind != .json or t.body.text().len == 0) return;
+    if (t.body_kind != .json) return;
     const json = @import("../utils/json.zig");
-    // A {{variable}} isn't JSON yet, but it is what the user means.
-    if (std.mem.indexOf(u8, t.body.text(), "{{") != null) return;
-    const p = json.validate(t.body.text()) orelse return;
-    t.body_problem_at = p.offset;
+    const variables = @import("../core/variables.zig");
+    var ar = std.heap.ArenaAllocator.init(app.gpa);
+    defer ar.deinit();
+    var source = t.body.text();
+    const templated = variables.nextReference(source, 0) != null;
+    if (templated) {
+        var missing: std.ArrayList([]const u8) = .empty;
+        variables.collectUnresolved(ar.allocator(), source, vars, &missing) catch return;
+        if (missing.items.len > 0) {
+            t.body_problem_pending = true;
+            tab_mod.setOwned(app.gpa, &t.body_problem_text, "JSON validation waits for unresolved body variables") catch {};
+            return;
+        }
+        source = variables.resolve(ar.allocator(), source, vars) catch return;
+    }
+    const p = json.validate(source) orelse return;
+    if (!templated) t.body_problem_at = p.offset;
     var buf: [200]u8 = undefined;
-    tab_mod.setOwned(app.gpa, &t.body_problem_text, std.fmt.bufPrint(&buf, "Line {d}, column {d}: {s}", .{ p.line, p.column, p.message }) catch p.message) catch {};
+    tab_mod.setOwned(app.gpa, &t.body_problem_text, std.fmt.bufPrint(&buf, "{s}Line {d}, column {d}: {s}", .{ if (templated) "Resolved JSON: " else "", p.line, p.column, p.message }) catch p.message) catch {};
 }
 
 /// Format (`indent` 2) or minify (0) the JSON body.

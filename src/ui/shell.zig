@@ -13,7 +13,7 @@ pub var sidebar_ratio: f32 = 0.215;
 pub var narrow_open = false;
 
 fn toggleSidebar(ui: *c.cui_ctx, app: *App) void {
-    if (c.cui_viewport_size(ui).x < 840) narrow_open = !narrow_open else {
+    if (c.cui_viewport_size(ui).x < w.design.geometry.sidebar_sheet) narrow_open = !narrow_open else {
         app.prefs.sidebar_open = !app.prefs.sidebar_open;
         persist.prefsChanged(app);
     }
@@ -28,18 +28,26 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
         defer app.gpa.free(failure);
         app.toast(.danger, "Saving failed", failure);
     }
+    if (app.store.takeFailedPath()) |path| {
+        defer app.gpa.free(path);
+        persist.writeFailed(app, path);
+    }
     commands.ensureTab(app);
     @import("design.zig").apply(ui, app.prefs.dark);
     shortcuts(ui, app);
     const size = c.cui_viewport_size(ui);
     w.column(ui, .{ .width = w.fill, .height = w.fill, .bg = w.color(c.CUI_TOKEN_BACKGROUND) });
     topbar(ui, app, size.x);
-    w.column(ui, .{ .width = w.fill, .height = w.fill, .gap = 0 });
-    if (app.prefs.sidebar_open and size.x >= 840) {
+    w.column(ui, .{ .id = "workspace-region", .width = w.fill, .height = w.fill, .gap = 0 });
+    if (app.prefs.sidebar_open and size.x >= w.design.geometry.sidebar_sheet) {
+        // Width is a user preference, not a fraction of the current window.
+        const geometry = w.design.geometry;
+        const maximum = @min(geometry.sidebar_max, @min(size.x * 0.4, size.x - geometry.workspace_min));
+        sidebar_ratio = std.math.clamp(app.prefs.sidebar_width, geometry.sidebar_min, maximum) / size.x;
         const before = sidebar_ratio;
-        c.cui_split_begin(ui, "sidebar-split", &sidebar_ratio, &.{ .min_first = 210, .min_second = 520, .width = w.fill, .height = w.fill });
+        c.cui_split_begin(ui, "sidebar-split", &sidebar_ratio, &.{ .min_first = geometry.sidebar_min, .min_second = @max(geometry.workspace_min, size.x - maximum), .width = w.fill, .height = w.fill });
         sidebar.view(ui, app);
-        c.cui_split_next(ui);
+        c.kest_split_next(ui, "sidebar-split", false);
         workspace_ui.view(ui, app);
         c.cui_split_end(ui);
         if (before != sidebar_ratio) {
@@ -49,9 +57,8 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
     } else workspace_ui.view(ui, app);
     w.end(ui);
     if (app.prefs.log_open) log(ui, app);
-    status(ui, app, size.x);
     w.end(ui);
-    if (narrow_open and size.x < 840) {
+    if (narrow_open and size.x < w.design.geometry.sidebar_sheet) {
         var opened = true;
         if (c.cui_sheet_begin(ui, "Workspace", &opened, &.{ .side = c.CUI_SIDE_LEFT, .size = @min(300, size.x - 80) })) {
             sidebar.view(ui, app);
@@ -66,11 +73,16 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
 }
 
 fn topbar(ui: *c.cui_ctx, app: *App, width: f32) void {
-    w.row(ui, .{ .height = w.px(36), .pad_x = 10, .gap = 8, .width = w.fill });
+    w.row(ui, .{ .id = "global-toolbar", .height = w.px(36), .pad_x = 10, .gap = w.design.space.normal, .width = w.fill });
     defer w.end(ui);
     if (w.icon(ui, c.CUI_ICON_PANEL_LEFT, "Toggle workspace (Ctrl B)")) {
         toggleSidebar(ui, app);
     }
+    var running: usize = 0;
+    for (app.tabs.items) |t| if (t.running()) {
+        running += 1;
+    };
+    if (running > 0) w.text(ui, w.fmt("{d} running", .{running}), .{ .size = w.design.text.secondary, .color = w.color(c.CUI_TOKEN_INFO), .nowrap = true });
     c.cui_spacer(ui);
     if (w.iconMenu(ui, w.fmt("{s}###active-environment", .{if (app.active_env) |e| e.name else "No environment"}), c.CUI_ICON_DATABASE, if (width < 800) 170 else 200, w.color(if (app.active_env != null) c.CUI_TOKEN_FOREGROUND else c.CUI_TOKEN_TEXT_MUTED))) {
         c.cui_menu_label(ui, "ACTIVE ENVIRONMENT");
@@ -85,40 +97,29 @@ fn topbar(ui: *c.cui_ctx, app: *App, width: f32) void {
         c.cui_menu_separator(ui);
         if (w.menuItem(ui, "Manage environments...")) {
             app.mode = .environments;
-            if (width < 840) narrow_open = true else app.prefs.sidebar_open = true;
+            if (width < w.design.geometry.sidebar_sheet) narrow_open = true else app.prefs.sidebar_open = true;
         }
         if (w.menuItem(ui, "New environment...")) dialogs.askName(app, .new_env, "");
         c.cui_menu_end(ui);
     }
-    if (width >= 1000 and w.action(ui, "command-search", "Commands", c.CUI_ICON_SEARCH, false, 122, 28, 3)) app.palette_open = true;
+    if (w.action(ui, "command-search", if (width >= 1000) "Commands" else "", c.CUI_ICON_SEARCH, false, if (width >= 1000) 122 else 28, 28, 3)) app.palette_open = true;
+    c.cui_tooltip(ui, "Commands (Ctrl Shift P)");
+    if (w.action(ui, "activity-toggle", if (width >= 1000) "Activity" else "", c.CUI_ICON_SQUARE_TERMINAL, app.prefs.log_open, if (width >= 1000) 96 else 28, 28, 3)) {
+        app.prefs.log_open = !app.prefs.log_open;
+        persist.prefsChanged(app);
+    }
+    c.cui_tooltip(ui, "Activity console (Ctrl J)");
     if (w.icon(ui, if (app.prefs.dark) c.CUI_ICON_SUN else c.CUI_ICON_MOON, "Switch appearance")) {
         app.prefs.dark = !app.prefs.dark;
         persist.prefsChanged(app);
     }
     if (c.kest_dropdown_begin(ui, "Workspace actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END })) {
-        if (w.menuItem(ui, "New collection")) dialogs.askName(app, .new_collection, "");
-        if (w.menuItem(ui, "New environment")) dialogs.askName(app, .new_env, "");
-        if (w.menuItem(ui, "Import file")) imports.chooseFile(app);
         if (w.menuItem(ui, "Show data folder") and !@import("platform.zig").headless) _ = c.cui_app_open_url(w.z(app.store.path));
         if (w.menuItem(ui, "Settings")) settings(app);
         c.cui_menu_end(ui);
     }
 }
 
-fn status(ui: *c.cui_ctx, app: *App, width: f32) void {
-    c.cui_status_bar_begin(ui, "status", &.{});
-    if (app.current()) |t| {
-        c.cui_status_bar_text_ex(ui, if (t.running()) "Sending request..." else "Ready", &.{});
-    }
-    c.cui_status_bar_spacer(ui);
-    if (width >= 800) c.cui_status_bar_text_ex(ui, "Ctrl+Shift+P  Commands", &.{});
-    if (c.cui_status_bar_item_ex(ui, "Log", &.{ .icon = c.CUI_ICON_SQUARE_TERMINAL })) {
-        app.prefs.log_open = !app.prefs.log_open;
-        persist.prefsChanged(app);
-    }
-    c.cui_status_bar_text_ex(ui, "Ctrl+Enter  Send", &.{});
-    c.cui_status_bar_end(ui);
-}
 fn log(ui: *c.cui_ctx, app: *App) void {
     @import("activity.zig").view(ui, app);
 }
@@ -131,6 +132,7 @@ fn settings(app: *App) void {
 fn shortcuts(ui: *c.cui_ctx, app: *App) void {
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT, c.CUI_KEY_P)) app.palette_open = true;
     if (app.modal_open or app.palette_open) return;
+    const request_submit = c.kest_request_shortcut(ui);
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_N)) _ = commands.newTab(app);
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_B)) {
         toggleSidebar(ui, app);
@@ -142,61 +144,138 @@ fn shortcuts(ui: *c.cui_ctx, app: *App) void {
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_TAB)) commands.cycleTab(app, 1);
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT, c.CUI_KEY_TAB)) commands.cycleTab(app, -1);
     if (app.current()) |t| {
-        if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_ENTER)) {
+        if (request_submit) {
             if (t.running()) commands.cancel(t) else commands.send(app, t);
         }
         if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_S)) commands.save(app, t);
         if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_W)) commands.requestClose(app, t);
         if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_D)) commands.duplicateTab(app, t);
         if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_F)) {
-            const code = if (t.pane == .body and t.shown == null) &t.body else &t.response.code_raw;
-            code.search_open = true;
-            code.query.focus();
-            if (t.shown != null) t.response.pane = .raw;
+            c.cui_push_id_int(ui, @intCast(t.uid));
+            const body_focused = c.kest_editor_focus(ui, c.cui_make_id(ui, "body-editor")) != 0;
+            c.cui_pop_id(ui);
+            if (body_focused or (t.pane == .body and t.shown == null)) {
+                t.body.search_open = true;
+                t.body.query.focus();
+            } else @import("response_search.zig").open(t);
         }
     }
 }
+const PaletteAction = enum { send, new_request, save, save_as, duplicate, close_tab, next_tab, previous_tab, find, copy_curl, focus_request, focus_response, both_panes, import_file, import_curl, new_collection, new_environment, manage_environments, toggle_sidebar, toggle_activity, appearance, settings, encode_url, decode_url };
+const PaletteEntry = struct { title: [*:0]const u8, group: [*:0]const u8, shortcut: ?[*:0]const u8 = null, action: PaletteAction };
+const palette_entries = [_]PaletteEntry{
+    .{ .title = "Send or cancel request", .group = "Request", .shortcut = "Ctrl Enter", .action = .send },
+    .{ .title = "Save request", .group = "Request", .shortcut = "Ctrl S", .action = .save },
+    .{ .title = "Save request as...", .group = "Request", .action = .save_as },
+    .{ .title = "Duplicate request", .group = "Request", .shortcut = "Ctrl D", .action = .duplicate },
+    .{ .title = "Copy as cURL", .group = "Request", .action = .copy_curl },
+    .{ .title = "Encode URL", .group = "Request", .action = .encode_url },
+    .{ .title = "Decode URL", .group = "Request", .action = .decode_url },
+    .{ .title = "Find in body or response", .group = "Request", .shortcut = "Ctrl F", .action = .find },
+    .{ .title = "New request", .group = "Tabs", .shortcut = "Ctrl N", .action = .new_request },
+    .{ .title = "Close tab", .group = "Tabs", .shortcut = "Ctrl W", .action = .close_tab },
+    .{ .title = "Next tab", .group = "Tabs", .shortcut = "Ctrl Tab", .action = .next_tab },
+    .{ .title = "Previous tab", .group = "Tabs", .shortcut = "Ctrl Shift Tab", .action = .previous_tab },
+    .{ .title = "Show request and response", .group = "Layout", .action = .both_panes },
+    .{ .title = "Focus request editor", .group = "Layout", .action = .focus_request },
+    .{ .title = "Focus response", .group = "Layout", .action = .focus_response },
+    .{ .title = "Toggle sidebar", .group = "Layout", .shortcut = "Ctrl B", .action = .toggle_sidebar },
+    .{ .title = "Toggle activity console", .group = "Layout", .shortcut = "Ctrl J", .action = .toggle_activity },
+    .{ .title = "Import file...", .group = "Collections", .action = .import_file },
+    .{ .title = "Import cURL...", .group = "Collections", .action = .import_curl },
+    .{ .title = "New collection...", .group = "Collections", .action = .new_collection },
+    .{ .title = "New environment...", .group = "Environments", .action = .new_environment },
+    .{ .title = "Manage environments", .group = "Environments", .action = .manage_environments },
+    .{ .title = "Switch appearance", .group = "Application", .action = .appearance },
+    .{ .title = "Workspace settings...", .group = "Application", .action = .settings },
+};
+
 fn palette(ui: *c.cui_ctx, app: *App) void {
     if (!app.palette_open) return;
-    const names = [_][*:0]const u8{ "Send / cancel request", "New request", "Save request", "Duplicate request", "Import file", "Import cURL", "New collection", "New environment", "Toggle sidebar", "Toggle log", "Switch appearance", "Settings", "Encode URL", "Decode URL" };
     var items: std.ArrayList(c.cui_command) = .empty;
     var nodes: std.ArrayList(*col.Node) = .empty;
     const a = w.arena.allocator();
-    for (names) |name| items.append(a, .{ .title = name, .group = "Actions" }) catch {};
+    for (palette_entries) |entry| items.append(a, .{ .title = entry.title, .group = entry.group, .shortcut = entry.shortcut }) catch {};
+    // Environments are switched by name, beside the toolbar picker.
+    const env_start = items.items.len;
+    items.append(a, .{ .title = "Use no environment", .group = "Environments" }) catch {};
+    for (app.envs.items) |e| items.append(a, .{ .title = w.fmt("Use environment: {s}", .{e.name}), .group = "Environments" }) catch {};
+    const env_end = items.items.len;
     for (app.collections.items) |root| collect(a, root, &items, &nodes);
     const chosen = c.cui_command_palette(ui, &app.palette_open, items.items.ptr, @intCast(items.items.len));
     if (chosen < 0) return;
     const i: usize = @intCast(chosen);
+    if (i >= env_start and i < env_end) {
+        commands.setActiveEnv(app, if (i == env_start) null else app.envs.items[i - env_start - 1]);
+        return;
+    }
+    if (i >= env_end) {
+        if (i - env_end < nodes.items.len) commands.openRequest(app, nodes.items[i - env_end]);
+        return;
+    }
+    runPalette(ui, app, palette_entries[i].action);
+}
+
+fn runPalette(ui: *c.cui_ctx, app: *App, action: PaletteAction) void {
     const t = app.current();
-    switch (i) {
-        0 => if (t) |x| {
+    switch (action) {
+        .send => if (t) |x| {
             if (x.running()) commands.cancel(x) else commands.send(app, x);
         },
-        1 => _ = commands.newTab(app),
-        2 => if (t) |x| commands.save(app, x),
-        3 => if (t) |x| commands.duplicateTab(app, x),
-        4 => imports.chooseFile(app),
-        5 => {
+        .new_request => _ = commands.newTab(app),
+        .save => if (t) |x| commands.save(app, x),
+        .save_as => if (t) |x| commands.beginSaveAs(app, x),
+        .duplicate => if (t) |x| commands.duplicateTab(app, x),
+        .close_tab => if (t) |x| commands.requestClose(app, x),
+        .next_tab => commands.cycleTab(app, 1),
+        .previous_tab => commands.cycleTab(app, -1),
+        .find => if (t) |x| {
+            if (x.pane == .body and x.shown == null) {
+                x.body.search_open = true;
+                x.body.query.focus();
+            } else @import("response_search.zig").open(x);
+        },
+        .copy_curl => if (t) |x| {
+            if (x.toRequest(w.arena.allocator()) catch null) |r| w.copy(ui, @import("../import_export/curl.zig").generate(w.arena.allocator(), r) catch "");
+        },
+        .both_panes => if (t) |x| {
+            x.details_collapsed = false;
+            x.response_collapsed = false;
+        },
+        .focus_request => if (t) |x| {
+            x.details_collapsed = false;
+            x.response_collapsed = true;
+        },
+        .focus_response => if (t) |x| {
+            x.details_collapsed = true;
+            x.response_collapsed = false;
+        },
+        .import_file => imports.chooseFile(app),
+        .import_curl => {
             app.modal = .import_curl;
             app.modal_open = true;
         },
-        6 => dialogs.askName(app, .new_collection, ""),
-        7 => dialogs.askName(app, .new_env, ""),
-        8 => {
-            toggleSidebar(ui, app);
+        .new_collection => dialogs.askName(app, .new_collection, ""),
+        .new_environment => dialogs.askName(app, .new_env, ""),
+        .manage_environments => {
+            app.mode = .environments;
+            if (c.cui_viewport_size(ui).x < w.design.geometry.sidebar_sheet) narrow_open = true else {
+                app.prefs.sidebar_open = true;
+                persist.prefsChanged(app);
+            }
         },
-        9 => {
+        .toggle_sidebar => toggleSidebar(ui, app),
+        .toggle_activity => {
             app.prefs.log_open = !app.prefs.log_open;
             persist.prefsChanged(app);
         },
-        10 => {
+        .appearance => {
             app.prefs.dark = !app.prefs.dark;
             persist.prefsChanged(app);
         },
-        11 => settings(app),
-        12 => if (t) |x| commands.encodeUrl(app, x),
-        13 => if (t) |x| commands.decodeUrl(app, x),
-        else => if (i - names.len < nodes.items.len) commands.openRequest(app, nodes.items[i - names.len]),
+        .settings => settings(app),
+        .encode_url => if (t) |x| commands.encodeUrl(app, x),
+        .decode_url => if (t) |x| commands.decodeUrl(app, x),
     }
 }
 fn collect(a: std.mem.Allocator, n: *col.Node, items: *std.ArrayList(c.cui_command), nodes: *std.ArrayList(*col.Node)) void {

@@ -11,7 +11,7 @@ const tree = @import("app/tree_ops.zig");
 fn frame(ui: *c.cui_ctx, app: *App) void {
     c.cui_begin_frame(ui, 1.0 / 60.0);
     shell.view(ui, app);
-    c.cui_end_frame(ui);
+    c.kest_end_frame(ui);
     c.kest_quiet_caret(ui);
 }
 fn click(ui: *c.cui_ctx, app: *App, x: f32, y: f32) void {
@@ -44,6 +44,12 @@ pub fn run(app: *App, test_mode: bool, snapshot: ?[]const u8, width: f32, height
     c.cui_set_viewport(ui, width, height, scale);
     errdefer if (snapshot) |path| @import("ui_snapshots.zig").capture(ui, sw, app, path) catch {};
     if (test_mode) {
+        // This mode owns a scratch workspace. Start its UI fixtures independently
+        // of prior restored tabs, including a previous 64-document stress run.
+        // Destroy only in-memory views here; stored requests/drafts stay on disk.
+        for (app.tabs.items) |t| t.destroy();
+        app.tabs.clearRetainingCapacity();
+        app.active = 0;
         // Suite interactions begin on the desktop layout; requested snapshot
         // dimensions are restored below. Tests exercise compact layout explicitly.
         // Scratch workspaces survive runs; start from a deterministic console
@@ -55,6 +61,19 @@ pub fn run(app: *App, test_mode: bool, snapshot: ?[]const u8, width: f32, height
         try @import("ui_interaction_tests.zig").run(ui, app, frame, click, chord);
         try integration(ui, app);
         try @import("sidebar_tests.zig").run(ui, app, sw, snapshot, frame, click);
+        try @import("geometry_tests.zig").run(ui, app, frame, click);
+        try @import("document_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
+        try @import("composer_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
+        try @import("table_data_tests.zig").run(ui, app, sw, snapshot, frame, click);
+        try @import("table_ui_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
+        try @import("body_editor_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
+        try @import("upload_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
+        try @import("response_state_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
+        try @import("response_preparation_tests.zig").run(ui, app, sw, snapshot, frame, click);
+        try @import("response_header_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
+        try @import("response_text_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
+        try @import("response_search_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
+        try @import("workflow_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
         try memoryLifecycle(app);
         try performance(ui, app);
     }
@@ -80,6 +99,7 @@ fn chord(ui: *c.cui_ctx, app: *App, key: c.cui_key, mods: c_int) void {
     frame(ui, app);
 }
 fn tests(ui: *c.cui_ctx, app: *App) !void {
+    try requestSelection(app);
     commands.ensureTab(app);
     const count = app.tabs.items.len;
     frame(ui, app);
@@ -128,12 +148,20 @@ fn tests(ui: *c.cui_ctx, app: *App) !void {
         for ([_]bool{ false, true }) |log_open| {
             app.prefs.log_open = log_open;
             for (0..8) |_| frame(ui, app);
-            const footer = c.cui_get_rect(ui, c.cui_make_id(ui, "status"));
+            const region = c.cui_get_rect(ui, c.cui_make_id(ui, "workspace-region"));
             const panel = tabRect(ui, t, "response-panel");
-            if (footer.h <= 0 or footer.y + footer.h > 420 or panel.h <= 0 or panel.y + panel.h > footer.y)
-                std.debug.print("Compact body={s} log={}: footer={any}, response={any}\n", .{ @tagName(kind), log_open, footer, panel });
-            try expect(@src(), footer.h > 0 and footer.y + footer.h <= 420);
-            try expect(@src(), panel.h > 0 and panel.y + panel.h <= footer.y);
+            try expect(@src(), region.h > 0 and region.y + region.h <= 420);
+            try expect(@src(), panel.h > 0 and panel.y + panel.h <= region.y + region.h);
+            if (kind == .form_urlencoded or kind == .multipart) {
+                c.cui_push_id_int(ui, @intCast(t.uid));
+                c.cui_push_id(ui, "form");
+                c.cui_push_id_int(ui, @intCast(t.form.entry.?.uid));
+                const insertion = c.cui_get_rect(ui, c.cui_make_id(ui, "key"));
+                c.cui_pop_id(ui);
+                c.cui_pop_id(ui);
+                c.cui_pop_id(ui);
+                try expect(@src(), insertion.h >= 30 and insertion.y + insertion.h <= panel.y);
+            }
         }
     }
     app.prefs.log_open = old_log;
@@ -183,8 +211,10 @@ fn workspaceUx(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]c
     try expect(@src(), t.params.rows.items.len == 0 and t.params.entry != null);
     const new_row = t.params.entry.?;
     c.cui_push_id_int(ui, @intCast(t.uid));
+    c.cui_push_id(ui, "params");
     c.cui_push_id_int(ui, @intCast(new_row.uid));
     const blank_key = c.cui_get_rect(ui, c.cui_make_id(ui, "key"));
+    c.cui_pop_id(ui);
     c.cui_pop_id(ui);
     c.cui_pop_id(ui);
     click(ui, app, blank_key.x + 20, blank_key.y + 16);
@@ -202,28 +232,35 @@ fn workspaceUx(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]c
     try expect(@src(), std.mem.indexOf(u8, t.url.text(), "query=native") != null);
     for (0..3) |_| frame(ui, app);
     c.cui_push_id_int(ui, @intCast(t.uid));
+    c.cui_push_id(ui, "params");
     c.cui_push_id_int(ui, @intCast(new_row.uid));
     const key_rect = c.cui_get_rect(ui, c.cui_make_id(ui, "key"));
+    c.cui_pop_id(ui);
     c.cui_pop_id(ui);
     c.cui_pop_id(ui);
     try expect(@src(), key_rect.h >= 30 and key_rect.y + key_rect.h <= tabRect(ui, t, "response-panel").y);
     // Both the populated row and the next insertion row fit at minimum size.
     c.cui_push_id_int(ui, @intCast(t.uid));
+    c.cui_push_id(ui, "params");
     c.cui_push_id_int(ui, @intCast(t.params.entry.?.uid));
     const next_row = c.cui_get_rect(ui, c.cui_make_id(ui, "key"));
+    c.cui_pop_id(ui);
     c.cui_pop_id(ui);
     c.cui_pop_id(ui);
     if (next_row.h < 30 or next_row.y + next_row.h > tabRect(ui, t, "response-panel").y)
         std.debug.print("Parameter insertion={any}, response={any}, log={}\n", .{ next_row, tabRect(ui, t, "response-panel"), app.prefs.log_open });
     try expect(@src(), next_row.h >= 30 and next_row.y + next_row.h <= tabRect(ui, t, "response-panel").y);
     const response_before = tabRect(ui, t, "response-panel");
-    const nav = tabRect(ui, t, "toggle-details");
-    click(ui, app, nav.x + nav.w / 2, nav.y + nav.h / 2);
-    try expect(@src(), t.details_collapsed);
+    // Layout > Focus response hides the request editor; any section tab
+    // restores it (the old floating chevron duplicated the Layout menu).
+    t.details_collapsed = true;
+    t.response_collapsed = false;
+    frame(ui, app);
     frame(ui, app);
     const response_after = tabRect(ui, t, "response-panel");
     try expect(@src(), response_after.h > response_before.h + 30);
-    click(ui, app, nav.x + nav.w / 2, nav.y + nav.h / 2);
+    const params_tab = tabRect(ui, t, "pane-params");
+    click(ui, app, params_tab.x + params_tab.w / 2, params_tab.y + params_tab.h / 2);
     try expect(@src(), !t.details_collapsed);
 
     c.cui_set_viewport(ui, 1180, 800, 1);
@@ -292,6 +329,7 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     inline for (std.meta.tags(@import("app/tab.zig").ResponsePane)) |pane| {
         t.response.pane = pane;
         frame(ui, app);
+        try @import("response_test_support.zig").settle(ui, app, frame);
     }
     try expect(@src(), t.response.tree != null);
     const expanded_rows = t.response.tree.?.rows.items.len;
@@ -300,10 +338,10 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     try t.response.tree.?.setAll(app.gpa, false);
     t.response.pretty_mode = .text;
     t.response.pane = .pretty;
-    frame(ui, app);
+    try @import("response_test_support.zig").settle(ui, app, frame);
     try expect(@src(), t.response.formatted != null);
     t.response.pretty_mode = .minified;
-    frame(ui, app);
+    try @import("response_test_support.zig").settle(ui, app, frame);
     try expect(@src(), std.mem.indexOfScalar(u8, t.response.formatted.?, '\n') == null);
     t.response.pane = .raw;
     t.response.code_raw.search_open = true;
@@ -367,7 +405,7 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     commands.send(app, t);
     try wait(ui, app);
     t.response.pane = .preview;
-    frame(ui, app);
+    try @import("response_test_support.zig").settle(ui, app, frame);
     try expect(@src(), t.response.stripped != null and std.mem.indexOf(u8, t.response.stripped.?, "Loopback preview") != null);
     t.url.set(try server.url(w.arena.allocator(), "/markdown"));
     commands.send(app, t);
@@ -389,13 +427,26 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     commands.send(app, t);
     try wait(ui, app);
     t.response.pane = .preview;
-    frame(ui, app);
+    try @import("response_test_support.zig").settle(ui, app, frame);
     try expect(@src(), t.response.image != 0 and t.response.image_width == 1);
     // Validate real import + saved request files + a reload of the workspace.
     @import("app/import_ops.zig").previewText(app, "curl -X POST http://127.0.0.1/echo -H 'Content-Type: application/json' -d '{\"hello\":1}'", "test.curl");
     try expect(@src(), app.preview != null);
     @import("app/import_ops.zig").accept(app);
     app.modal_open = false;
+    // Different choices belong to different requests, including a body request
+    // deliberately left on Headers. Neither choice is request data.
+    t.pane = .headers;
+    commands.moveTab(app, std.mem.indexOfScalar(*@import("app/tab.zig").Tab, app.tabs.items, t).?, 0);
+    const selection_draft = commands.openUnsaved(app, .{
+        .name = "Selection restoration draft",
+        .method = "POST",
+        .body_kind = .json,
+        .body_text = "{\"restore\":true}",
+    }) orelse return error.AllocationFailed;
+    selection_draft.pane = .settings;
+    // Keep both restoration probes first, independently of other suite fixtures.
+    commands.moveTab(app, app.active, 0);
     persist.flush(app);
     persist.savePrefs(app);
     app.store.sync();
@@ -404,6 +455,19 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     try persist.load(&restored);
     try expect(@src(), restored.collections.items.len == app.collections.items.len and restored.envs.items.len == app.envs.items.len);
     try expect(@src(), restored.tabs.items.len > 0);
+    var restored_selection_draft = false;
+    for (restored.tabs.items) |loaded| {
+        const original = for (app.tabs.items) |candidate| {
+            if (std.mem.eql(u8, &candidate.id, &loaded.id) or
+                (candidate.link != null and loaded.link != null and
+                    std.mem.eql(u8, &candidate.link.?.request, &loaded.link.?.request))) break candidate;
+        } else return error.RestoredTabMissing;
+        try expect(@src(), loaded.pane == original.pane and loaded.pane_chosen);
+        try expect(@src(), std.mem.eql(u8, loaded.body.text(), original.body.text()));
+        if (original == selection_draft) restored_selection_draft = true;
+    }
+    try expect(@src(), restored_selection_draft);
+    commands.closeNow(app, selection_draft);
     // Finish with real JSON on show, also used by the optional screenshot.
     t.url.set(try server.url(w.arena.allocator(), "/json"));
     t.syncParamsFromUrl();
@@ -414,6 +478,7 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     t.response.pretty_mode = .tree;
     c.cui_set_viewport(ui, 640, 420, 1);
     for (0..4) |_| frame(ui, app);
+    try @import("response_test_support.zig").settle(ui, app, frame);
     const json_rect = tabRect(ui, t, "json-rows");
     try expect(@src(), json_rect.h >= 60 and json_rect.y + json_rect.h <= 420);
     chord(ui, app, c.CUI_KEY_B, c.CUI_MOD_PRIMARY);
@@ -426,6 +491,26 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     t.response.pretty_mode = .text;
     std.debug.print("CUI integration: loopback GET/POST, response modes, tree, search, pointer editing/undo, cancel, memory/spill export lifetime, HTML/PNG preview, cURL import, workspace reload passed\n", .{});
 }
+fn requestSelection(app: *App) !void {
+    const Tab = @import("app/tab.zig").Tab;
+    const t = try Tab.create(app.gpa, @import("core/collection.zig").newId(app.io), 999999);
+    defer t.destroy();
+    try t.fromRequest(.{ .method = "POST", .url = "https://example.invalid/?q=1", .body_kind = .json, .body_text = "{\"keep\":true}" });
+    try expect(@src(), t.pane == .body and t.hasBodyContent());
+    try expect(@src(), std.mem.eql(u8, t.body.text(), "{\"keep\":true}"));
+    try t.fromRequest(.{ .url = "https://example.invalid/?q=1", .headers = &.{.{ .key = "Accept", .value = "application/json" }} });
+    try expect(@src(), t.pane == .params and !t.hasBodyContent());
+    for ([_]@import("core/request.zig").BodyKind{ .form_urlencoded, .multipart }) |kind| {
+        try t.fromRequest(.{ .body_kind = kind, .form = &.{.{ .key = "file", .value = "sample.txt", .is_file = true }} });
+        try expect(@src(), t.pane == .body and t.hasBodyContent());
+    }
+    try t.fromRequest(.{ .body_kind = .file, .file_path = "sample.bin" });
+    try expect(@src(), t.pane == .body and t.hasBodyContent());
+    try t.fromRequest(.{ .method = "PATCH" });
+    try expect(@src(), t.pane == .body and !t.hasBodyContent());
+    std.debug.print("CUI request selection: JSON, URL query priority, forms, upload and method defaults passed\n", .{});
+}
+
 fn noWake(_: *App) void {}
 fn noSchedule(_: *App, _: u64) void {}
 

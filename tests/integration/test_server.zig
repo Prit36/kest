@@ -132,11 +132,59 @@ pub const Server = struct {
             try w.print("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}", .{ json.len, json });
             return true;
         }
+        if (std.mem.eql(u8, target, "/headers")) {
+            try w.writeAll("HTTP/1.1 200 OK\r\nSet-Cookie: a=1; Path=/\r\nset-cookie: b=2; Path=/\r\nX-OWS:\t  exact  \t\r\nX-Empty:\r\nX-Literal: value###literal\r\nContent-Length: 4\r\n\r\n");
+            if (!is_head) try w.writeAll("body");
+            return true;
+        }
+        if (std.mem.eql(u8, target, "/headers/large")) {
+            try w.writeAll("HTTP/1.1 200 OK\r\nSet-Cookie: a=1; Path=/\r\nset-cookie: b=2; Path=/\r\nX-Long:\t");
+            var value: [17 * 1024]u8 = @splat('L');
+            try w.writeAll(&value);
+            try w.writeAll("  \t\r\n");
+            for (0..1200) |i| try w.print("X-Header-{d}: value-{d}\r\n", .{ i, i });
+            try w.writeAll("X-Empty:\r\nX-Literal: value###literal\r\nX-Last: final value\r\nContent-Length: 4\r\n\r\n");
+            if (!is_head) try w.writeAll("body");
+            return true;
+        }
+        if (std.mem.startsWith(u8, target, "/content/")) {
+            const cases = [_]struct { []const u8, []const u8, []const u8 }{
+                .{ "malformed", "application/json", "{\"broken\":[1,]}" },
+                .{ "invalid-escape", "application/json", "{\"s\":\"\\q\"}" },
+                .{ "fragment", "text/plain", "GET /echo\nContent-Type: application/json\n\n{\"n\":1.10}" },
+                .{ "scalar", "text/plain", "42" },
+                .{ "svg", "image/svg+xml", "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>Text</text></svg>" },
+                .{ "binary-markdown", "text/markdown", "# title\x00unreadable" },
+            };
+            const name = target["/content/".len..];
+            for (cases) |case| if (std.mem.eql(u8, name, case[0])) {
+                try respond(w, 200, "OK", case[1], is_head, case[2], null);
+                return true;
+            };
+            if (std.mem.eql(u8, name, "large-json") or std.mem.eql(u8, name, "late-invalid") or std.mem.eql(u8, name, "late-nul")) {
+                const count = 2 * 1024 * 1024;
+                const nul = std.mem.eql(u8, name, "late-nul");
+                const invalid = std.mem.eql(u8, name, "late-invalid");
+                try w.print("HTTP/1.1 200 OK\r\nContent-Type: {s}\r\nContent-Length: {d}\r\n\r\n", .{ if (nul) "text/plain" else "application/json", count });
+                if (is_head) return true;
+                try w.writeAll(if (nul) "xx" else "{}");
+                var block: [4096]u8 = @splat(if (nul) 'x' else ' ');
+                var remaining: usize = count - 3;
+                while (remaining > 0) {
+                    const n = @min(remaining, block.len);
+                    try w.writeAll(block[0..n]);
+                    remaining -= n;
+                }
+                try w.writeByte(if (nul) 0 else if (invalid) 'x' else ' ');
+                return true;
+            }
+        }
         if (std.mem.eql(u8, target, "/hang")) {
             try w.flush();
             try s.io.sleep(.fromSeconds(120), .awake);
             return false;
         }
+        if (std.mem.eql(u8, target, "/drop")) return false;
         if (std.mem.eql(u8, target, "/stall")) {
             try w.writeAll("HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\nhalf");
             try w.flush();

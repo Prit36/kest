@@ -3,10 +3,7 @@ const w = @import("widgets.zig");
 const c = w.c;
 const App = @import("../app/state.zig").App;
 const tab = @import("../app/tab.zig");
-const commands = @import("../app/commands.zig");
 const persist = @import("../app/persist.zig");
-const editor = @import("editor.zig");
-const platform = @import("platform.zig");
 
 pub const bar = @import("composer.zig").view;
 
@@ -14,7 +11,7 @@ pub fn minimumHeight(t: *const tab.Tab) f32 {
     return switch (t.pane) {
         .params => if (t.params.rows.items.len > 0 or t.params.bulk != null) 148 else 112,
         .headers => if (t.headers.rows.items.len > 0 or t.headers.bulk != null) 148 else 112,
-        .body => if (t.body_kind == .multipart or t.body_kind == .form_urlencoded) 148 else 140,
+        .body => if (t.body_kind == .multipart or t.body_kind == .form_urlencoded) (if (t.form.rows.items.len > 0 or t.form.bulk != null) 180 else 148) else if (t.body_kind == .file and t.file_path.len > 0) 184 else if (t.body_kind == .json and t.body_problem_text.len > 0) 176 else 140,
         .settings => 140,
     };
 }
@@ -22,96 +19,47 @@ pub fn minimumHeight(t: *const tab.Tab) f32 {
 pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     w.column(ui, .{ .id = "request-panel", .height = w.fill, .width = w.fill, .clip = true });
     defer w.end(ui);
-    w.row(ui, .{ .id = "request-navigation", .pad_left = 4, .pad_right = 6, .height = w.px(36), .width = w.fill });
-    const labels = [_][]const u8{ w.fmt("Params{s}", .{if (t.params.rows.items.len > 0) w.fmt(" {d}", .{t.params.rows.items.len}) else ""}), "Body", w.fmt("Headers{s}", .{if (t.headers.rows.items.len > 0) w.fmt(" {d}", .{t.headers.rows.items.len}) else ""}) };
-    const panes = [_]tab.RequestPane{ .params, .body, .headers };
-    for (labels, panes) |label, pane| {
-        if (w.action(ui, w.fmt("pane-{s}", .{@tagName(pane)}), label, null, t.pane == pane, 0, 36, 2)) {
-            t.pane = pane;
-            t.details_collapsed = false;
+    w.row(ui, .{ .id = "request-navigation", .pad_left = w.design.space.tight, .pad_right = w.design.space.compact, .height = w.px(w.design.control.tab_height), .width = w.fill });
+    // Settings is an ordinary labeled section rather than a floating gear.
+    // Focusing the response lives in the Layout menu; any section restores it.
+    const keys = [_][*:0]const u8{ "pane-params", "pane-body", "pane-headers", "pane-settings" };
+    const custom = customSettings(t);
+    const labels = [_][]const u8{ w.counted("Params", t.params.rows.items.len), if (t.hasBodyContent()) "Body •" else "Body", w.counted("Headers", t.headers.rows.items.len), if (custom) "Settings •" else "Settings" };
+    const panes = [_]tab.RequestPane{ .params, .body, .headers, .settings };
+    const current = std.mem.indexOfScalar(tab.RequestPane, &panes, t.pane);
+    const next = w.tabNavigation(ui, &keys, current orelse 0);
+    if (current != null and next != current.?) selectPane(app, t, panes[next]);
+    for (labels, panes, keys) |label, pane, key| {
+        if (w.contentTab(ui, key, label, t.pane == pane and !t.details_collapsed)) {
+            selectPane(app, t, pane);
+        }
+        switch (pane) {
+            .body => c.cui_tooltip(ui, if (t.hasBodyContent()) "Request body contains content" else "Request body"),
+            .headers => c.cui_tooltip(ui, "Configured request headers; automatic headers are in the table actions menu"),
+            .settings => c.cui_tooltip(ui, if (custom) "Timeout, size, redirect and TLS options; some differ from the defaults" else "Timeout, size, redirect and TLS options"),
+            .params => {},
         }
     }
     c.cui_spacer(ui);
-    if (w.action(ui, "request-options", "", c.CUI_ICON_SETTINGS, t.pane == .settings, 28, 28, 3)) {
-        t.pane = .settings;
-        t.details_collapsed = false;
-    }
-    c.cui_tooltip(ui, "Request settings");
-    if (w.action(ui, "toggle-details", "", if (t.details_collapsed) c.CUI_ICON_CHEVRON_DOWN else c.CUI_ICON_CHEVRON_UP, false, 26, 28, 3)) t.details_collapsed = !t.details_collapsed;
-    c.cui_tooltip(ui, if (t.details_collapsed) "Show request editor" else "Focus response");
     w.end(ui);
-    c.cui_separator(ui);
+    w.separator(ui, "request-navigation-boundary");
     if (t.details_collapsed) return;
     switch (t.pane) {
-        .params => if (@import("key_value.zig").view(ui, &t.params, false, "Query parameters")) {
+        .params => if (@import("key_value.zig").view(ui, &t.params, false, "Query parameters", .{ .kind = .params, .vars = app.activeVars() })) {
             t.syncUrlFromParams();
             persist.touchTab(app, t);
         },
-        .headers => if (@import("key_value.zig").view(ui, &t.headers, false, "Request headers")) persist.touchTab(app, t),
-        .body => body(ui, app, t),
+        .headers => if (@import("key_value.zig").view(ui, &t.headers, false, "Configured request headers", .{ .kind = .headers, .vars = app.activeVars(), .request = t })) persist.touchTab(app, t),
+        .body => @import("body.zig").view(ui, app, t),
         .settings => settings(ui, app, t),
     }
 }
 
-pub fn table(ui: *c.cui_ctx, values: *tab.Table, files: bool) bool {
-    return @import("key_value.zig").view(ui, values, files, if (files) "Form fields" else "Variables");
-}
-
-fn body(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
-    w.row(ui, .{ .id = "body-toolbar", .gap = 4, .pad_x = 12, .height = w.px(36), .width = w.fill });
-    const kinds = [_][]const u8{ "No body", "JSON", "Text", "XML", "Form", "Multipart", "File" };
-    if (w.menu(ui, w.fmt("{s}###body-kind", .{kinds[@intCast(@backingInt(t.body_kind))]}), 126, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
-        for (kinds, 0..) |label, i| {
-            if (c.cui_menu_item_ex(ui, w.z(label), &.{ .checked = @backingInt(t.body_kind) == i })) {
-                t.body_kind = @fromBackingInt(@intCast(i));
-                persist.touchTab(app, t);
-            }
-        }
-        c.cui_menu_end(ui);
-    }
-    c.cui_spacer(ui);
-    if (t.body_kind == .json) {
-        if (w.action(ui, "format-body", "", c.CUI_ICON_LIST, false, 28, 28, 3)) commands.formatBody(app, t, 2);
-        c.cui_tooltip(ui, "Format JSON");
-    }
-    if (w.action(ui, "find-body", "", c.CUI_ICON_SEARCH, false, 28, 28, 3)) {
-        t.body.search_open = !t.body.search_open;
-        t.body.query.focus();
-    }
-    c.cui_tooltip(ui, "Find in body");
-    if (c.kest_dropdown_begin(ui, "Body actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END })) {
-        if (t.body_kind == .json) {
-            if (w.menuItem(ui, "Format JSON")) commands.formatBody(app, t, 2);
-            if (w.menuItem(ui, "Minify JSON")) commands.formatBody(app, t, 0);
-        }
-        if (w.menuItem(ui, "Copy body")) w.copy(ui, t.body.text());
-        c.cui_menu_end(ui);
-    }
-    w.end(ui);
-    switch (t.body_kind) {
-        .none => w.empty(ui, "This request has no body", "Choose JSON, text, a form, or a file from the menu above."),
-        .json, .text, .xml => {
-            commands.bodyProblem(app, t);
-            if (t.body_problem_text.len > 0) w.text(ui, t.body_problem_text, .{ .size = 12, .color = w.color(c.CUI_TOKEN_DANGER) });
-            if (editor.view(ui, "body-editor", &t.body, t.body.text(), false, if (t.body_kind == .json) .json else if (t.body_kind == .xml) .xml else .plain)) persist.touchTab(app, t);
-        },
-        .form_urlencoded, .multipart => if (table(ui, &t.form, t.body_kind == .multipart)) persist.touchTab(app, t),
-        .file => {
-            if (w.field(ui, "file-path", &t.file_path, .{ .placeholder = "Path to upload", .width = w.fill })) persist.touchTab(app, t);
-            if (w.button(ui, "Choose file", .{})) {
-                if (platform.dialog.open(app.gpa, .{ .title = "Upload file" }) catch null) |paths| {
-                    defer {
-                        for (paths) |p| app.gpa.free(p);
-                        app.gpa.free(paths);
-                    }
-                    if (paths.len > 0) {
-                        t.file_path.set(paths[0]);
-                        persist.touchTab(app, t);
-                    }
-                }
-            }
-        },
-    }
+fn selectPane(app: *App, t: *tab.Tab, pane: tab.RequestPane) void {
+    t.pane = pane;
+    t.pane_chosen = true;
+    t.details_collapsed = false;
+    persist.prefsChanged(app);
 }
 
 fn settings(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
@@ -145,4 +93,14 @@ fn setting(ui: *c.cui_ctx, label: []const u8, detail: []const u8, id: [*:0]const
     w.text(ui, detail, .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
     w.end(ui);
     return w.field(ui, id, value, .{ .width = w.px(128), .suffix = suffix });
+}
+
+/// Whether any per-request transfer option differs from its default, so the
+/// Settings section can say so without being opened.
+pub fn customSettings(t: *const tab.Tab) bool {
+    const defaults: @import("../core/request.zig").Settings = .{};
+    const s = t.settings;
+    return s.timeout_ms != defaults.timeout_ms or s.follow_redirects != defaults.follow_redirects or
+        s.max_redirects != defaults.max_redirects or s.max_response_bytes != defaults.max_response_bytes or
+        s.verify_tls != defaults.verify_tls;
 }

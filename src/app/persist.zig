@@ -15,7 +15,7 @@ const Allocator = std.mem.Allocator;
 
 /// How long edits wait, so a burst of typing is one write.
 pub const debounce_ms = 700;
-const max_restored_tabs = 40;
+const max_restored_tabs = tab_mod.max_open_tabs;
 
 pub fn hashOf(text: []const u8) u64 {
     return std.hash.Wyhash.hash(0x6272, text);
@@ -121,7 +121,7 @@ fn restoreTabs(app: *App) void {
     for (app.prefs.open_tabs, 0..) |o, i| {
         if (restored == max_restored_tabs) break;
         // Parsed requests and serialized hashes are temporary. Release them
-        // per tab instead of holding up to forty large bodies until startup ends.
+        // per tab instead of holding every large body until startup ends.
         var scratch = std.heap.ArenaAllocator.init(app.gpa);
         defer scratch.deinit();
         const a = scratch.allocator();
@@ -148,6 +148,11 @@ fn restoreTab(app: *App, a: Allocator, o: ws.OpenTab) !?*Tab {
     const t = try Tab.create(app.gpa, id, app.next_tab_uid);
     app.next_tab_uid += 1;
     errdefer t.destroy();
+    // Apply after both saved and draft loads, including fallback returns.
+    defer if (o.request_pane) |pane| {
+        t.pane = pane;
+        t.pane_chosen = true;
+    };
     var saved_text: ?[]const u8 = null;
     if (o.collection != null and o.request != null) {
         const c = collection.?;
@@ -303,8 +308,9 @@ pub fn savePrefs(app: *App) void {
     defer ar.deinit();
     const a = ar.allocator();
     var open: std.ArrayList(ws.OpenTab) = .empty;
-    for (app.tabs.items) |t| {
-        var o: ws.OpenTab = .{};
+    var active: usize = 0;
+    for (app.tabs.items, 0..) |t, i| {
+        var o: ws.OpenTab = .{ .request_pane = t.pane };
         if (t.link) |l| {
             o.collection = l.collection;
             o.request = l.request;
@@ -312,11 +318,12 @@ pub fn savePrefs(app: *App) void {
         if (t.has_draft) o.draft = t.id;
         // A blank tab with nothing in it isn't worth bringing back.
         if (o.collection == null and o.draft == null) continue;
+        if (i <= app.active) active = open.items.len;
         open.append(a, o) catch return;
     }
     var p = app.prefs;
     p.open_tabs = open.items;
-    p.active_tab = app.active;
+    p.active_tab = active;
     p.active_env = if (app.active_env) |e| e.id else null;
     const text = ws.prefsJson(app.gpa, p) catch return;
     app.store.writeOwned("workspace.json", text);
@@ -383,7 +390,25 @@ fn refreshTab(app: *App, t: *Tab, a: Allocator) void {
     }
     const v = std.json.parseFromSliceLeaky(std.json.Value, a, text, .{}) catch return;
     const r = req.Request.parse(a, v) catch return;
+    const pane = t.pane;
+    const pane_chosen = t.pane_chosen;
     t.fromRequest(r) catch return;
+    t.pane = pane;
+    t.pane_chosen = pane_chosen;
     t.saved_hash = h;
     app.toast(.info, "Reloaded from disk", "A request's file was changed by another program.");
+}
+
+/// A background write of `path` failed. A linked request saved to that file is
+/// no longer clean: show it as changed so the edits are not taken as saved.
+pub fn writeFailed(app: *App, path: []const u8) void {
+    for (app.tabs.items) |t| {
+        const link = t.link orelse continue;
+        var buf: [cs.path_len]u8 = undefined;
+        if (!std.mem.eql(u8, cs.requestPath(&buf, &link.collection, &link.request), path)) continue;
+        t.dirty = true;
+        // No hash matches, so the next save writes again. Not "touched":
+        // autosave would otherwise retry a failing disk on every debounce.
+        t.saved_hash = 0;
+    }
 }

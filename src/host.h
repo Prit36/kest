@@ -1,7 +1,16 @@
 #include <cui/cui.h>
 #include <cui/cui_app.h>
 #include <cui/cui_render.h>
+#include "ui/metrics.h"
 void kest_host_attach(cui_app *app);
+typedef struct kest_window_geometry {
+    int x, y, width, height;
+    unsigned dpi;
+    float client_width, client_height;
+    bool positioned, maximized;
+} kest_window_geometry;
+bool kest_host_get_geometry(kest_window_geometry *geometry);
+void kest_host_restore_geometry(const kest_window_geometry *geometry, bool show);
 void kest_host_sync_chrome(cui_ctx *ui);
 void kest_host_wake(void);
 void kest_host_schedule(unsigned ms);
@@ -10,20 +19,69 @@ const char *kest_clipboard(cui_ctx *ui);
 void kest_copy(cui_ctx *ui, const char *text);
 const char *kest_editor_text(cui_ctx *ui);
 float kest_editor_scroll(cui_ctx *ui, cui_id id);
+cui_vec2 kest_editor_scroll_axes(cui_ctx *ui, cui_id id);
 int kest_editor_focus(cui_ctx *ui, cui_id id);
 void kest_editor_register(cui_ctx *ui, cui_id id);
+void kest_editor_tabs(cui_ctx *ui, cui_id id, int capture);
+bool kest_has_node(cui_ctx *ui, cui_id id);
 void kest_quiet_caret(cui_ctx *ui);
 bool kest_item_begin(cui_ctx *ui, const char *id, bool selected, float height);
 void kest_item_end(cui_ctx *ui);
 bool kest_control_begin(cui_ctx *ui, const char *id, bool selected, float width, float height, int kind);
+bool kest_content_tab_begin(cui_ctx *ui, const char *id, bool selected);
+int kest_tab_navigation(cui_ctx *ui, const char *const *keys, int count, int selected);
+typedef struct kest_doc_tab {
+    const char *title; /* Stable native identity, independent of user text. */
+    const char *label, *method, *tooltip;
+    cui_color method_color;
+    bool dirty;
+} kest_doc_tab;
+cui_doc_tabs_result kest_doc_tabs_ex(cui_ctx *ui, const char *id, const kest_doc_tab *tabs, int count, int *selected);
+bool kest_document_menu_item(cui_ctx *ui, const char *identity, const char *label, bool checked, const char *scroll);
+bool kest_scrolling_menu_item(cui_ctx *ui, const char *label, const cui_menu_item_opts *opts, const char *scroll);
+void kest_document_list_begin(cui_ctx *ui, const char *id, float max_height);
+void kest_separator(cui_ctx *ui, const char *id, bool vertical);
+void kest_split_next(cui_ctx *ui, const char *id, bool vertical);
+cui_path_bar_result kest_path_bar_ex(cui_ctx *ui, const char *id, const char *const *segments, int count, const cui_path_bar_opts *opts);
 int kest_flat_input(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_input_opts *opts, bool cell);
-bool kest_menu_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts, float width, cui_color color);
+int kest_table_input(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_input_opts *opts);
+int kest_table_bulk_input(cui_ctx *ui, char *buf, size_t cap, bool focus);
+int kest_table_navigation(cui_ctx *ui, const unsigned *rows, int count);
+int kest_response_header_navigation(cui_ctx *ui, int count);
+void kest_response_header_source(cui_ctx *ui, const void *source, int count);
+void kest_table_focus(cui_ctx *ui, unsigned row, int column, int index);
+void kest_table_row_begin(cui_ctx *ui);
+bool kest_table_menu_begin(cui_ctx *ui, const char *id, bool row, const char *notice, cui_color color);
+bool kest_table_details_begin(cui_ctx *ui, const char *id);
+bool kest_inspector_begin(cui_ctx *ui, const char *id, const char *anchor, float width);
+void kest_popup_track(cui_ctx *ui, const char *trigger);
+void kest_table_popup_cleanup(cui_ctx *ui);
+void kest_end_frame(cui_ctx *ui);
+bool kest_menu_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts, float width, float height, cui_color color);
+bool kest_method_menu_begin(cui_ctx *ui, const char *method, cui_color color);
+void kest_url_invalid(cui_ctx *ui, bool invalid);
+bool kest_request_button(cui_ctx *ui, const char *label, const cui_button_opts *opts);
+bool kest_request_enter(cui_ctx *ui);
+bool kest_request_shortcut(cui_ctx *ui);
 bool kest_dropdown_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts);
 bool kest_reveal(cui_ctx *ui, cui_id scroll_id, cui_id target, bool horizontal);
 void kest_focus(cui_ctx *ui, const char *id);
+void kest_input_select_all(cui_ctx *ui, const char *id, int length);
+bool kest_focus_within(cui_ctx *ui, const char *id);
 void kest_collection_style(cui_ctx *ui, const char *id, cui_color background);
 void kest_collection_top(cui_ctx *ui, const char *id);
-void kest_collection_name(cui_ctx *ui, const char *name, const char *method, const char *icon, cui_color color);
+bool kest_collection_reveal(cui_ctx *ui, const char *id, int index, float row_h);
+void kest_collection_name(cui_ctx *ui, const char *name, const char *method, const char *icon, cui_color color, int match_start, int match_length);
+bool kest_collection_name_marked(cui_ctx *ui);
+bool kest_collection_row_hot(cui_ctx *ui);
+cui_rect kest_collection_row_rect(cui_ctx *ui);
+void kest_collection_drop(cui_ctx *ui, int where);
+bool kest_collection_drop_shown(cui_ctx *ui);
+void kest_collection_drop_clear(void);
+float kest_collection_scroll_y(cui_ctx *ui, const char *key);
+void kest_collection_scroll_by(cui_ctx *ui, const char *key, float dy);
 bool kest_button_ex(cui_ctx *ui, const char *label, const cui_button_opts *opts);
 bool kest_select_ex(cui_ctx *ui, const char *id, const char *const *items, int count, int *index, const cui_select_opts *opts);
-cui_texture kest_image_memory(cui_ctx *ui, const unsigned char *bytes, int length, int *out_width, int *out_height);
+/* failure: 0 success, 1 invalid/unsupported, 2 resource limit, 3 allocation. */
+unsigned char *kest_image_decode(const unsigned char *bytes, int length, int *out_width, int *out_height, int *source_width, int *source_height, int *failure);
+void kest_image_free(unsigned char *rgba);

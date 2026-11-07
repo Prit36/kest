@@ -4,6 +4,37 @@
 //! hover fades take ~70 ms and menus/dialogs ~150 ms. Headless frames stay still.
 const c = @import("c.zig").c;
 
+pub const space = struct {
+    pub const micro: f32 = c.KEST_SPACE_MICRO;
+    pub const tight: f32 = c.KEST_SPACE_TIGHT;
+    pub const compact: f32 = c.KEST_SPACE_COMPACT;
+    pub const normal: f32 = c.KEST_SPACE_NORMAL;
+    pub const group: f32 = c.KEST_SPACE_GROUP;
+    pub const section: f32 = c.KEST_SPACE_SECTION;
+};
+pub const control = struct {
+    pub const small: f32 = c.KEST_CONTROL_SMALL;
+    pub const normal: f32 = c.KEST_CONTROL_NORMAL;
+    pub const large: f32 = c.KEST_CONTROL_LARGE;
+    pub const tab_height: f32 = c.KEST_CONTENT_TAB_HEIGHT;
+    pub const document_strip: f32 = c.KEST_DOCUMENT_STRIP_HEIGHT;
+    pub const icon: f32 = c.KEST_ICON_SMALL;
+};
+pub const text = struct {
+    pub const body: f32 = c.KEST_TEXT_BODY;
+    pub const secondary: f32 = c.KEST_TEXT_SECONDARY;
+    pub const caption: f32 = c.KEST_TEXT_CAPTION;
+};
+pub const geometry = struct {
+    pub const sidebar_min: f32 = 210;
+    pub const sidebar_max: f32 = 480;
+    pub const sidebar_sheet: f32 = 840;
+    pub const workspace_min: f32 = 520;
+    pub const columns_min: f32 = 730;
+    pub const request_min: f32 = 320;
+    pub const response_min: f32 = 360;
+};
+
 /// Multiplier on CUI's motion tokens. Below 1 is faster than CUI's defaults.
 pub const motion_scale: f32 = 0.5;
 /// 1 = dark, 0 = light. Eases between palettes when the appearance changes.
@@ -68,17 +99,17 @@ pub fn apply(ui: *c.cui_ctx, dark: bool) void {
     t.*.tone_rose = t.*.colors[c.CUI_TOKEN_DANGER];
     t.*.tone_orchid = pick(0xbe185d, 0xf472b6);
     t.*.tone_violet = pick(0x6d28d9, 0xa78bfa);
-    t.*.radius_control = 3;
-    t.*.radius_panel = 6;
-    t.*.radius_surface = 6;
+    t.*.radius_control = c.KEST_RADIUS_CONTROL;
+    t.*.radius_panel = c.KEST_RADIUS_PANEL;
+    t.*.radius_surface = c.KEST_RADIUS_PANEL;
     t.*.shadow_floating[0] = .{ .y = 8, .blur = 20, .spread = -4, .alpha = pickf(0.10, 0.24) };
     t.*.shadow_floating[1] = .{ .y = 1, .blur = 2, .spread = 0, .alpha = pickf(0.08, 0.30) };
-    t.*.control_sm = 28;
-    t.*.control_md = 32;
-    t.*.control_lg = 38;
-    t.*.text_body = 13;
-    t.*.text_sm = 12;
-    t.*.text_xs = 11;
+    t.*.control_sm = control.small;
+    t.*.control_md = control.normal;
+    t.*.control_lg = control.large;
+    t.*.text_body = text.body;
+    t.*.text_sm = text.secondary;
+    t.*.text_xs = text.caption;
 }
 
 pub fn sidebar() c.cui_color {

@@ -109,6 +109,9 @@ fn supervise(j: *Job) void {
     var task = io.concurrent(transfer, .{ j, &result }) catch {
         j.resp.setError("Too many requests are running");
         j.resp.stop = .failed;
+        j.resp.failure = .other;
+        j.resp.time_ms = @intCast(std.math.clamp(j.elapsedMs(), 0, std.math.maxInt(u32)));
+        j.resp.timing_known = true;
         j.callbacks.on_done(j.callbacks.ctx, j);
         return;
     };
@@ -155,9 +158,14 @@ fn notify(j: *Job, force: bool) void {
 
 fn finish(j: *Job, result: transport.Result) void {
     const r = &j.resp;
+    // Publish classification with the completed response, never parse a large
+    // body in the UI's class()/navigation lookups. Include final stop state.
+    defer r.inspectContent();
     r.closeSpill();
     r.reused_connection = result.reused_connection;
     r.time_ms = @intCast(std.math.clamp(j.elapsedMs(), 0, std.math.maxInt(u32)));
+    r.timing_known = true;
+    r.failure = result.failure;
     if (j.timed_out) {
         r.stop = .timed_out;
         r.setError(std.fmt.allocPrint(j.arena.allocator(), "No complete answer within {d} ms", .{j.timeout_ms}) catch "Timed out");

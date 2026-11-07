@@ -91,6 +91,10 @@ pub const App = struct {
     /// Asks for `flush` in a while, once; on the main thread.
     schedule_fn: *const fn (*App, u64) void,
     read_clipboard: ?*const fn (Allocator) ?[]u8 = null,
+    /// Optional host/test picker. A non-null result is owned by the caller.
+    choose_upload: ?*const fn (Allocator) anyerror!?[]u8 = null,
+    uploads: @import("upload_info.zig").Cache,
+    response_preparation: @import("response_prepare.zig").Service,
 
     collections: std.ArrayList(*col.Node) = .empty,
     /// The hash of each tree as last written, to tell a change on disk.
@@ -106,6 +110,7 @@ pub const App = struct {
     vars: []const variables.Var = &.{},
     vars_arena: std.heap.ArenaAllocator,
     vars_dirty: bool = true,
+    vars_version: u64 = 0,
     history: history_mod.History,
     history_dirty: bool = false,
     log: log_mod.Log,
@@ -141,6 +146,8 @@ pub const App = struct {
     move_targets: std.ArrayList(col.Row) = .empty,
     save_target: ?*col.Node = null,
     save_name: ui.TextBuffer = .{},
+    /// A dirty tab whose close is waiting for Save as to finish.
+    close_after_save: ?*Tab = null,
     editing_env: ?*Env = null,
     retention_text: ui.TextBuffer = .{},
 
@@ -184,6 +191,8 @@ pub const App = struct {
             .wake_fn = wake_fn,
             .schedule_fn = schedule_fn,
             .vars_arena = .init(gpa),
+            .uploads = .init(gpa, io),
+            .response_preparation = .init(gpa, io),
             .history = .init(gpa),
             .log = .init(gpa),
             .toaster = .{ .gpa = gpa },
@@ -192,6 +201,8 @@ pub const App = struct {
 
     /// The caller has stopped the client's jobs first.
     pub fn deinit(a: *App) void {
+        a.response_preparation.deinit();
+        a.uploads.deinit();
         for (a.tabs.items) |t| t.destroy();
         a.tabs.deinit(a.gpa);
         for (a.done.items) |j| j.destroy();
@@ -253,6 +264,7 @@ pub const App = struct {
     pub fn activeVars(a: *App) []const variables.Var {
         if (!a.vars_dirty) return a.vars;
         a.vars_dirty = false;
+        a.vars_version +%= 1;
         _ = a.vars_arena.reset(.retain_capacity);
         const e = a.active_env orelse {
             a.vars = &.{};

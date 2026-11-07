@@ -25,6 +25,27 @@ fn readClipboard(a: std.mem.Allocator) ?[]u8 {
     return if (text != null) a.dupe(u8, std.mem.span(text)) catch null else null;
 }
 
+fn syncWindowGeometry(app: *App) void {
+    var geometry: c.kest_window_geometry = undefined;
+    if (!c.kest_host_get_geometry(&geometry)) return;
+    const placement: @import("storage/workspace_store.zig").WindowPlacement = .{
+        .x = geometry.x,
+        .y = geometry.y,
+        .width = @intCast(geometry.width),
+        .height = @intCast(geometry.height),
+        .dpi = geometry.dpi,
+        .maximized = geometry.maximized,
+    };
+    if (app.prefs.window_placement == null or !std.meta.eql(app.prefs.window_placement.?, placement) or
+        app.prefs.window_width != geometry.client_width or app.prefs.window_height != geometry.client_height)
+    {
+        app.prefs.window_placement = placement;
+        app.prefs.window_width = geometry.client_width;
+        app.prefs.window_height = geometry.client_height;
+        persist.prefsChanged(app);
+    }
+}
+
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
@@ -102,10 +123,13 @@ pub fn main(init: std.process.Init) !void {
         }
         return;
     }
-    const window = c.cui_app_create(&.{ .title = if (demo_mode) "Kest (Demo)" else "Kest", .width = @intFromFloat(app.prefs.window_width), .height = @intFromFloat(app.prefs.window_height), .min_width = 640, .min_height = 420, .theme = if (app.prefs.dark) c.CUI_THEME_DARK else c.CUI_THEME_LIGHT, .accent = c.CUI_ACCENT_BLUE }) orelse return error.WindowCreationFailed;
+    // Restore and clamp before showing. Avoid allocating an enormous initial
+    // surface for stale preferences from a monitor that is no longer attached.
+    const window = c.cui_app_create(&.{ .title = if (demo_mode) "Kest (Demo)" else "Kest", .width = @intFromFloat(@min(1280, app.prefs.window_width)), .height = @intFromFloat(@min(800, app.prefs.window_height)), .hidden = true, .min_width = 640, .min_height = 420, .theme = if (app.prefs.dark) c.CUI_THEME_DARK else c.CUI_THEME_LIGHT, .accent = c.CUI_ACCENT_BLUE }) orelse return error.WindowCreationFailed;
     platform.window = window;
     platform.context = c.cui_app_ui(window);
     defer {
+        syncWindowGeometry(&app);
         // Texture lifetime ends with the context, after model cleanup.
         for (app.tabs.items) |t| t.response.reset();
         platform.context = null;
@@ -114,18 +138,26 @@ pub fn main(init: std.process.Init) !void {
     }
     c.kest_host_attach(window);
     @import("window_icon.zig").apply(c.cui_app_native_window(window));
+    var geometry: c.kest_window_geometry = std.mem.zeroes(c.kest_window_geometry);
+    geometry.client_width = app.prefs.window_width;
+    geometry.client_height = app.prefs.window_height;
+    if (app.prefs.window_placement) |placement| {
+        geometry.x = placement.x;
+        geometry.y = placement.y;
+        geometry.width = @intCast(placement.width);
+        geometry.height = @intCast(placement.height);
+        geometry.dpi = placement.dpi;
+        geometry.maximized = placement.maximized;
+        geometry.positioned = true;
+    }
+    c.kest_host_restore_geometry(&geometry, true);
     while (c.cui_app_frame(window)) {
         const events = c.kest_host_events();
         if (events & 1 != 0 or events & 4 != 0) persist.flush(&app);
         if (events & 2 != 0) persist.refreshFromDisk(&app);
-        const size = c.cui_app_size(window);
-        if (app.prefs.window_width != size.x or app.prefs.window_height != size.y) {
-            app.prefs.window_width = size.x;
-            app.prefs.window_height = size.y;
-            persist.prefsChanged(&app);
-        }
+        syncWindowGeometry(&app);
         shell.view(platform.context.?, &app);
-        c.cui_end_frame(platform.context);
+        c.kest_end_frame(platform.context);
         c.kest_host_sync_chrome(platform.context);
         c.kest_quiet_caret(platform.context);
     }

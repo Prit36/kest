@@ -7,7 +7,6 @@ const commands = @import("../app/commands.zig");
 const persist = @import("../app/persist.zig");
 const tree = @import("../app/tree_ops.zig");
 const imports = @import("../app/import_ops.zig");
-const request = @import("request.zig");
 
 pub fn askName(app: *App, action: state.NameAction, value: []const u8) void {
     app.name_action = action;
@@ -18,7 +17,11 @@ pub fn askName(app: *App, action: state.NameAction, value: []const u8) void {
     app.modal_open = true;
 }
 pub fn view(ui: *c.cui_ctx, app: *App) void {
-    if (!app.modal_open) return;
+    if (!app.modal_open) {
+        // A Save as begun from a close prompt was dismissed: keep the tab.
+        app.close_after_save = null;
+        return;
+    }
     const title: []const u8 = switch (app.modal) {
         .name => switch (app.name_action) {
             .new_collection => "New collection",
@@ -85,16 +88,17 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
             w.text(ui, e.name, .{ .font = c.CUI_FONT_MEDIUM, .width = w.fill, .nowrap = true });
             if (app.active_env == e) w.text(ui, "Active", .{ .size = 12, .font = c.CUI_FONT_MEDIUM, .color = w.color(c.CUI_TOKEN_SUCCESS), .nowrap = true }) else if (w.button(ui, "Use this environment", .{ .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_SECONDARY })) commands.setActiveEnv(app, e);
             w.end(ui);
-            // Fit the table to its rows (title, header, rows, insertion row),
+            // Fit the table to its header, rows and insertion row,
             // bounded by the window, rather than reserving a fixed empty block.
             const rows: f32 = @floatFromInt(e.table.rows.items.len + 1);
-            const title_row: f32 = if (c.cui_viewport_size(ui).y < 600) 0 else 28;
-            const wanted = title_row + 14 + 8 + 29 + rows * 33 + 2;
-            w.column(ui, .{ .height = w.px(@max(100, @min(wanted, @min(320, c.cui_viewport_size(ui).y - 250)))) });
-            if (request.table(ui, &e.table, false)) {
+            const wanted = 12 + c.KEST_TABLE_HEADER + 1 + rows * c.KEST_TABLE_STRIDE;
+            w.column(ui, .{ .height = w.px(@max(64, @min(wanted, @min(320, c.cui_viewport_size(ui).y - 250)))) });
+            c.cui_push_id(ui, w.z(&e.id));
+            if (@import("key_value.zig").view(ui, &e.table, false, "Environment variables", .{})) {
                 app.vars_dirty = true;
                 persist.saveEnv(app, e);
             }
+            c.cui_pop_id(ui);
             w.end(ui);
             w.text(ui, "Use {{name}} in URLs, headers and bodies. Changes save as you type.", .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_MUTED), .width = w.fill });
         },
@@ -117,6 +121,12 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
         return;
     }
     if (w.button(ui, "Cancel", .{ .variant = c.CUI_BUTTON_GHOST })) app.modal_open = false;
+    // Closing a request with edits offers Save beside Discard and Cancel.
+    const closing: ?*@import("../app/tab.zig").Tab = if (modal == .confirm) switch (app.pending) {
+        .close_tab => |t| t,
+        else => null,
+    } else null;
+    var save_close = false;
     const label: []const u8 = switch (modal) {
         .confirm => app.confirm_ok,
         .import_preview => "Import",
@@ -129,8 +139,15 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
         },
         else => "Done",
     };
-    const ok = w.button(ui, label, .{ .variant = if (modal == .confirm) c.CUI_BUTTON_DANGER else c.CUI_BUTTON_PRIMARY });
+    const ok = w.button(ui, label, .{ .variant = if (modal == .confirm) (if (closing != null) c.CUI_BUTTON_OUTLINE else c.CUI_BUTTON_DANGER) else c.CUI_BUTTON_PRIMARY });
+    if (closing != null and w.button(ui, if (closing.?.link == null) "Save as..." else "Save", .{ .variant = c.CUI_BUTTON_PRIMARY })) save_close = true;
     c.cui_dialog_footer_end(ui);
+    if (save_close) {
+        app.modal_open = false;
+        app.pending = .none;
+        commands.saveAndClose(app, closing.?);
+        return;
+    }
     if (ok or submit) {
         app.modal_open = false;
         accept(app, modal);
@@ -188,6 +205,10 @@ fn accept(app: *App, modal: state.Modal) void {
         .save_as => if (app.current()) |t| {
             const parent = app.save_target orelse (if (app.collections.items.len > 0) app.collections.items[0] else tree.newCollection(app, "My collection")) orelse return;
             tree.saveTabAs(app, t, tree.containerOf(parent), app.save_name.text());
+            if (app.close_after_save == t) {
+                app.close_after_save = null;
+                if (!t.dirty and t.link != null) commands.closeNow(app, t);
+            }
         },
         .move_to => if (app.move_node) |n| {
             if (app.save_target) |target| tree.moveTo(app, n, target);

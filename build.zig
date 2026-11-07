@@ -69,6 +69,31 @@ pub fn build(b: *std.Build) void {
     const chrome_run = b.addRunArtifact(chrome_test);
     test_step.dependOn(&chrome_run.step);
     b.step("test-chrome", "Check native title bar theme and modal colors in a hidden window").dependOn(&chrome_run.step);
+    const geometry_test = b.addExecutable(.{ .name = "window-geometry-test", .root_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    }) });
+    geometry_test.root_module.addIncludePath(b.path("src"));
+    geometry_test.root_module.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/include"));
+    geometry_test.root_module.addCSourceFile(.{ .file = b.path("tests/window_geometry.c"), .flags = c_flags });
+    geometry_test.root_module.linkLibrary(cui_lib);
+    const geometry_run = b.addRunArtifact(geometry_test);
+    test_step.dependOn(&geometry_run.step);
+    b.step("test-window-geometry", "Check native placement restoration on a private desktop").dependOn(&geometry_run.step);
+    const control_test = b.addExecutable(.{ .name = "control-styles-test", .root_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    }) });
+    control_test.root_module.addIncludePath(b.path("src"));
+    control_test.root_module.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/include"));
+    control_test.root_module.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/src"));
+    control_test.root_module.addCSourceFile(.{ .file = b.path("tests/control_styles.c"), .flags = c_flags });
+    control_test.root_module.linkLibrary(cui_lib);
+    const control_run = b.addRunArtifact(control_test);
+    test_step.dependOn(&control_run.step);
+    b.step("test-controls", "Check shared tab rendering and keyboard behavior").dependOn(&control_run.step);
     const text_test = b.addExecutable(.{ .name = "text-rendering-test", .root_module = b.createModule(.{
         .target = target,
         .optimize = optimize,
@@ -129,6 +154,7 @@ fn appExecutable(b: *std.Build, name: []const u8, target: std.Build.ResolvedTarg
     exe.root_module.addOptions("build_options", options);
     exe.root_module.linkLibrary(cui_lib);
     exe.root_module.addImport("cui", cui_bindings);
+    if (diagnostics) exe.root_module.addAnonymousImport("response_fixtures", .{ .root_source_file = b.path("tests/fixtures/response/fixtures.zig") });
     exe.root_module.addIncludePath(b.path("src"));
     exe.root_module.addWin32ResourceFile(.{ .file = b.path("assets/kest.rc") });
     exe.subsystem = .windows;

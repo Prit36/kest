@@ -11,6 +11,8 @@ pub const KeyValue = struct {
     enabled: bool = true,
     /// Multipart only: `value` is a path to upload.
     is_file: bool = false,
+    /// Query only: distinguish an explicit empty `name=` from a bare `flag`.
+    has_equals: bool = false,
 };
 
 pub const BodyKind = enum {
@@ -49,7 +51,8 @@ pub const Request = struct {
     description: []const u8 = "",
     method: []const u8 = "GET",
     url: []const u8 = "",
-    /// Disabled rows live here only; enabled rows are also in `url`'s query.
+    /// Editable query rows, including disabled rows and original cell spelling.
+    /// Enabled rows are also represented in `url`'s query.
     params: []const KeyValue = &.{},
     headers: []const KeyValue = &.{},
     body_kind: BodyKind = .none,
@@ -147,7 +150,11 @@ pub const Request = struct {
 
 fn cloneRows(a: Allocator, rows: []const KeyValue) ![]const KeyValue {
     const out = try a.alloc(KeyValue, rows.len);
-    for (rows, out) |r, *o| o.* = .{ .key = try a.dupe(u8, r.key), .value = try a.dupe(u8, r.value), .enabled = r.enabled, .is_file = r.is_file };
+    for (rows, out) |r, *o| {
+        o.* = r;
+        o.key = try a.dupe(u8, r.key);
+        o.value = try a.dupe(u8, r.value);
+    }
     return out;
 }
 
@@ -160,6 +167,7 @@ fn writeRows(s: *std.json.Stringify, name: []const u8, rows: []const KeyValue) !
         try json.field(s, "value", r.value);
         if (!r.enabled) try json.field(s, "enabled", false);
         if (r.is_file) try json.field(s, "file", true);
+        if (r.has_equals and r.value.len == 0) try json.field(s, "hasEquals", true);
         try s.endObject();
     }
     try s.endArray();
@@ -176,6 +184,7 @@ fn parseRows(arena: Allocator, v: ?std.json.Value) ![]const KeyValue {
             .value = try json.dupeStr(arena, item, "value", ""),
             .enabled = json.boolean(item, "enabled") orelse true,
             .is_file = json.boolean(item, "file") orelse false,
+            .has_equals = json.boolean(item, "hasEquals") orelse false,
         });
     }
     return out.items;
@@ -219,4 +228,18 @@ test "missing fields take their defaults" {
     try std.testing.expectEqual(BodyKind.none, r.body_kind);
     try std.testing.expectEqual(@as(usize, 0), r.headers.len);
     try std.testing.expect(r.settings.verify_tls);
+}
+
+test "explicit empty query equals survives clone and file forms with legacy fallback" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const r: Request = .{ .params = &.{ .{ .key = "empty", .has_equals = true }, .{ .key = "flag", .enabled = false } } };
+    const copy = try r.clone(a);
+    try std.testing.expect(copy.params[0].has_equals and !copy.params[1].has_equals);
+    const text = try r.toJson(a);
+    const decoded = try Request.parse(a, try std.json.parseFromSliceLeaky(std.json.Value, a, text, .{}));
+    try std.testing.expect(decoded.params[0].has_equals and !decoded.params[1].has_equals);
+    const old = try Request.parse(a, try std.json.parseFromSliceLeaky(std.json.Value, a, "{\"params\":[{\"key\":\"flag\"},{\"key\":\"invalid\",\"hasEquals\":\"yes\"}]}", .{}));
+    try std.testing.expect(!old.params[0].has_equals and !old.params[1].has_equals);
 }

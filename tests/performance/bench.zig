@@ -283,6 +283,32 @@ fn history(gpa: Allocator, count: *Counting, io: Io) !void {
     line("added                  {d:>9.1} ms  {d} kept, {d:.2} MiB held", .{ ms, h.entries.items.len, mib(count.live.load(.monotonic) - before) });
 }
 
+/// How long a Postman import blocks the UI thread: detect, then parse, which
+/// is what the import preview does before it opens.
+fn importing(gpa: Allocator, io: Io, requests: usize) !void {
+    var text: std.ArrayList(u8) = .empty;
+    defer text.deinit(gpa);
+    try text.appendSlice(gpa, "{\"info\":{\"name\":\"Bench\",\"schema\":\"https://schema.getpostman.com/json/collection/v2.1.0/collection.json\"},\"item\":[");
+    const folders = 50;
+    for (0..folders) |f| {
+        if (f > 0) try text.append(gpa, ',');
+        try text.print(gpa, "{{\"name\":\"Folder {d}\",\"item\":[", .{f});
+        for (0..requests / folders) |r| {
+            if (r > 0) try text.append(gpa, ',');
+            try text.print(gpa, "{{\"name\":\"Request {d}-{d}\",\"request\":{{\"method\":\"POST\",\"header\":[{{\"key\":\"Content-Type\",\"value\":\"application/json\"}},{{\"key\":\"Authorization\",\"value\":\"Bearer {{{{token}}}}\"}}],\"url\":{{\"raw\":\"{{{{base_url}}}}/v1/items/{d}?page=1&limit=50\"}},\"body\":{{\"mode\":\"raw\",\"raw\":\"{{\\\"name\\\":\\\"item {d}\\\",\\\"tags\\\":[\\\"a\\\",\\\"b\\\",\\\"c\\\"],\\\"active\\\":true,\\\"count\\\":{d}}}\"}}}}}}", .{ f, r, r, r, r });
+        }
+        try text.appendSlice(gpa, "]}");
+    }
+    try text.appendSlice(gpa, "]}");
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const t = Clock.begin(io);
+    const format = lib.doc.detect(arena.allocator(), text.items);
+    const d = try lib.postman.importCollection(arena.allocator(), text.items);
+    const ms = t.ms();
+    line("{d:>6} requests {d:>6.1} MiB {d:>9.1} ms  format {s}, {d} requests read", .{ requests, mib(text.items.len), ms, @tagName(format), d.countRequests() });
+}
+
 extern "kernel32" fn K32GetProcessMemoryInfo(process: std.os.windows.HANDLE, counters: *ProcessMemory, size: u32) callconv(.winapi) i32;
 const ProcessMemory = extern struct {
     cb: u32 = @sizeOf(ProcessMemory),
@@ -320,5 +346,7 @@ pub fn main(init: std.process.Init) !void {
     try json(gpa, &count, io, 64);
     try network(gpa, &count, io, dir);
     try history(gpa, &count, io);
+    line("\n## Postman import on the UI thread (detect + parse)", .{});
+    for ([_]usize{ 2_000, 20_000 }) |n| try importing(gpa, io, n);
     peakWorkingSet();
 }

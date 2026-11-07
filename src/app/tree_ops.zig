@@ -171,9 +171,19 @@ pub fn reorder(app: *App, n: *Node, delta: i32) void {
 
 /// Into another folder or collection; the files follow if the collection changes.
 pub fn moveTo(app: *App, n: *Node, target: *Node) void {
+    moveAt(app, n, target, target.children.items.len);
+}
+
+/// Into `target` at child position `index` (counted before `n` is removed),
+/// as drag reordering drops it. Dropping an item where it already is does
+/// nothing and writes nothing.
+pub fn moveAt(app: *App, n: *Node, target: *Node, index: usize) void {
+    if (n.parent == target) if (n.indexInParent()) |at| {
+        if (index == at or index == at + 1) return;
+    };
     const from = n.root();
     const to = target.root();
-    col.move(app.gpa, n, target, target.children.items.len) catch |e| {
+    col.move(app.gpa, n, target, index) catch |e| {
         app.toast(.warning, "Can't move there", switch (e) {
             error.IntoItself => "A folder can't go inside itself.",
             error.BadTarget => "Only folders and collections can hold it.",

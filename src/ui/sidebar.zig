@@ -13,6 +13,83 @@ var revealed_request: u64 = 0;
 var revealed_link: col.Id = @splat(0);
 var active_link: col.Id = @splat(0);
 var reveal_pending = false;
+/// The revealed row still needs scrolling into view (kept until the tree has
+/// been laid out, which can be a frame after the sidebar first appears).
+var scroll_pending = false;
+const row_height = 30;
+var actions_open: ?*col.Node = null;
+/// Rows that drew their actions button in the last frame (hovered,
+/// selected, menu open); at most a few at once.
+var actions_shown: [4]?*col.Node = @splat(null);
+
+/// Drag reordering in the collection tree. A press on a folder or request row
+/// becomes a drag only after the pointer travels a few pixels, so ordinary
+/// clicks never move anything; Escape cancels until the button is released.
+pub const Drop = struct { target: *col.Node, index: usize, where: c_int };
+var press: ?struct { node: *col.Node, x: f32, y: f32 } = null;
+var dragging = false;
+var drag_cancelled = false;
+var was_down = false;
+var drop: ?Drop = null;
+const drag_threshold = 5;
+pub fn pressedNode() ?*col.Node {
+    return if (press) |p| p.node else null;
+}
+pub fn dragActive() bool {
+    return dragging;
+}
+pub fn dropTarget() ?Drop {
+    return drop;
+}
+var tree_scroll: f32 = 0;
+/// The collection tree's scroll offset in the last frame (for tests).
+pub fn treeScroll() f32 {
+    return tree_scroll;
+}
+
+/// Where `dragged` would land when released over `row` at `fraction` of its
+/// height (0 top, 1 bottom); null for a drop that is invalid or a no-op.
+pub fn dropFor(dragged: *col.Node, row: *col.Node, fraction: f32) ?Drop {
+    if (row == dragged or dragged.contains(row)) return null;
+    const open_container = row.kind != .request and row.expanded and row.children.items.len > 0;
+    const result: Drop = switch (row.kind) {
+        // Collections are roots: everything dropped on one goes inside it.
+        .collection => if (open_container and fraction > 0.5)
+            .{ .target = row, .index = 0, .where = 2 }
+        else
+            .{ .target = row, .index = row.children.items.len, .where = 1 },
+        .folder => if (fraction < 0.25)
+            beside(row, 0)
+        else if (fraction > 0.75 and open_container)
+            .{ .target = row, .index = 0, .where = 2 }
+        else if (fraction > 0.75)
+            beside(row, 1)
+        else
+            .{ .target = row, .index = row.children.items.len, .where = 1 },
+        .request => beside(row, if (fraction < 0.5) 0 else 1),
+    };
+    if (result.target.kind == .request or dragged.contains(result.target)) return null;
+    if (dragged.parent == result.target) if (dragged.indexInParent()) |at| {
+        if (result.index == at or result.index == at + 1) return null;
+    };
+    return result;
+}
+fn beside(row: *col.Node, after: usize) Drop {
+    const parent = row.parent.?;
+    const at = row.indexInParent() orelse 0;
+    return .{ .target = parent, .index = at + after, .where = if (after == 0) 0 else 2 };
+}
+
+/// Rows whose names showed a tinted search match in the last frame.
+var highlighted: usize = 0;
+pub fn highlightedRows() usize {
+    return highlighted;
+}
+
+pub fn rowActionsShown(n: *const col.Node) bool {
+    for (actions_shown) |shown| if (shown == n) return true;
+    return false;
+}
 
 pub fn reveal(app: *App, node: *col.Node) void {
     app.filter.clear();
@@ -23,15 +100,16 @@ pub fn reveal(app: *App, node: *col.Node) void {
     revealed_link = node.id;
     revealed_request = if (app.current()) |t| t.uid else 0;
     reveal_pending = true;
+    scroll_pending = true;
 }
 
 pub fn view(ui: *c.cui_ctx, app: *App) void {
     const size = c.cui_viewport_size(ui);
-    w.column(ui, .{ .id = "collection-browser", .width = w.fill, .height = if (size.x < 840) w.px(@max(200, size.y - 120)) else w.fill, .bg = @import("design.zig").sidebar(), .clip = true });
+    w.column(ui, .{ .id = "collection-browser", .width = w.fill, .height = if (size.x < w.design.geometry.sidebar_sheet) w.px(@max(200, size.y - 120)) else w.fill, .bg = @import("design.zig").sidebar(), .clip = true });
     defer w.end(ui);
-    w.row(ui, .{ .height = w.px(38), .pad_left = 4, .pad_right = 6, .width = w.fill });
+    w.row(ui, .{ .id = "sidebar-toolbar", .height = w.px(38), .pad_left = 4, .pad_right = 6, .width = w.fill });
     const titles = [_][]const u8{ "Collections", "History", "Environments" };
-    if (w.menu(ui, titles[@intCast(@backingInt(app.mode))], 0, w.color(c.CUI_TOKEN_FOREGROUND))) {
+    if (w.menu(ui, w.fmt("{s}###sidebar-navigation", .{titles[@intCast(@backingInt(app.mode))]}), 0, w.color(c.CUI_TOKEN_FOREGROUND))) {
         for (titles, 0..) |title, i| {
             if (c.cui_menu_item_ex(ui, w.z(title), &.{ .checked = @backingInt(app.mode) == i })) app.mode = @fromBackingInt(@intCast(i));
         }
@@ -50,39 +128,27 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
             app.modal = .import_curl;
             app.modal_open = true;
         }
-        if (w.menuItem(ui, "New collection")) dialogs.askName(app, .new_collection, "");
         c.cui_menu_end(ui);
     }
     w.end(ui);
-    c.cui_separator(ui);
+    w.separator(ui, "sidebar-toolbar-boundary");
     switch (app.mode) {
         .collections => collections(ui, app),
         .history => history(ui, app),
         .environments => environments(ui, app),
     }
-    c.cui_separator(ui);
-    w.row(ui, .{ .height = w.px(34), .width = w.fill, .pad_x = 6 });
-    if (w.action(ui, "browse-collections", "", c.CUI_ICON_FOLDER, app.mode == .collections, 26, 28, 3)) app.mode = .collections;
-    c.cui_tooltip(ui, "Collections");
-    if (w.action(ui, "browse-history", "", c.CUI_ICON_HISTORY, app.mode == .history, 26, 28, 3)) app.mode = .history;
-    c.cui_tooltip(ui, "Request history");
-    if (w.action(ui, "browse-environments", "", c.CUI_ICON_DATABASE, app.mode == .environments, 26, 28, 3)) app.mode = .environments;
-    c.cui_tooltip(ui, "Environments");
-    c.cui_spacer(ui);
-    if (c.kest_dropdown_begin(ui, "Import", &.{ .icon = c.CUI_ICON_DOWNLOAD, .variant = c.CUI_BUTTON_GHOST, .placement = c.CUI_PLACE_TOP_END })) {
-        if (w.menuItem(ui, "Import file...")) imports.chooseFile(app);
-        if (w.menuItem(ui, "Import cURL...")) {
-            app.modal = .import_curl;
-            app.modal_open = true;
-        }
-        c.cui_menu_end(ui);
-    }
-    w.end(ui);
 }
 
 fn collections(ui: *c.cui_ctx, app: *App) void {
     w.column(ui, .{ .pad_x = 10, .pad_y = 8 });
-    if (w.field(ui, "collection-filter", &app.filter, .{ .placeholder = "Find a request...", .icon = c.CUI_ICON_SEARCH, .size = c.CUI_SIZE_SM })) {
+    var filter_changed = w.field(ui, "collection-filter", &app.filter, .{ .placeholder = "Search requests", .icon = c.CUI_ICON_SEARCH, .size = c.CUI_SIZE_SM });
+    c.cui_tooltip(ui, "Filter by request, folder or collection name (Esc clears)");
+    // Escape clears an active search while the field keeps focus.
+    if (app.filter.len > 0 and c.kest_focus_within(ui, "collection-filter") and c.cui_key_pressed(ui, c.CUI_KEY_ESCAPE)) {
+        app.filter.clear();
+        filter_changed = true;
+    }
+    if (filter_changed) {
         app.rows_dirty = true;
         c.kest_collection_top(ui, "collection-rows");
         if (app.filter.len == 0) revealed_request = 0;
@@ -100,6 +166,7 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
                     active_link = link.request;
                     revealed_link = link.request;
                     reveal_pending = true;
+                    scroll_pending = true;
                     break;
                 }
             };
@@ -119,6 +186,7 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
     const stack = allocator.alloc(c_int, rows.len + 1) catch return;
     @memset(stack, -1);
     var cursor: c_int = -1;
+    var reveal_index: c_int = -1;
     for (rows, 0..) |r, i| {
         const depth: usize = @min(r.depth, rows.len);
         const parent = if (depth > 0) stack[depth - 1] else -1;
@@ -135,12 +203,16 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
             nodes[@intCast(parent)].first_child = @intCast(i);
         stack[depth] = @intCast(i);
         if (depth + 1 < stack.len) stack[depth + 1] = -1;
+        if (scroll_pending and std.mem.eql(u8, &r.node.id, &revealed_link)) reveal_index = @intCast(i);
         if (reveal_pending and std.mem.eql(u8, &r.node.id, &revealed_link)) {
             cursor = @intCast(i);
             app.selected = r.node;
             nodes[i].flags |= c.CUI_TREE_SELECTED;
         }
     }
+    // A revealed request (breadcrumb, switching tabs) is scrolled into view;
+    // CUI only follows cursor changes it already knew about.
+    if (scroll_pending and c.kest_collection_reveal(ui, "collection-rows", reveal_index, row_height)) scroll_pending = false;
     const columns = [_]c.cui_grid_column{
         // One flexible column avoids CUI caching the first frame's sidebar
         // width and assigning spare space to the actions column on resize.
@@ -149,24 +221,81 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
     c.cui_tree_table_begin_ex(ui, "collection-rows", &columns, columns.len, nodes.ptr, @intCast(nodes.len), &.{
         .height = w.fill,
         .width = w.fill,
-        .row_height = 30,
+        .row_height = row_height,
         .guides = true,
         .cursor = &cursor,
     });
     c.kest_collection_style(ui, "collection-rows", @import("design.zig").sidebar());
+    // Row actions appear for the hovered or selected row, and stay while that
+    // row's menu is open. Right-click works on every row.
+    const menu_owner = actions_open;
+    actions_open = null;
+    actions_shown = @splat(null);
+    highlighted = 0;
+    const query = std.mem.trim(u8, app.filter.text(), " ");
+    // Drag state: reordering is off while filtering (rows then hide parts
+    // of the hierarchy) and while a dialog or popup owns the pointer.
+    const mouse = c.cui_mouse_pos(ui);
+    const down = c.cui_mouse_down(ui, c.CUI_MOUSE_LEFT);
+    const pressed = down and !was_down;
+    was_down = down;
+    const can_drag = app.filter.len == 0 and !app.modal_open and !app.palette_open and menu_owner == null;
+    if (!down) {
+        if (dragging and !drag_cancelled) if (press) |p| if (drop) |d| {
+            tree.moveAt(app, p.node, d.target, d.index);
+            app.rows_dirty = true;
+        };
+        press = null;
+        dragging = false;
+        drag_cancelled = false;
+    } else if (press) |p| {
+        if (!can_drag or drag_cancelled) {
+            dragging = false;
+        } else if (!dragging and (@abs(mouse.x - p.x) > drag_threshold or @abs(mouse.y - p.y) > drag_threshold)) {
+            dragging = true;
+        }
+    }
+    if (dragging and c.cui_key_pressed(ui, c.CUI_KEY_ESCAPE)) {
+        dragging = false;
+        drag_cancelled = true;
+    }
+    drop = null;
+    c.kest_collection_drop_clear();
+    var shown_count: usize = 0;
     while (true) {
         const index = c.cui_tree_table_row(ui);
         if (index < 0) break;
         const n = rows[@intCast(index)].node;
         const icon = if (n.kind == .request) c.CUI_ICON_FILE else if (n.kind == .collection) c.CUI_ICON_BOX else c.CUI_ICON_FOLDER;
-        c.kest_collection_name(ui, w.z(n.name), if (n.kind == .request) w.z(n.method) else null, icon, w.methodColor(n.method));
+        // Tint the matched part of the name while searching (case-insensitive,
+        // like the filter itself); method-only matches leave the name plain.
+        const match: ?usize = if (query.len > 0) std.ascii.findIgnoreCase(n.name, query) else null;
+        c.kest_collection_name(ui, w.z(n.name), if (n.kind == .request) w.z(n.method) else null, icon, w.methodColor(n.method), if (match) |m| @intCast(m) else -1, if (match != null) @intCast(query.len) else 0);
+        if (match != null and c.kest_collection_name_marked(ui)) highlighted += 1;
+        const rect = c.kest_collection_row_rect(ui);
+        const over = rect.h > 0 and mouse.x >= rect.x and mouse.x < rect.x + rect.w and mouse.y >= rect.y and mouse.y < rect.y + rect.h;
+        // A press on the actions button opens its menu instead of dragging.
+        if (over and pressed and can_drag and n.kind != .collection and mouse.x < rect.x + rect.w - 34)
+            press = .{ .node = n, .x = mouse.x, .y = mouse.y };
+        if (over and dragging) if (press) |p| {
+            drop = dropFor(p.node, n, (mouse.y - rect.y) / rect.h);
+            if (drop) |d| c.kest_collection_drop(ui, d.where);
+        };
+        c.cui_tooltip(ui, if (n.kind == .request) w.fmt("{s} {s}", .{ n.method, n.name }) else w.z(n.name));
+        const hot = c.kest_collection_row_hot(ui) or app.selected == n or menu_owner == n;
         c.cui_push_id(ui, w.z(&n.id));
         if (c.cui_context_menu_begin(ui, "node-menu")) {
             nodeMenu(ui, app, n);
             c.cui_context_menu_end(ui);
         }
+        // The slot is reserved on every row so names never shift on hover.
         w.column(ui, .{ .id = "collection-item-actions", .width = w.px(28), .height = w.px(28) });
-        if (c.kest_dropdown_begin(ui, "Item actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .variant = c.CUI_BUTTON_GHOST, .placement = c.CUI_PLACE_BOTTOM_END })) {
+        if (hot and shown_count < actions_shown.len) {
+            actions_shown[shown_count] = n;
+            shown_count += 1;
+        }
+        if (hot and c.kest_dropdown_begin(ui, "Item actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .variant = c.CUI_BUTTON_GHOST, .placement = c.CUI_PLACE_BOTTOM_END })) {
+            actions_open = n;
             nodeMenu(ui, app, n);
             c.cui_menu_end(ui);
         }
@@ -175,6 +304,18 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
     }
     const events = c.cui_tree_table_end(ui);
     reveal_pending = false;
+    // Autoscroll while dragging near the top or bottom edge, faster nearer it.
+    if (dragging) {
+        const area = c.cui_get_rect(ui, c.cui_make_id(ui, "collection-rows"));
+        const edge: f32 = 32;
+        const top = area.y + edge - mouse.y;
+        const bottom = mouse.y - (area.y + area.h - edge);
+        if (area.h > edge * 2 and mouse.x >= area.x and mouse.x < area.x + area.w) {
+            if (top > 0) c.kest_collection_scroll_by(ui, "collection-rows", -@min(top, edge) / 2);
+            if (bottom > 0) c.kest_collection_scroll_by(ui, "collection-rows", @min(bottom, edge) / 2);
+        }
+    }
+    tree_scroll = c.kest_collection_scroll_y(ui, "collection-rows");
     for (rows, nodes) |r, node| {
         if (app.filter.len == 0 and r.node.expanded != (node.flags & c.CUI_TREE_OPEN != 0)) {
             r.node.expanded = node.flags & c.CUI_TREE_OPEN != 0;

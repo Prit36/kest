@@ -33,16 +33,55 @@ pub fn parseParams(a: Allocator, url: []const u8) ![]KeyValue {
     const q = split(url).query;
     var out: std.ArrayList(KeyValue) = .empty;
     if (q.len == 0) return out.items;
-    var it = std.mem.splitScalar(u8, q, '&');
-    while (it.next()) |pair| {
+    var start: usize = 0;
+    while (start < q.len) {
+        const end = queryDelimiter(q, start, '&') orelse q.len;
+        const pair = q[start..end];
+        start = end + 1;
         if (pair.len == 0) continue;
-        const eq = std.mem.indexOfScalar(u8, pair, '=');
+        const eq = queryDelimiter(pair, 0, '=');
         try out.append(a, .{
             .key = try a.dupe(u8, if (eq) |e| pair[0..e] else pair),
             .value = try a.dupe(u8, if (eq) |e| pair[e + 1 ..] else ""),
+            .has_equals = eq != null,
         });
     }
     return out.items;
+}
+
+fn queryDelimiter(s: []const u8, start: usize, delimiter: u8) ?usize {
+    var i = start;
+    while (i < s.len) : (i += 1) {
+        if (std.mem.startsWith(u8, s[i..], "{{")) {
+            if (std.mem.indexOfPos(u8, s, i + 2, "}}")) |end| {
+                i = end + 1;
+                continue;
+            }
+        }
+        if (s[i] == delimiter) return i;
+    }
+    return null;
+}
+
+fn queryComponent(a: Allocator, out: *std.ArrayList(u8), value: []const u8, key: bool) !void {
+    var i: usize = 0;
+    while (i < value.len) : (i += 1) {
+        if (std.mem.startsWith(u8, value[i..], "{{")) {
+            if (std.mem.indexOfPos(u8, value, i + 2, "}}")) |end| {
+                try out.appendSlice(a, value[i .. end + 2]);
+                i = end + 1;
+                continue;
+            }
+        }
+        // Preserve existing escapes, plus signs and allowed query characters.
+        // Protect query/fragment structure and literal percent signs; normal
+        // request preparation still escapes spaces and non-ASCII characters.
+        const ch = value[i];
+        const valid_escape = ch == '%' and i + 2 < value.len and std.ascii.isHex(value[i + 1]) and std.ascii.isHex(value[i + 2]);
+        if (ch == '&' or ch == '#' or (key and ch == '=') or (ch == '%' and !valid_escape)) {
+            try out.print(a, "%{X:0>2}", .{ch});
+        } else try out.append(a, ch);
+    }
 }
 
 /// `url` with its query made of the enabled rows (fragment kept).
@@ -53,13 +92,13 @@ pub fn withParams(a: Allocator, url: []const u8, params: []const KeyValue) ![]u8
     try out.appendSlice(a, s.base);
     var first = true;
     for (params) |p| {
-        if (!p.enabled or (p.key.len == 0 and p.value.len == 0)) continue;
+        if (!p.enabled or (p.key.len == 0 and p.value.len == 0 and !p.has_equals)) continue;
         try out.append(a, if (first) '?' else '&');
         first = false;
-        try out.appendSlice(a, p.key);
-        if (p.value.len > 0) {
+        try queryComponent(a, &out, p.key, true);
+        if (p.value.len > 0 or p.has_equals) {
             try out.append(a, '=');
-            try out.appendSlice(a, p.value);
+            try queryComponent(a, &out, p.value, false);
         }
     }
     if (s.fragment.len > 0) {
@@ -351,6 +390,29 @@ test "withParams rewrites the query alone" {
     });
     defer a.free(out);
     try t.expectEqualStrings("http://h/p?a=1&dup=x&dup=y&flag#frag", out);
+}
+
+test "query editing protects separators and preserves encoded spelling, repeats and empty equals" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const source = "https://h/p?dup=one&dup=two&flag&empty=&encoded=%2f+%26&=value&=#fragment";
+    const rows = try parseParams(a, source);
+    try t.expectEqualStrings(source, try withParams(a, source, rows));
+    try t.expect(!rows[2].has_equals and rows[3].has_equals);
+    try t.expectEqualStrings("https://h/p?a%3Db%26c%23d=x%26y%23z=ok&encoded=%2f+%26&off=#fragment", try withParams(a, "https://h/p#fragment", &.{
+        .{ .key = "a=b&c#d", .value = "x&y#z=ok" },
+        .{ .key = "encoded", .value = "%2f+%26" },
+        .{ .key = "off", .value = "", .has_equals = true },
+        .{ .key = "disabled", .value = "keep", .enabled = false },
+    }));
+    const template = "{{base}}/p?{{a=b&c#d}}={{x&y=z}}&second={{two}}#frag";
+    const templated = try parseParams(a, template);
+    try t.expectEqual(@as(usize, 2), templated.len);
+    try t.expectEqualStrings("{{a=b&c#d}}", templated[0].key);
+    try t.expectEqualStrings("{{x&y=z}}", templated[0].value);
+    try t.expectEqualStrings(template, try withParams(a, template, templated));
+    try t.expectEqualStrings("https://h/?percent=100%25-%25xy-%25f-%2f", try withParams(a, "https://h/", &.{.{ .key = "percent", .value = "100%-%xy-%f-%2f" }}));
 }
 
 test "encode and decode" {

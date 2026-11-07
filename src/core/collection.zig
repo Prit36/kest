@@ -162,20 +162,23 @@ fn anyMatch(n: *const Node, query: []const u8) bool {
 /// matches and the folders around it, open.
 pub fn flatten(a: Allocator, roots: []const *Node, query: []const u8, out: *std.ArrayList(Row)) !void {
     out.clearRetainingCapacity();
-    for (roots) |r| try flattenInto(a, r, 0, query, out);
+    for (roots) |r| try flattenInto(a, r, 0, query, false, out);
 }
 
-fn flattenInto(a: Allocator, n: *Node, depth: u16, query: []const u8, out: *std.ArrayList(Row)) Allocator.Error!void {
-    if (query.len > 0 and !anyMatch(n, query)) return;
-    try out.append(a, .{ .node = n, .depth = depth });
-    if (query.len > 0 and matches(n, query) and n.kind != .request) {
-        // A matching folder shows what's in it, by its own open state.
-        if (!n.expanded) return;
-        for (n.children.items) |c| try flattenInto(a, c, depth + 1, "", out);
+/// `inside_match`: an ancestor folder matched the query, so everything below
+/// it is listed. The tree draws every row open while filtering; listing only
+/// the expanded parts would show open folders with nothing in them.
+fn flattenInto(a: Allocator, n: *Node, depth: u16, query: []const u8, inside_match: bool, out: *std.ArrayList(Row)) Allocator.Error!void {
+    if (inside_match) {
+        try out.append(a, .{ .node = n, .depth = depth });
+        for (n.children.items) |c| try flattenInto(a, c, depth + 1, query, true, out);
         return;
     }
+    if (query.len > 0 and !anyMatch(n, query)) return;
+    try out.append(a, .{ .node = n, .depth = depth });
+    const listed = query.len > 0 and matches(n, query) and n.kind != .request;
     if (query.len == 0 and !n.expanded) return;
-    for (n.children.items) |c| try flattenInto(a, c, depth + 1, query, out);
+    for (n.children.items) |c| try flattenInto(a, c, depth + 1, query, listed, out);
 }
 
 const t = std.testing;
@@ -270,4 +273,23 @@ test "ids" {
     try t.expect(validId(&id));
     try t.expect(!validId("../../etc/passwd"));
     try t.expect(!validId("ABCDEF0123456789"));
+}
+
+test "a matching folder lists everything inside it while filtering" {
+    const a = t.allocator;
+    const c = try fixture(a);
+    defer destroy(a, c);
+    const users = c.children.items[0];
+    const nested = try create(a, newId(t.io), .folder, "Admin", "");
+    try append(a, users, nested);
+    try append(a, nested, try create(a, newId(t.io), .request, "Audit log", "GET"));
+    users.expanded = false;
+    nested.expanded = false;
+    var rows: std.ArrayList(Row) = .empty;
+    defer rows.deinit(a);
+    try flatten(a, &.{c}, "users", &rows);
+    // API, Users, List users, Create user, Admin, Audit log
+    try t.expectEqual(@as(usize, 6), rows.items.len);
+    try t.expectEqualStrings("Audit log", rows.items[5].node.name);
+    try t.expectEqual(@as(u16, 3), rows.items[5].depth);
 }

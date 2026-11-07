@@ -13,6 +13,8 @@ pub const Index = struct {
     lines: std.ArrayList(u32) = .empty,
     longest: usize = 0,
     wrap_at: usize = default_wrap,
+    /// Soft wrapping prefers whitespace and budgets a tab as two cells.
+    prefer_words: bool = false,
 
     const continued: u32 = 1 << 31;
 
@@ -22,9 +24,18 @@ pub const Index = struct {
     }
 
     pub fn build(x: *Index, a: Allocator, text: []const u8) !void {
+        return x.buildLimited(a, text, std.math.maxInt(usize));
+    }
+
+    pub fn buildLimited(x: *Index, a: Allocator, text: []const u8, max_rows: usize) !void {
         x.starts.clearRetainingCapacity();
         x.lines.clearRetainingCapacity();
         x.longest = 0;
+        errdefer {
+            x.starts.clearRetainingCapacity();
+            x.lines.clearRetainingCapacity();
+            x.longest = 0;
+        }
         var at: usize = 0;
         var line: u32 = 0;
         while (true) {
@@ -32,11 +43,28 @@ pub const Index = struct {
             var start = at;
             var first = true;
             while (true) {
+                if (x.starts.items.len >= max_rows) return error.TooManyRows;
                 try x.starts.append(a, @intCast(start));
                 try x.lines.append(a, if (first) line else line | continued);
                 first = false;
-                if (nl - start <= x.wrap_at) break;
-                var cut = start + x.wrap_at;
+                const limit = @max(4, x.wrap_at);
+                if (nl - start <= limit and !x.prefer_words) break;
+                var cut = @min(nl, start + limit);
+                if (x.prefer_words) {
+                    var budget: usize = 0;
+                    cut = start;
+                    var space: ?usize = null;
+                    while (cut < nl) {
+                        const cost: usize = if (text[cut] == '\t') 2 else 1;
+                        if (budget + cost > limit) break;
+                        budget += cost;
+                        cut += 1;
+                        if (text[cut - 1] == ' ' or text[cut - 1] == '\t') space = cut;
+                    }
+                    if (cut == nl) break;
+                    if (space) |word_end| cut = word_end;
+                }
+                if (cut == nl) break;
                 while (cut > start and (text[cut] & 0xc0) == 0x80) cut -= 1;
                 x.longest = @max(x.longest, cut - start);
                 start = cut;
@@ -62,7 +90,10 @@ pub const Index = struct {
         const start: usize = x.starts.items[i];
         const next = if (i + 1 < x.starts.items.len) x.starts.items[i + 1] else text.len;
         var end: usize = next;
-        if (i + 1 < x.starts.items.len and !x.isContinued(i + 1) and end > start) end -= 1;
+        if (i + 1 < x.starts.items.len and !x.isContinued(i + 1) and end > start) {
+            end -= 1;
+            if (end > start and text[end - 1] == '\r') end -= 1;
+        }
         return .{ start, @max(start, end) };
     }
 
@@ -133,4 +164,22 @@ test "long lines wrap, on character boundaries" {
     var total: usize = 0;
     for (0..x.count()) |i| total += x.row(s, i).len;
     try t.expectEqual(s.len - 1, total);
+}
+
+test "soft wrapping prefers words and never splits UTF-8 or changes bytes" {
+    var x: Index = .{ .wrap_at = 10, .prefer_words = true };
+    defer x.deinit(t.allocator);
+    const source = "one two three\t\u{e9}\u{1f642}abcdefghijk\n";
+    try x.build(t.allocator, source);
+    try t.expectEqualStrings("one two ", x.row(source, 0));
+    var bytes: usize = 0;
+    for (0..x.count()) |i| {
+        const row = x.row(source, i);
+        try t.expect(std.unicode.utf8ValidateSlice(row));
+        bytes += row.len;
+    }
+    try t.expectEqual(source.len - 1, bytes);
+    x.wrap_at = 1;
+    try x.build(t.allocator, "\u{1f642}\u{1f642}");
+    try t.expectEqual(@as(usize, 2), x.count());
 }

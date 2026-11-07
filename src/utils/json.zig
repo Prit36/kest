@@ -63,12 +63,33 @@ pub fn nextToken(s: []const u8, start: usize) Token {
     if (one) |k| return .{ .kind = k, .start = i, .end = i + 1 };
     if (s[i] == '"') {
         var j = i + 1;
-        while (j < s.len) : (j += 1) {
+        while (j < s.len) {
             switch (s[j]) {
                 '"' => return .{ .kind = .string, .start = i, .end = j + 1 },
-                '\\' => j += 1,
-                '\n' => return .{ .kind = .invalid, .start = i, .end = j },
-                else => {},
+                '\\' => {
+                    j += 1;
+                    if (j >= s.len) break;
+                    switch (s[j]) {
+                        '"', '\\', '/', 'b', 'f', 'n', 'r', 't' => j += 1,
+                        'u' => {
+                            if (s.len - j < 5) break;
+                            for (s[j + 1 .. j + 5]) |hex| if (!std.ascii.isHex(hex))
+                                return .{ .kind = .invalid, .start = i, .end = j + 5 };
+                            j += 5;
+                        },
+                        else => return .{ .kind = .invalid, .start = i, .end = j + 1 },
+                    }
+                },
+                0...0x1f => return .{ .kind = .invalid, .start = i, .end = j + 1 },
+                else => {
+                    if (s[j] < 0x80) {
+                        j += 1;
+                    } else {
+                        const len = std.unicode.utf8ByteSequenceLength(s[j]) catch return .{ .kind = .invalid, .start = i, .end = j + 1 };
+                        if (s.len - j < len or !std.unicode.utf8ValidateSlice(s[j .. j + len])) return .{ .kind = .invalid, .start = i, .end = j + 1 };
+                        j += len;
+                    }
+                },
             }
         }
         return .{ .kind = .invalid, .start = i, .end = s.len };
@@ -138,7 +159,7 @@ const Expect = enum { value, value_or_close, key_or_close, key, colon, comma_or_
 /// Null when `s` is one well-formed JSON document; else where it first isn't.
 /// `visit`, if given, sees each token as it's accepted (format and minify).
 pub fn check(s: []const u8, visitor: anytype) ?Problem {
-    var stack: [max_depth / 8]u8 = undefined; // one bit per level: 1 is an object
+    var stack: [max_depth / 8]u8 = @splat(0); // one bit per level: 1 is an object
     var depth: usize = 0;
     var expect: Expect = .value;
     var i: usize = 0;
@@ -151,7 +172,7 @@ pub fn check(s: []const u8, visitor: anytype) ?Problem {
                 if (expect == .end) return null;
                 return problemAt(s, s.len, if (s.len == 0) "Empty document" else "Unexpected end of JSON");
             },
-            .invalid => return problemAt(s, t.start, if (t.start < s.len and s[t.start] == '"') "Unterminated string" else "Invalid token"),
+            .invalid => return problemAt(s, t.start, if (t.start < s.len and s[t.start] == '"') "Invalid or unterminated string" else "Invalid token"),
             .lbrace, .lbracket => {
                 if (expect != .value and expect != .value_or_close) return problemAt(s, t.start, unexpected(expect));
                 if (depth >= max_depth) return problemAt(s, t.start, "Nested too deeply");
@@ -208,19 +229,38 @@ const Formatter = struct {
     indent: usize,
     level: usize = 0,
     fresh: bool = false, // just opened a container
+    limit: usize,
+    failure: ?anyerror = null,
+
+    fn room(f: *Formatter, count: usize) !void {
+        if (count > f.limit - f.out.items.len) return error.OutputTooLarge;
+    }
+
+    fn append(f: *Formatter, text: []const u8) !void {
+        try f.room(text.len);
+        try f.out.appendSlice(f.a, text);
+    }
 
     fn newline(f: *Formatter) !void {
+        try f.room(1 + f.level * f.indent);
         try f.out.append(f.a, '\n');
         try f.out.appendNTimes(f.a, ' ', f.level * f.indent);
     }
 
     fn token(f: *Formatter, s: []const u8, t: Token) !void {
+        f.writeToken(s, t) catch |err| {
+            f.failure = err;
+            return err;
+        };
+    }
+
+    fn writeToken(f: *Formatter, s: []const u8, t: Token) !void {
         const text = s[t.start..t.end];
-        if (f.indent == 0) return f.out.appendSlice(f.a, text);
+        if (f.indent == 0) return f.append(text);
         switch (t.kind) {
             .lbrace, .lbracket => {
                 if (f.fresh) try f.newline();
-                try f.out.appendSlice(f.a, text);
+                try f.append(text);
                 f.level += 1;
                 f.fresh = true;
             },
@@ -229,17 +269,17 @@ const Formatter = struct {
                 // {} and [] stay on one line.
                 if (!f.fresh) try f.newline();
                 f.fresh = false;
-                try f.out.appendSlice(f.a, text);
+                try f.append(text);
             },
             .comma => {
-                try f.out.append(f.a, ',');
+                try f.append(",");
                 try f.newline();
             },
-            .colon => try f.out.appendSlice(f.a, ": "),
+            .colon => try f.append(": "),
             else => {
                 if (f.fresh) try f.newline();
                 f.fresh = false;
-                try f.out.appendSlice(f.a, text);
+                try f.append(text);
             },
         }
     }
@@ -249,11 +289,19 @@ pub const FormatResult = union(enum) { ok: []u8, problem: Problem };
 
 /// `s` re-indented (`indent` spaces), or minified when `indent` is 0.
 pub fn format(a: Allocator, s: []const u8, indent: usize) !FormatResult {
+    return formatLimited(a, s, indent, std.math.maxInt(usize));
+}
+
+/// Bounds output expansion, including deeply nested indentation. Partial
+/// output is discarded on allocation/limit failure; source bytes stay intact.
+pub fn formatLimited(a: Allocator, s: []const u8, indent: usize, max_output: usize) !FormatResult {
+    if (indent > 16) return error.InvalidIndent;
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
-    try out.ensureTotalCapacity(a, s.len + s.len / 4);
-    var f: Formatter = .{ .out = &out, .a = a, .indent = indent };
+    try out.ensureTotalCapacity(a, @min(max_output, s.len +| s.len / 4));
+    var f: Formatter = .{ .out = &out, .a = a, .indent = indent, .limit = max_output };
     if (check(s, &f)) |p| {
+        if (f.failure) |err| return err;
         out.deinit(a);
         return .{ .problem = p };
     }
@@ -295,7 +343,7 @@ test "problems say where" {
         .{ "{\"a\" 1}", 1, "Expected ':' after the key" },
         .{ "{a:1}", 1, "Invalid token" },
         .{ "[1] 2", 1, "Unexpected content after the document" },
-        .{ "\"abc", 1, "Unterminated string" },
+        .{ "\"abc", 1, "Invalid or unterminated string" },
         .{ "[01]", 1, "Invalid token" },
         .{ "", 1, "Empty document" },
         .{ "[1}", 1, "Mismatched closing bracket" },
@@ -307,4 +355,30 @@ test "problems say where" {
     }
     try std.testing.expect(validate(" {\"a\": [1, -2.5e3, \"\\u00e9\", {}]} ") == null);
     try std.testing.expect(validate("42") == null);
+}
+
+test "strings reject invalid escapes, raw controls and invalid UTF-8" {
+    const t = std.testing;
+    for ([_][]const u8{ "\"\\q\"", "\"\\u123\"", "\"\\u12z4\"", "\"a\rb\"", "\"a\tb\"", "\"a\x00b\"", "\"\xff\"", "\"\xc0\xaf\"", "\"\xed\xa0\x80\"", "\"\xf4\x90\x80\x80\"" }) |source| {
+        try t.expect(validate(source) != null);
+        const result = try format(t.allocator, source, 2);
+        try t.expect(result == .problem);
+    }
+    for ([_][]const u8{ "\"\\\"\\\\\\/\\b\\f\\n\\r\\t\\u0000\\u00e9\"", "\"\xc3\xa9\xf0\x9f\x98\x80\"", "\"\\uD83D\\uDE00\"" }) |source|
+        try t.expect(validate(source) == null);
+}
+
+test "formatting limits expansion and propagates allocation failures" {
+    const t = std.testing;
+    const source = "[[[[[[[[[[0]]]]]]]]]]";
+    try t.expectError(error.OutputTooLarge, formatLimited(t.allocator, source, 2, 64));
+    try t.expectError(error.OutputTooLarge, formatLimited(t.allocator, "{}", 0, 1));
+    const exact = try formatLimited(t.allocator, "{\"n\":1.10}", 0, 10);
+    defer t.allocator.free(exact.ok);
+    try t.expectEqualStrings("{\"n\":1.10}", exact.ok);
+    var fault = t.FailingAllocator.init(t.allocator, .{ .fail_index = 1, .resize_fail_index = 0 });
+    // The initial reservation succeeds; indentation forces a later allocation.
+    try t.expectError(error.OutOfMemory, formatLimited(fault.allocator(), source, 2, 1024));
+    try t.expectEqual(fault.allocated_bytes, fault.freed_bytes);
+    try t.expectError(error.InvalidIndent, formatLimited(t.allocator, "{}", 17, 100));
 }

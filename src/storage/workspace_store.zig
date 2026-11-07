@@ -8,6 +8,7 @@ const col = @import("../core/collection.zig");
 const environment = @import("../core/environment.zig");
 const history = @import("../core/history.zig");
 const Store = @import("store.zig").Store;
+const RequestPane = @import("../ui/request_selection.zig").Pane;
 
 pub const OpenTab = struct {
     /// A tab of a saved request: where it is.
@@ -16,10 +17,21 @@ pub const OpenTab = struct {
     /// A tab with no home yet: its draft file. Saved tabs have one too, while
     /// autosave is off and they have unsaved edits.
     draft: ?col.Id = null,
+    request_pane: ?RequestPane = null,
 };
 
 /// Plain data; `open_tabs` and `active_env` live in an arena or the app.
 pub const EditorLayout = enum { auto, columns, stacked };
+/// Physical screen rectangle of the normal window; DPI keeps logical size
+/// stable when the target monitor's scale changes. Never stores minimized size.
+pub const WindowPlacement = struct {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    dpi: u32 = 96,
+    maximized: bool = false,
+};
 
 pub const Prefs = struct {
     dark: bool = true,
@@ -37,6 +49,7 @@ pub const Prefs = struct {
     active_tab: usize = 0,
     window_width: f32 = 1280,
     window_height: f32 = 800,
+    window_placement: ?WindowPlacement = null,
 };
 
 fn id(s: ?[]const u8) ?col.Id {
@@ -64,16 +77,33 @@ pub fn parsePrefs(a: Allocator, text: []const u8) !Prefs {
     if (json.int(v, "retention")) |r| p.retention = @intCast(std.math.clamp(r, 1, 100_000));
     if (json.int(v, "windowWidth")) |w| p.window_width = std.math.clamp(@as(f32, @floatFromInt(w)), 640, 8000);
     if (json.int(v, "windowHeight")) |h| p.window_height = std.math.clamp(@as(f32, @floatFromInt(h)), 420, 8000);
+    if (json.get(v, "windowPlacement")) |placement| p.window_placement = parsePlacement(placement);
     p.active_env = id(json.str(v, "activeEnvironment"));
     var tabs: std.ArrayList(OpenTab) = .empty;
     for (json.array(v, "openTabs")) |row| {
-        const tab: OpenTab = .{ .collection = id(json.str(row, "collection")), .request = id(json.str(row, "request")), .draft = id(json.str(row, "draft")) };
+        const tab: OpenTab = .{
+            .collection = id(json.str(row, "collection")),
+            .request = id(json.str(row, "request")),
+            .draft = id(json.str(row, "draft")),
+            .request_pane = if (json.str(row, "requestPane")) |value| std.meta.stringToEnum(RequestPane, value) else null,
+        };
         if (tab.draft == null and (tab.collection == null or tab.request == null)) continue;
         try tabs.append(a, tab);
     }
     p.open_tabs = tabs.items;
     if (json.int(v, "activeTab")) |i| p.active_tab = @intCast(@max(0, i));
     return p;
+}
+
+fn parsePlacement(v: std.json.Value) ?WindowPlacement {
+    const x = json.int(v, "x") orelse return null;
+    const y = json.int(v, "y") orelse return null;
+    const width = json.int(v, "width") orelse return null;
+    const height = json.int(v, "height") orelse return null;
+    const dpi = json.int(v, "dpi") orelse 96;
+    if (x < -1_000_000 or x > 1_000_000 or y < -1_000_000 or y > 1_000_000 or
+        width < 100 or width > 64000 or height < 100 or height > 64000 or dpi < 48 or dpi > 768) return null;
+    return .{ .x = @intCast(x), .y = @intCast(y), .width = @intCast(width), .height = @intCast(height), .dpi = @intCast(dpi), .maximized = json.boolean(v, "maximized") orelse false };
 }
 
 pub fn prefsJson(a: Allocator, p: Prefs) ![]u8 {
@@ -99,6 +129,7 @@ fn writePrefs(s: *std.json.Stringify, p: Prefs) !void {
     try json.field(s, "retention", p.retention);
     try json.field(s, "windowWidth", @as(i64, @intFromFloat(p.window_width)));
     try json.field(s, "windowHeight", @as(i64, @intFromFloat(p.window_height)));
+    if (p.window_placement) |placement| try json.field(s, "windowPlacement", placement);
     if (p.active_env) |e| try json.field(s, "activeEnvironment", &e);
     try s.objectField("openTabs");
     try s.beginArray();
@@ -107,6 +138,7 @@ fn writePrefs(s: *std.json.Stringify, p: Prefs) !void {
         if (tab.collection) |c| try json.field(s, "collection", &c);
         if (tab.request) |r| try json.field(s, "request", &r);
         if (tab.draft) |d| try json.field(s, "draft", &d);
+        if (tab.request_pane) |pane| try json.field(s, "requestPane", @tagName(pane));
         try s.endObject();
     }
     try s.endArray();
@@ -177,6 +209,46 @@ test "preferences round trip, and forgive what's wrong" {
     try t.expectEqual(EditorLayout.auto, invalid_layout.editor_layout);
     try t.expectEqual(@as(f32, 0.8), invalid_layout.column_split);
     try t.expectError(error.Malformed, parsePrefs(a, "not json"));
+}
+
+test "normal window placement round trips and malformed placement falls back safely" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const placement: WindowPlacement = .{ .x = -1920, .y = 40, .width = 1320, .height = 900, .dpi = 144, .maximized = true };
+    const parsed = try parsePrefs(a, try prefsJson(a, .{ .window_placement = placement }));
+    try t.expect(std.meta.eql(placement, parsed.window_placement.?));
+    const legacy = try parsePrefs(a, "{\"windowWidth\":1100,\"windowHeight\":700}");
+    try t.expect(legacy.window_placement == null and legacy.window_width == 1100 and legacy.window_height == 700);
+    for ([_][]const u8{
+        "null",                                         "42",                                                                "{}",
+        "{\"x\":0,\"y\":0,\"width\":0,\"height\":800}", "{\"x\":9223372036854775807,\"y\":0,\"width\":1000,\"height\":800}", "{\"x\":0,\"y\":0,\"width\":1000,\"height\":800,\"dpi\":0}",
+    }) |bad| {
+        const prefs = try parsePrefs(a, try std.fmt.allocPrint(a, "{{\"windowPlacement\":{s},\"windowWidth\":1100}}", .{bad}));
+        try t.expect(prefs.window_placement == null and prefs.window_width == 1100);
+    }
+}
+
+test "request panes round trip independently and tolerate old or unknown values" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const draft = col.newId(t.io);
+    const encoded = try prefsJson(a, .{ .open_tabs = &.{
+        .{ .draft = draft, .request_pane = .body },
+        .{ .draft = draft, .request_pane = .headers },
+        .{ .draft = draft, .request_pane = .settings },
+        .{ .draft = draft, .request_pane = .params },
+        .{ .draft = draft },
+    } });
+    const parsed = try parsePrefs(a, encoded);
+    try t.expectEqual(@as(?RequestPane, .body), parsed.open_tabs[0].request_pane);
+    try t.expectEqual(@as(?RequestPane, .headers), parsed.open_tabs[1].request_pane);
+    try t.expectEqual(@as(?RequestPane, .settings), parsed.open_tabs[2].request_pane);
+    try t.expectEqual(@as(?RequestPane, .params), parsed.open_tabs[3].request_pane);
+    try t.expect(parsed.open_tabs[4].request_pane == null);
+    const unknown = try parsePrefs(a, try std.fmt.allocPrint(a, "{{\"openTabs\":[{{\"draft\":\"{s}\",\"requestPane\":\"future-pane\"}},{{\"draft\":\"{s}\",\"requestPane\":42}}]}}", .{ draft, draft }));
+    for (unknown.open_tabs) |tab| try t.expect(tab.request_pane == null);
 }
 
 test "reading a folder of ids skips everything else" {

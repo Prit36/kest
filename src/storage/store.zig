@@ -34,6 +34,8 @@ pub const Store = struct {
     task: ?Io.Future(void) = null,
     /// The last write that failed (for a warning), owned; cleared when read.
     failure: ?[]u8 = null,
+    /// The relative path of that write, owned; read with `takeFailedPath`.
+    failure_path: ?[]u8 = null,
     /// Called from the writer's thread when `failure` is set.
     on_failure: ?*const fn (ctx: ?*anyopaque) void = null,
     on_failure_ctx: ?*anyopaque = null,
@@ -87,6 +89,7 @@ pub const Store = struct {
         s.pending.deinit(s.gpa);
         s.tasks.deinit(s.gpa);
         if (s.failure) |f| s.gpa.free(f);
+        if (s.failure_path) |f| s.gpa.free(f);
         s.dir.close(s.io);
     }
 
@@ -212,9 +215,12 @@ pub const Store = struct {
 
     fn noteFailure(s: *Store, rel: []const u8, e: anyerror) void {
         const text = std.fmt.allocPrint(s.gpa, "Couldn't save {s}: {s}", .{ rel, @errorName(e) }) catch return;
+        const path = s.gpa.dupe(u8, rel) catch null;
         s.lock.lockUncancelable(s.io);
         if (s.failure) |old| s.gpa.free(old);
         s.failure = text;
+        if (s.failure_path) |old| s.gpa.free(old);
+        s.failure_path = path;
         s.lock.unlock(s.io);
         if (s.on_failure) |f| f(s.on_failure_ctx);
     }
@@ -225,6 +231,22 @@ pub const Store = struct {
         defer s.lock.unlock(s.io);
         const f = s.failure;
         s.failure = null;
+        return f;
+    }
+
+    /// Whether the most recent unreported failure was a write of `rel`.
+    pub fn lastFailureIs(s: *Store, rel: []const u8) bool {
+        s.lock.lockUncancelable(s.io);
+        defer s.lock.unlock(s.io);
+        return if (s.failure_path) |p| std.mem.eql(u8, p, rel) else false;
+    }
+
+    /// The path whose write failed last, now the caller's to free.
+    pub fn takeFailedPath(s: *Store) ?[]u8 {
+        s.lock.lockUncancelable(s.io);
+        defer s.lock.unlock(s.io);
+        const f = s.failure_path;
+        s.failure_path = null;
         return f;
     }
 
