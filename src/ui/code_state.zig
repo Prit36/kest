@@ -1,7 +1,5 @@
 //! A code view's text state: caret, selection, undo, and every edit command.
-//! No drawing here. NanoUI's own text area reflows its whole text each frame
-//! and keeps 1 KiB of undo; this one indexes rows once per edit and keeps a
-//! bounded list of edits, so megabyte payloads stay responsive.
+//! Indexes rows per edit and keeps bounded undo for responsive large payloads.
 const std = @import("std");
 
 const ui = @import("model.zig");

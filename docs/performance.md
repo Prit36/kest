@@ -1,12 +1,11 @@
 # Kest measurements
 
 Measured on the Windows development machine on 2026-11-07, with Zig 0.17.0.
-The initial migration measurements use `-Doptimize=ReleaseFast`, including the
+The initial measurements use `-Doptimize=ReleaseFast`, including the
 diagnostic harness. The current distribution build prioritizes runtime speed:
 Zig uses `ReleaseFast`, and CUI, both renderers, the host and image decoder use
 `-O3`. The earlier size experiment below uses `ReleaseSmall`.
-These are observed runs, not guarantees or a direct comparison with the
-original renderer. The machine's OS caches were warm.
+These are observed runs, not guarantees. The machine's OS caches were warm.
 
 ## CUI 1.1 distribution
 

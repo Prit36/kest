@@ -1,9 +1,8 @@
 # Kest
 
-A native HTTP client, evolved from Retort in a separate, independently buildable folder.
-The original NanoUI application is untouched. The interface uses CUI 1.1.0,
+A native HTTP client. The interface uses CUI 1.1.0,
 pinned to commit `d0383c4d3c00b7769f6b11cefdf581e1800f2da3`; networking, validation,
-collections, environment resolution and persistence remain in Zig 0.17.0.
+collections, environment resolution and persistence use Zig 0.17.0.
 There is no browser engine, telemetry, account or runtime package manager.
 
 ## Build
@@ -20,7 +19,7 @@ The first build downloads the pinned CUI source. Subsequent builds use the local
 package cache. CMake, a separate C compiler and Node are unnecessary. The app is
 `zig-out/bin/kest.exe`; distribute the `zig-out/licenses` directory with it.
 The CUI host is Windows-only at present. The engine remains portable; Linux and
-macOS hosts have not been migrated or tested.
+macOS hosts have not been implemented or tested.
 
 `ReleaseFast` is the recommended distribution build: Zig optimizes for runtime
 speed and the CUI/rendering/image C sources use `-O3`. Executable size is not
@@ -30,11 +29,7 @@ headless UI tests and loopback server. Plain `zig build` remains a debug build.
 ## Workspace and shortcuts
 
 The default data folder is `%APPDATA%\retort-cui`. `RETORT_DATA` selects another
-folder. These legacy names stay compatible with existing CUI workspaces after
-the Kest rename. Nothing reads or changes the original `%APPDATA%\retort` automatically.
-To use an existing workspace, close both apps and copy its files to the new data
-folder. The collection, environment, history, draft and workspace formats are
-the same. Use a copy while evaluating this version.
+folder.
 
 Ctrl+Enter sends or cancels; Ctrl+N creates a request; Ctrl+S saves; Ctrl+D
 duplicates; Ctrl+W closes; Ctrl+F searches; Ctrl+B toggles the workspace;
@@ -57,8 +52,7 @@ All transitions are instant. The request chevron focuses the response.
 Below 840 px the collection browser opens as an overlay. The minimum window is
 640x420. Row menus and right-click expose collection organization/export actions.
 The request menu includes Save as and Copy as cURL. New/Open requests reveal their
-tab and collection location. The data formats and native worker architecture stay
-compatible with the migration described below.
+tab and collection location.
 
 ## Verification
 
@@ -95,7 +89,7 @@ These flags require `-Ddiagnostics=true`; normal distribution builds omit them.
 
 The existing `tests/performance/startup.ps1` runs the native window on a private
 Windows desktop. See [verified coverage](docs/supported_features.md),
-[migration analysis](docs/migration.md) and [measurements](docs/performance.md). The [CUI 1.1 update](docs/cui-1.1-update.md)
+and [measurements](docs/performance.md). The [CUI 1.1 update](docs/cui-1.1-update.md)
 records component choices, compatibility work and validation.
 
 ## Icon
@@ -104,12 +98,9 @@ The angular K mark is shared by the app header and Windows icon. Its source is
 `assets/kest.svg`; `tools/build-icon.ps1` regenerates the PNG, multi-size ICO and
 native vector geometry using Windows System.Drawing. The app needs none of
 these development tools at runtime. Windows metadata and the title use Kest.
-Native exports use `.kest.json` / `.kest-env.json`; their internal format identifiers
-remain compatible with existing Retort files.
+Native exports use `.kest.json` / `.kest-env.json`.
 
 ## Licenses
 
-Kest retains Retort's MIT license; CUI is also MIT licensed. CUI's embedded Inter/Geist fonts and Lucide icons
-have their own licenses, installed with the application. `src/ui/code_state.zig`
-retains Retort's editor model; it has no NanoUI dependency. The downloaded CUI
-package is never edited.
+Kest and CUI are MIT licensed. CUI's embedded Inter/Geist fonts and Lucide icons
+have their own licenses, installed with the application.

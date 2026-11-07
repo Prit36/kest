@@ -67,12 +67,11 @@ does not establish coverage for this interface.
 
 ## Deliberate gaps
 
-- Windows host only. Linux/macOS have not been migrated.
-- SVG preview and header-name autocomplete have not been carried over.
+- Windows host only. Linux/macOS hosts have not been implemented.
+- SVG preview and header-name autocomplete are not supported.
 - JSON search opens Raw; the tree itself is not filtered.
 - No OS clipboard or real input testing. No screen-reader/IME/complex-script
   validation. Byte-based editor column geometry is a known limitation.
-- No claim that every original UI test has been ported. Current runs contain
-  71 engine tests, 17 HTTP tests and the additional executable CUI harness.
-- Original limitations continue: no HTTP/2, cookie persistence, proxies, browser
+- Current runs contain 71 engine tests, 17 HTTP tests and the additional executable CUI harness.
+- Current limitations include: no HTTP/2, cookie persistence, proxies, browser
   HTML rendering, or tree drag/drop. These features are outside the current scope.

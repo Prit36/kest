@@ -1,4 +1,4 @@
-//! Virtualized editor: row index and bounded undo are reused from Retort.
+//! Virtualized editor with a row index and bounded undo.
 //! The canvas paints only visible rows, never reflows the entire document.
 const std = @import("std");
 const w = @import("widgets.zig");
