@@ -4,7 +4,7 @@
 # asks the window to close and checks that the app left cleanly.
 #
 #   zig build -Doptimize=ReleaseFast
-#   powershell -File tests/performance/startup.ps1 -Exe zig-out/bin/retort.exe -Data <folder> [-Runs 5] [-IdleSeconds 10]
+#   powershell -File tests/performance/startup.ps1 -Exe zig-out/bin/kest.exe -Data <folder> [-Runs 5] [-IdleSeconds 10]
 #
 # -Data becomes KEST_DATA: the app reads and writes only there.
 param(
@@ -75,7 +75,7 @@ $Exe = (Resolve-Path $Exe).Path
 New-Item -ItemType Directory -Force $Data | Out-Null
 $Data = (Resolve-Path $Data).Path
 $env:KEST_DATA = $Data
-$name = "retort-measure-$PID"
+$name = "kest-measure-$PID"
 $desk = [Hidden]::NewDesktop($name)
 $cwd = Split-Path $Exe
 $startup = @(); $working = @(); $private = @(); $cpu = @(); $handles = @()

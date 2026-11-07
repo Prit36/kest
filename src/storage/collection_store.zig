@@ -39,7 +39,7 @@ pub fn treeJson(a: Allocator, c: *const Node) ![]u8 {
 
 fn writeTree(s: *std.json.Stringify, c: *const Node) !void {
     try s.beginObject();
-    try json.field(s, "format", "retort.collection/1");
+    try json.field(s, "format", "kest.collection/1");
     try json.field(s, "id", &c.id);
     try json.field(s, "name", c.name);
     if (c.description.len > 0) try json.field(s, "description", c.description);

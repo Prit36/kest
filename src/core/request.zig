@@ -1,5 +1,5 @@
 //! A saved HTTP request: plain data whose strings live in an arena, and its
-//! human-readable JSON form (`retort.request/1`). Templates stay templates:
+//! human-readable JSON form (`kest.request/1`). Templates stay templates:
 //! `{{variables}}` are only resolved when a request is sent.
 const std = @import("std");
 const json = @import("../utils/json.zig");
@@ -60,7 +60,7 @@ pub const Request = struct {
 
     pub fn write(r: Request, s: *std.json.Stringify) !void {
         try s.beginObject();
-        try json.field(s, "format", "retort.request/1");
+        try json.field(s, "format", "kest.request/1");
         try r.writeFields(s);
         try s.endObject();
     }

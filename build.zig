@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) void {
     const cui_bindings = bindings.createModule();
     const exe = appExecutable(b, "kest", target, optimize, cui_lib, cui_bindings, diagnostics);
     b.installArtifact(exe);
-    b.getInstallStep().dependOn(&b.addInstallFile(b.path("LICENSE"), "licenses/Retort-MIT.txt").step);
+    b.getInstallStep().dependOn(&b.addInstallFile(b.path("LICENSE"), "licenses/Kest-MIT.txt").step);
     b.getInstallStep().dependOn(&b.addInstallFile(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/LICENSE"), "licenses/CUI-MIT.txt").step);
     b.getInstallStep().dependOn(&b.addInstallFile(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/THIRD_PARTY.md"), "licenses/CUI-THIRD-PARTY.md").step);
     for ([_][]const u8{ "Inter", "Geist", "Lucide" }) |font|
@@ -58,7 +58,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/integration/http_tests.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{ .{ .name = "retort", .module = lib }, .{ .name = "test_server", .module = server } },
+        .imports = &.{ .{ .name = "kest", .module = lib }, .{ .name = "test_server", .module = server } },
     }) });
     test_step.dependOn(&b.addRunArtifact(http).step);
     const check_exe = appExecutable(b, "kest-check", target, optimize, cui_lib, cui_bindings, true);
@@ -76,14 +76,14 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/performance/bench.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{ .{ .name = "retort", .module = lib }, .{ .name = "test_server", .module = server } },
+        .imports = &.{ .{ .name = "kest", .module = lib }, .{ .name = "test_server", .module = server } },
     }) });
     b.step("bench", "Measure engine and storage").dependOn(&b.addRunArtifact(bench).step);
     const smoke = b.addExecutable(.{ .name = "smoke", .root_module = b.createModule(.{
         .root_source_file = b.path("tests/integration/smoke.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "retort", .module = lib }},
+        .imports = &.{.{ .name = "kest", .module = lib }},
     }) });
     const sr = b.addRunArtifact(smoke);
     sr.addPassthruArgs();

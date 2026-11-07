@@ -12,7 +12,7 @@ fn frame(ui: *c.cui_ctx, app: *App) void {
     c.cui_begin_frame(ui, 1.0 / 60.0);
     shell.view(ui, app);
     c.cui_end_frame(ui);
-    c.retort_quiet_caret(ui);
+    c.kest_quiet_caret(ui);
 }
 fn click(ui: *c.cui_ctx, app: *App, x: f32, y: f32) void {
     c.cui_input_mouse_move(ui, x, y);
@@ -248,7 +248,7 @@ fn workspaceUx(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]c
     };
     @import("ui/sidebar.zig").reveal(app, root);
     for (0..3) |_| frame(ui, app);
-    c.retort_focus(ui, "collection-rows");
+    c.kest_focus(ui, "collection-rows");
     chord(ui, app, c.CUI_KEY_LEFT, 0);
     try expect(@src(), !root.expanded);
     chord(ui, app, c.CUI_KEY_RIGHT, 0);

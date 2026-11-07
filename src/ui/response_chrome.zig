@@ -35,7 +35,7 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
             if (w.menuItem(ui, "Preview")) t.response.pane = .preview;
             c.cui_menu_end(ui);
         }
-        if (c.retort_dropdown_begin(ui, "Response actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END })) {
+        if (c.kest_dropdown_begin(ui, "Response actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END })) {
             if (w.menuItem(ui, "Raw text")) t.response.pane = .raw;
             if (w.menuItem(ui, "Preview")) t.response.pane = .preview;
             if (w.menuItem(ui, "Find in response")) find(t);

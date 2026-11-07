@@ -87,7 +87,7 @@ pub fn prefsJson(a: Allocator, p: Prefs) ![]u8 {
 
 fn writePrefs(s: *std.json.Stringify, p: Prefs) !void {
     try s.beginObject();
-    try json.field(s, "format", "retort.workspace/1");
+    try json.field(s, "format", "kest.workspace/1");
     try json.field(s, "dark", p.dark);
     try json.field(s, "sidebarOpen", p.sidebar_open);
     try json.field(s, "sidebarWidth", @as(i64, @intFromFloat(p.sidebar_width)));

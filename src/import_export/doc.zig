@@ -82,9 +82,9 @@ pub fn detect(a: Allocator, text_in: []const u8) Format {
     const v = std.json.parseFromSliceLeaky(std.json.Value, ar.allocator(), text, .{}) catch return .unknown;
     if (v != .object) return .unknown;
     if (v.object.get("format")) |f| if (f == .string) {
-        if (std.mem.startsWith(u8, f.string, "retort.collection")) return .native_collection;
-        if (std.mem.startsWith(u8, f.string, "retort.environment")) return .native_environment;
-        if (std.mem.startsWith(u8, f.string, "retort.request")) return .native_request;
+        if (std.mem.startsWith(u8, f.string, "kest.collection")) return .native_collection;
+        if (std.mem.startsWith(u8, f.string, "kest.environment")) return .native_environment;
+        if (std.mem.startsWith(u8, f.string, "kest.request")) return .native_request;
     };
     if (v.object.get("info") != null and v.object.get("item") != null) return .postman_collection;
     if (v.object.get("values") != null) return .postman_environment;
@@ -96,7 +96,7 @@ test "detect" {
     try std.testing.expectEqual(Format.curl, detect(a, "  curl http://x"));
     try std.testing.expectEqual(Format.postman_collection, detect(a, "{\"info\":{},\"item\":[]}"));
     try std.testing.expectEqual(Format.postman_environment, detect(a, "{\"name\":\"e\",\"values\":[]}"));
-    try std.testing.expectEqual(Format.native_collection, detect(a, "{\"format\":\"retort.collection-export/1\"}"));
+    try std.testing.expectEqual(Format.native_collection, detect(a, "{\"format\":\"kest.collection-export/1\"}"));
     try std.testing.expectEqual(Format.unknown, detect(a, "{\"a\":1}"));
     try std.testing.expectEqual(Format.unknown, detect(a, "{broken"));
     try std.testing.expectEqual(Format.unknown, detect(a, "hello"));

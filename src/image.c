@@ -6,7 +6,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_MAX_DIMENSIONS 8192
 #include "third_party/stb_image.h"
-cui_texture retort_image_memory(cui_ctx *ui, const unsigned char *bytes, int length, int *out_width, int *out_height) {
+cui_texture kest_image_memory(cui_ctx *ui, const unsigned char *bytes, int length, int *out_width, int *out_height) {
     int width, height, channels;
     if (!stbi_info_from_memory(bytes, length, &width, &height, &channels)) return 0;
     if (width <= 0 || height <= 0 || (size_t)width * (size_t)height > 16 * 1024 * 1024) return 0;

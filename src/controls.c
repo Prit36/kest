@@ -2,9 +2,9 @@
  * No dependency sources are patched. No animation state is introduced. */
 #include "host.h"
 #include "cui_internal.h"
-void retort_focus(cui_ctx *ui, const char *id) { ui->focus = cui_make_id(ui, id); }
+void kest_focus(cui_ctx *ui, const char *id) { ui->focus = cui_make_id(ui, id); }
 
-void retort_collection_top(cui_ctx *ui, const char *key) {
+void kest_collection_top(cui_ctx *ui, const char *key) {
     /* The pinned CUI grid owns a separate scroll state from its public id. */
     cui_scroll_state *s = cui_state(ui, cui_make_id(ui, key) ^ 0x5C011u, sizeof *s);
     s->x = s->tx = s->y = s->ty = 0;
@@ -13,7 +13,7 @@ void retort_collection_top(cui_ctx *ui, const char *key) {
 
 /* Keep the native tree's navigation/selection, with browser-like rows.
  * All geometry changes are local; dependency sources stay untouched. */
-void retort_collection_style(cui_ctx *ui, const char *key, cui_color background) {
+void kest_collection_style(cui_ctx *ui, const char *key, cui_color background) {
     cui_id id = cui_make_id(ui, key);
     for (int i = cui__current(ui); i >= 0; i = ui->nodes[i].parent) {
         cui_node *n = &ui->nodes[i];
@@ -25,7 +25,7 @@ void retort_collection_style(cui_ctx *ui, const char *key, cui_color background)
     }
 }
 
-void retort_collection_name(cui_ctx *ui, const char *name, const char *method, const char *icon, cui_color color) {
+void kest_collection_name(cui_ctx *ui, const char *name, const char *method, const char *icon, cui_color color) {
     int row = cui__current(ui);
     if (row >= 0) { ui->nodes[row].paint = NULL; ui->nodes[row].paint_data = NULL; }
     cui_tree_table_name(ui, method ? method : name, method ? NULL : icon);
@@ -47,9 +47,9 @@ void retort_collection_name(cui_ctx *ui, const char *name, const char *method, c
     if (cell >= 0) ui->nodes[cell].pad[1] = 4;
 }
 
-typedef struct { int kind; bool selected, hovered; } retort_control_paint;
+typedef struct { int kind; bool selected, hovered; } kest_control_paint;
 static void paint_control(cui_ctx *ui, cui_node *n, void *raw) {
-    retort_control_paint *p = raw;
+    kest_control_paint *p = raw;
     cui_rect r = n->rect;
     if (p->kind == 2 && (p->selected || p->hovered)) {
         cui_draw_rect(ui, (cui_rect){r.x + 3, r.y + 5, r.w - 6, r.h - 10}, CUI_CORNERS(3), p->selected ? CUI_C(ui, ACTIVE) : CUI_C(ui, HOVER));
@@ -58,7 +58,7 @@ static void paint_control(cui_ctx *ui, cui_node *n, void *raw) {
     }
 }
 
-bool retort_control_begin(cui_ctx *ui, const char *key, bool selected, float width, float height, int kind) {
+bool kest_control_begin(cui_ctx *ui, const char *key, bool selected, float width, float height, int kind) {
     cui_id id = cui_make_id(ui, key);
     cui_interact hit = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     cui_box box = {0};
@@ -78,7 +78,7 @@ bool retort_control_begin(cui_ctx *ui, const char *key, bool selected, float wid
     int at = ui->last_node;
     cui__mark_interactive(ui, at, CUI_IF_FOCUSABLE);
     if (kind == 2 || (kind == 0 && selected)) {
-        retort_control_paint *p = CUI_PAINT_DATA(ui, retort_control_paint);
+        kest_control_paint *p = CUI_PAINT_DATA(ui, kest_control_paint);
         p->kind = kind; p->selected = selected; p->hovered = hit.hovered;
         ui->nodes[at].paint = paint_control;
         ui->nodes[at].paint_data = p;
@@ -87,7 +87,7 @@ bool retort_control_begin(cui_ctx *ui, const char *key, bool selected, float wid
     return hit.clicked;
 }
 
-int retort_flat_input(cui_ctx *ui, const char *key, char *buf, size_t cap, const cui_input_opts *opts, bool cell) {
+int kest_flat_input(cui_ctx *ui, const char *key, char *buf, size_t cap, const cui_input_opts *opts, bool cell) {
     cui_id id = cui_make_id(ui, key);
     if (opts && opts->autofocus) ui->focus = id;
     int first = ui->node_count;
@@ -107,7 +107,7 @@ int retort_flat_input(cui_ctx *ui, const char *key, char *buf, size_t cap, const
 /* CUI has 32 popup slots. A closed, never-used row menu must not reserve one:
  * a long collection tree can otherwise prevent the method/body pickers opening.
  * Keep CUI's keyboard/menu behavior, and create a slot only on activation. */
-bool retort_dropdown_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts) {
+bool kest_dropdown_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts) {
     cui_menu_opts defaults = {0};
     if (!opts) opts = &defaults;
     cui_id popup_id = cui_make_id(ui, label) ^ 0x3E40u;
@@ -139,9 +139,9 @@ bool retort_dropdown_begin(cui_ctx *ui, const char *label, const cui_menu_opts *
     return cui__popup_begin(ui, popup_id, anchor, opts->placement, opts->width, 6, 0, true);
 }
 
-bool retort_menu_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts, float width, cui_color color) {
+bool kest_menu_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts, float width, cui_color color) {
     int first = ui->node_count;
-    bool open = retort_dropdown_begin(ui, label, opts);
+    bool open = kest_dropdown_begin(ui, label, opts);
     /* cui_menu_begin constructs its trigger first, followed by its label/icon. */
     if (first < ui->node_count) {
         cui_node *n = &ui->nodes[first];
@@ -161,7 +161,7 @@ bool retort_menu_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts
     return open;
 }
 
-bool retort_button_ex(cui_ctx *ui, const char *label, const cui_button_opts *opts) {
+bool kest_button_ex(cui_ctx *ui, const char *label, const cui_button_opts *opts) {
     int first = ui->node_count;
     bool clicked = cui_button_ex(ui, label, opts);
     if (opts && (opts->variant == CUI_BUTTON_PRIMARY || opts->variant == CUI_BUTTON_DANGER)) {
@@ -171,7 +171,7 @@ bool retort_button_ex(cui_ctx *ui, const char *label, const cui_button_opts *opt
     return clicked;
 }
 
-bool retort_select_ex(cui_ctx *ui, const char *key, const char *const *items, int count, int *index, const cui_select_opts *opts) {
+bool kest_select_ex(cui_ctx *ui, const char *key, const char *const *items, int count, int *index, const cui_select_opts *opts) {
     int first = ui->node_count;
     bool changed = cui_select_ex(ui, key, items, count, index, opts);
     /* The app's selects have no external label. Keep sufficient room for the
@@ -183,7 +183,7 @@ bool retort_select_ex(cui_ctx *ui, const char *key, const char *const *items, in
     return changed;
 }
 
-bool retort_reveal(cui_ctx *ui, cui_id id, cui_id target, bool horizontal) {
+bool kest_reveal(cui_ctx *ui, cui_id id, cui_id target, bool horizontal) {
     cui_rect viewport = cui__prev_rect(ui, id), item = cui__prev_rect(ui, target);
     if (viewport.w <= 0 || viewport.h <= 0 || item.w <= 0 || item.h <= 0) return false;
     cui_scroll_state *st = cui_state(ui, id, sizeof *st);

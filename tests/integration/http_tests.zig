@@ -1,6 +1,6 @@
 //! The real transport against a real socket on loopback.
 const std = @import("std");
-const lib = @import("retort");
+const lib = @import("kest");
 const Server = @import("test_server.zig").Server;
 const http_client = lib.http_client;
 const req = lib.request;
@@ -108,7 +108,7 @@ test "headers and a JSON body arrive; repeated response headers are kept" {
     try t.expect(!has(b, "X-Off"));
     try t.expect(has(b, "Content-Type: application/json\n"));
     try t.expect(has(b, "Content-Length: 7\n"));
-    try t.expect(has(b, "User-Agent: retort/"));
+    try t.expect(has(b, "User-Agent: kest/"));
     try t.expect(std.mem.endsWith(u8, b, "\n\n{\"a\":1}"));
     var n: usize = 0;
     for (j.resp.headers.items) |h| {
@@ -125,7 +125,7 @@ test "the user's headers replace the defaults" {
     defer j.destroy();
     const b = body(j);
     try t.expect(has(b, "user-agent: me\n"));
-    try t.expect(!has(b, "User-Agent: retort"));
+    try t.expect(!has(b, "User-Agent: kest"));
     try t.expect(has(b, "Accept: a/b\n"));
 }
 
@@ -149,7 +149,7 @@ test "forms and multipart with a file upload" {
     });
     defer mp.destroy();
     const b = body(mp);
-    try t.expect(has(b, "multipart/form-data; boundary=----retort"));
+    try t.expect(has(b, "multipart/form-data; boundary=----kest"));
     try t.expect(has(b, "name=\"title\"\r\n\r\nx\r\n"));
     try t.expect(has(b, "filename=\"up.txt\"\r\nContent-Type: text/plain\r\n\r\nfile contents here\r\n"));
 

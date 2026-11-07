@@ -47,7 +47,7 @@ Eight tabs send automatically so real responses, headers, history, and activity
 are ready to inspect. All data is fictional; people/order endpoints return fixed
 fixtures rather than implementing CRUD. Closing and reopening Demo starts over.
 
-The default data folder is `%APPDATA%\retort-cui`. `KEST_DATA` selects another
+The default data folder is `%APPDATA%\kest-cui`. `KEST_DATA` selects another
 folder.
 
 Ctrl+Enter sends or cancels; Ctrl+N creates a request; Ctrl+S saves; Ctrl+D

@@ -79,7 +79,7 @@ fn body(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
         t.body.query.focus();
     }
     c.cui_tooltip(ui, "Find in body");
-    if (c.retort_dropdown_begin(ui, "Body actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END })) {
+    if (c.kest_dropdown_begin(ui, "Body actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END })) {
         if (t.body_kind == .json) {
             if (w.menuItem(ui, "Format JSON")) commands.formatBody(app, t, 2);
             if (w.menuItem(ui, "Minify JSON")) commands.formatBody(app, t, 0);

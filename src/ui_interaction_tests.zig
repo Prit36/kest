@@ -123,7 +123,7 @@ pub fn run(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime click: a
     const from = app.active;
     const target: usize = if (from == 0) 1 else from - 1;
     c.cui_push_id(ui, "request-documents");
-    c.retort_focus(ui, workspace.documentTitle(moved));
+    c.kest_focus(ui, workspace.documentTitle(moved));
     c.cui_pop_id(ui);
     chord(ui, app, if (from == 0) c.CUI_KEY_RIGHT else c.CUI_KEY_LEFT, c.CUI_MOD_SHIFT);
     try expect(@src(), app.current().? == moved and app.tabs.items[target] == moved);

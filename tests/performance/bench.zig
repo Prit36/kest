@@ -3,7 +3,7 @@
 //! Works only on loopback and in a folder under .zig-cache, which it removes.
 const std = @import("std");
 const builtin = @import("builtin");
-const lib = @import("retort");
+const lib = @import("kest");
 const Server = @import("test_server").Server;
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
@@ -314,7 +314,7 @@ pub fn main(init: std.process.Init) !void {
     try cwd.createDirPath(io, dir);
     defer cwd.deleteTree(io, dir) catch {};
 
-    line("Retort benchmarks ({s}, {s})", .{ @tagName(builtin.mode), @tagName(builtin.os.tag) });
+    line("Kest benchmarks ({s}, {s})", .{ @tagName(builtin.mode), @tagName(builtin.os.tag) });
     try collection(gpa, &count, io, dir ++ "/store");
     try json(gpa, &count, io, 8);
     try json(gpa, &count, io, 64);

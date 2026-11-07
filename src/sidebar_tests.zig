@@ -78,7 +78,7 @@ pub fn run(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, path: ?[]const u8,
                 c.cui_set_viewport(ui, if (narrow) 640 else 1180, if (narrow) 420 else 800, 1);
                 for (0..5) |_| frame(ui, app);
                 if (narrow) c.cui_push_id_int(ui, @bitCast(c.cui_make_id(ui, "Workspace") ^ 0x5ee7));
-                c.retort_collection_top(ui, "collection-rows");
+                c.kest_collection_top(ui, "collection-rows");
                 if (narrow) c.cui_pop_id(ui);
                 for (0..3) |_| frame(ui, app);
                 const browser = rect(ui, "collection-browser");

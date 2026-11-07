@@ -74,7 +74,7 @@ pub fn prepare(a: Allocator, io: std.Io, r: req.Request, vars: []const Var, prob
         .multipart => {
             var raw: [12]u8 = undefined;
             io.random(&raw);
-            const boundary = try std.fmt.allocPrint(a, "----retort{s}", .{&std.fmt.bytesToHex(raw, .lower)});
+            const boundary = try std.fmt.allocPrint(a, "----kest{s}", .{&std.fmt.bytesToHex(raw, .lower)});
             content_type = try std.fmt.allocPrint(a, "multipart/form-data; boundary={s}", .{boundary});
             for (r.form) |f| {
                 if (!f.enabled or f.key.len == 0) continue;
@@ -229,7 +229,7 @@ test "multipart parts" {
     try t.expect(std.mem.indexOf(u8, p.out.body[1].bytes, "image/png") != null);
     try t.expectEqualStrings("C:\\dir\\a.png", p.out.body[2].file);
     try t.expect(std.mem.endsWith(u8, p.out.body[4].bytes, "--\r\n"));
-    try t.expect(std.mem.startsWith(u8, p.out.headers[0].value, "multipart/form-data; boundary=----retort"));
+    try t.expect(std.mem.startsWith(u8, p.out.headers[0].value, "multipart/form-data; boundary=----kest"));
 }
 
 test "bad input is explained, not sent" {

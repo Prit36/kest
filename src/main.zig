@@ -11,17 +11,17 @@ const Store = @import("storage/store.zig").Store;
 const transport = @import("network/transport.zig");
 
 fn wake(_: *App) void {
-    c.retort_host_wake();
+    c.kest_host_wake();
 }
 fn schedule(_: *App, ms: u64) void {
-    c.retort_host_schedule(@intCast(ms));
+    c.kest_host_schedule(@intCast(ms));
 }
 fn storeFailed(_: ?*anyopaque) void {
-    c.retort_host_wake();
+    c.kest_host_wake();
 }
 fn readClipboard(a: std.mem.Allocator) ?[]u8 {
     if (platform.headless) return null;
-    const text = c.retort_clipboard(platform.context);
+    const text = c.kest_clipboard(platform.context);
     return if (text != null) a.dupe(u8, std.mem.span(text)) catch null else null;
 }
 
@@ -55,7 +55,7 @@ pub fn main(init: std.process.Init) !void {
         break :blk try std.fs.path.join(gpa, &.{ base, "kest-demo", &id });
     } else if (init.environ_map.get("KEST_DATA")) |d| try gpa.dupe(u8, d) else blk: {
         const base = init.environ_map.get("APPDATA") orelse return error.AppDataUnavailable;
-        break :blk try std.fs.path.join(gpa, &.{ base, "retort-cui" });
+        break :blk try std.fs.path.join(gpa, &.{ base, "kest-cui" });
     };
     defer gpa.free(data);
     var demo_server: @import("demo_server").Server = undefined;
@@ -109,10 +109,10 @@ pub fn main(init: std.process.Init) !void {
         platform.window = null;
         c.cui_app_destroy(window);
     }
-    c.retort_host_attach(window);
+    c.kest_host_attach(window);
     @import("window_icon.zig").apply(c.cui_app_native_window(window));
     while (c.cui_app_frame(window)) {
-        const events = c.retort_host_events();
+        const events = c.kest_host_events();
         if (events & 1 != 0 or events & 4 != 0) persist.flush(&app);
         if (events & 2 != 0) persist.refreshFromDisk(&app);
         const size = c.cui_app_size(window);
@@ -123,6 +123,6 @@ pub fn main(init: std.process.Init) !void {
         }
         shell.view(platform.context.?, &app);
         c.cui_end_frame(platform.context);
-        c.retort_quiet_caret(platform.context);
+        c.kest_quiet_caret(platform.context);
     }
 }

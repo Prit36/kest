@@ -72,7 +72,7 @@ fn documents(ui: *c.cui_ctx, app: *App) void {
             c.cui_push_id(ui, "request-documents");
             const target = c.cui_make_id(ui, documentTitle(t));
             c.cui_pop_id(ui);
-            if (c.retort_reveal(ui, strip, target, true)) {
+            if (c.kest_reveal(ui, strip, target, true)) {
                 revealed_document = t.uid;
                 revealed_width = width;
             }
@@ -96,7 +96,7 @@ fn documents(ui: *c.cui_ctx, app: *App) void {
     if (selected >= 0) commands.activate(app, @intCast(selected));
     if (w.action(ui, "new-document", "", c.CUI_ICON_PLUS, false, 34, 34, 3)) _ = commands.newTab(app);
     c.cui_tooltip(ui, "New request (Ctrl N)");
-    if (c.retort_dropdown_begin(ui, "Request actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END })) {
+    if (c.kest_dropdown_begin(ui, "Request actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END })) {
         if (app.current()) |t| actions(ui, app, t);
         c.cui_menu_separator(ui);
         layoutMenu(ui, app);

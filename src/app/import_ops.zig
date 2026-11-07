@@ -45,7 +45,7 @@ pub fn previewText(app: *App, text: []const u8, file_name: []const u8) void {
     const a = p.arena.allocator();
     fill(app, p, a, text, file_name) catch |e| {
         const why: []const u8 = switch (e) {
-            error.Unknown => "It doesn't look like a Postman collection or environment, a Kest/Retort export, or a cURL command.",
+            error.Unknown => "It doesn't look like a Postman collection or environment, a Kest/Kest export, or a cURL command.",
             else => @errorName(e),
         };
         app.toast(.danger, "Can't import this", why);
@@ -86,7 +86,7 @@ fn fill(app: *App, p: *state.ImportPreview, a: Allocator, text: []const u8, file
         },
         .native_collection => {
             const d = native.read(a, text) catch {
-                app.toast(.danger, "That file can't be read", "It says it's a Kest/Retort export, but its contents aren't valid.");
+                app.toast(.danger, "That file can't be read", "It says it's a Kest/Kest export, but its contents aren't valid.");
                 return error.Reported;
             };
             p.document = d;

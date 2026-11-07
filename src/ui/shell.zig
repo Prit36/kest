@@ -62,7 +62,7 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
     dialogs.view(ui, app);
     palette(ui, app);
     app.toaster.view(ui);
-    c.retort_quiet_caret(ui);
+    c.kest_quiet_caret(ui);
 }
 
 fn topbar(ui: *c.cui_ctx, app: *App, width: f32) void {
@@ -100,7 +100,7 @@ fn topbar(ui: *c.cui_ctx, app: *App, width: f32) void {
         app.prefs.dark = !app.prefs.dark;
         persist.prefsChanged(app);
     }
-    if (c.retort_dropdown_begin(ui, "Workspace actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END })) {
+    if (c.kest_dropdown_begin(ui, "Workspace actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END })) {
         if (w.menuItem(ui, "New collection")) dialogs.askName(app, .new_collection, "");
         if (w.menuItem(ui, "New environment")) dialogs.askName(app, .new_env, "");
         if (w.menuItem(ui, "Import file")) imports.chooseFile(app);

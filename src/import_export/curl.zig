@@ -242,7 +242,7 @@ pub fn parse(a: Allocator, command: []const u8) ParseError!Imported {
         } else if (eqAny(arg, &.{ "-G", "--get" })) {
             get_with_data = true;
         } else if (eqAny(arg, &.{"--compressed"}) or isIgnored(arg)) {
-            // Harmless output options, and what Retort does anyway.
+            // Harmless output options, and what Kest does anyway.
             if (takesValue(arg) and inline_value == null) i += 1;
         } else {
             try warnings.append(a, try std.fmt.allocPrint(a, "Unsupported option {s} was ignored", .{arg}));

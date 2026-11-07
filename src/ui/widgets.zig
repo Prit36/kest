@@ -25,7 +25,7 @@ pub fn end(ui: *c.cui_ctx) void {
     c.cui_box_end(ui);
 }
 pub fn button(ui: *c.cui_ctx, label: []const u8, opts: c.cui_button_opts) bool {
-    return c.retort_button_ex(ui, z(label), &opts);
+    return c.kest_button_ex(ui, z(label), &opts);
 }
 pub fn icon(ui: *c.cui_ctx, glyph: [*:0]const u8, hint: [*:0]const u8) bool {
     return c.cui_icon_button_ex(ui, glyph, &.{ .tooltip = hint, .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_GHOST, .color = color(c.CUI_TOKEN_TEXT_SECONDARY) });
@@ -41,7 +41,7 @@ pub fn field(ui: *c.cui_ctx, id: [*:0]const u8, buffer: *model.TextBuffer, opts_
     var opts = opts_in;
     if (buffer.want_focus) {
         opts.autofocus = true;
-        c.retort_focus(ui, id);
+        c.kest_focus(ui, id);
     }
     buffer.want_focus = false;
     const flags = c.cui_input_ex(ui, id, buffer.data.ptr, buffer.data.len, &opts);
@@ -56,25 +56,25 @@ pub fn flatField(ui: *c.cui_ctx, id: [*:0]const u8, buffer: *model.TextBuffer, o
     var opts = opts_in;
     opts.autofocus = buffer.want_focus;
     buffer.want_focus = false;
-    const flags = c.retort_flat_input(ui, id, buffer.data.ptr, buffer.data.len, &opts, cell);
+    const flags = c.kest_flat_input(ui, id, buffer.data.ptr, buffer.data.len, &opts, cell);
     if (flags & c.CUI_CHANGED == 0) return false;
     buffer.len = std.mem.indexOfScalar(u8, buffer.data, 0) orelse buffer.data.len - 1;
     return true;
 }
 pub fn action(ui: *c.cui_ctx, id: [*:0]const u8, label: []const u8, glyph: ?[*:0]const u8, selected: bool, width: f32, height: f32, kind: c_int) bool {
-    const clicked = c.retort_control_begin(ui, id, selected, width, height, kind);
+    const clicked = c.kest_control_begin(ui, id, selected, width, height, kind);
     if (glyph) |g| c.cui_icon(ui, g, 14, color(if (selected) c.CUI_TOKEN_FOREGROUND else c.CUI_TOKEN_TEXT_SECONDARY));
     if (label.len > 0) text(ui, label, .{ .size = 12, .font = if (selected) c.CUI_FONT_MEDIUM else c.CUI_FONT_BODY, .nowrap = true, .color = color(if (selected) c.CUI_TOKEN_FOREGROUND else c.CUI_TOKEN_TEXT_SECONDARY) });
-    c.retort_item_end(ui);
+    c.kest_item_end(ui);
     return clicked;
 }
 pub fn menu(ui: *c.cui_ctx, label: []const u8, width: f32, tint: c.cui_color) bool {
-    return c.retort_menu_begin(ui, z(label), &.{ .variant = c.CUI_BUTTON_GHOST, .width = 180 }, width, tint);
+    return c.kest_menu_begin(ui, z(label), &.{ .variant = c.CUI_BUTTON_GHOST, .width = 180 }, width, tint);
 }
 pub fn select(ui: *c.cui_ctx, id: [*:0]const u8, items: []const []const u8, index: *c_int, width: c.cui_size) bool {
     const labels = arena.allocator().alloc([*:0]const u8, items.len) catch unreachable;
     for (items, labels) |label, *dest| dest.* = z(label);
-    return c.retort_select_ex(ui, id, labels.ptr, @intCast(items.len), index, &.{ .width = width });
+    return c.kest_select_ex(ui, id, labels.ptr, @intCast(items.len), index, &.{ .width = width });
 }
 pub fn tabs(ui: *c.cui_ctx, id: [*:0]const u8, items: []const []const u8, index: *c_int) bool {
     const labels = arena.allocator().alloc([*:0]const u8, items.len) catch unreachable;
@@ -101,5 +101,5 @@ pub fn bytes(value: u64) [:0]const u8 {
     return fmt("{d:.1} MB", .{@as(f64, @floatFromInt(value)) / (1024 * 1024)});
 }
 pub fn copy(ui: *c.cui_ctx, value: []const u8) void {
-    if (!@import("platform.zig").headless) c.retort_copy(ui, z(value));
+    if (!@import("platform.zig").headless) c.kest_copy(ui, z(value));
 }

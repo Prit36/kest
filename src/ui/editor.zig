@@ -16,7 +16,7 @@ pub fn view(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8,
     const v0 = s.version;
     if (s.search_open) search(ui, s, source);
     const identity = c.cui_make_id(ui, id);
-    const focused = c.retort_editor_focus(ui, identity) != 0;
+    const focused = c.kest_editor_focus(ui, identity) != 0;
     if (focused) {
         keys(ui, s, source, read_only);
         if (!read_only) source = s.text();
@@ -27,10 +27,10 @@ pub fn view(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8,
         s.indexed_ptr = @intFromPtr(source.ptr);
         s.indexed_len = source.len;
     }
-    s.scroll_y = @max(0, s.scroll_y - c.retort_editor_scroll(ui, identity) * line_h * 3);
+    s.scroll_y = @max(0, s.scroll_y - c.kest_editor_scroll(ui, identity) * line_h * 3);
     const paint = Paint{ .state = s, .source = source, .lang = lang, .focused = focused };
     const result = c.cui_canvas(ui, id, w.fill, w.fill, draw, &paint, @sizeOf(Paint));
-    c.retort_editor_register(ui, identity);
+    c.kest_editor_register(ui, identity);
     const rect = result.rect;
     if (result.pressed and rect.w > 0) {
         const m = c.cui_mouse_pos(ui);
@@ -62,12 +62,12 @@ fn keys(ui: *c.cui_ctx, s: *State, source_in: []const u8, read_only: bool) void 
             s.replaceSelection("", false);
         }
         if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_V) and !@import("platform.zig").headless) {
-            const clip = c.retort_clipboard(ui);
+            const clip = c.kest_clipboard(ui);
             if (clip != null) s.replaceSelection(std.mem.span(clip), false);
         }
         if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_Z)) _ = s.undoEdit();
         if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_Y) or c.cui_shortcut(ui, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT, c.CUI_KEY_Z)) _ = s.redoEdit();
-        const entered = c.retort_editor_text(ui);
+        const entered = c.kest_editor_text(ui);
         if (!ctrl and entered != null and entered[0] != 0) s.replaceSelection(std.mem.span(entered), true);
         // Paste/undo/typing may reallocate the buffer before navigation runs.
         source = s.text();

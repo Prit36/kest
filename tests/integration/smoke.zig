@@ -1,7 +1,7 @@
 //! Sends one request and prints what happened: a check of real TLS, by hand.
 //!   zig build smoke -- https://example.com [--insecure]
 const std = @import("std");
-const lib = @import("retort");
+const lib = @import("kest");
 const Io = std.Io;
 
 const Done = struct {

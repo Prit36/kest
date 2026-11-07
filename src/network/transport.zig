@@ -75,7 +75,7 @@ pub const Result = struct {
 };
 
 pub const validHeader = check.validHeader;
-pub const user_agent = "retort/0.0.1";
+pub const user_agent = "kest/0.0.1";
 const max_head = 256 * 1024;
 const socket_buffer = 64 * 1024;
 const max_idle_connections = 4;

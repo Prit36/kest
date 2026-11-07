@@ -7,7 +7,7 @@ const doc = @import("doc.zig");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 
-pub const format_name = "retort.collection-export/1";
+pub const format_name = "kest.collection-export/1";
 
 pub fn write(a: Allocator, d: doc.Doc) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(a);
@@ -56,7 +56,7 @@ pub fn read(a: Allocator, text: []const u8) ReadError!doc.Doc {
         else => return error.NotJson,
     };
     const f = json.str(v, "format") orelse return error.NotACollection;
-    if (!std.mem.startsWith(u8, f, "retort.collection-export")) return error.NotACollection;
+    if (!std.mem.startsWith(u8, f, "kest.collection-export")) return error.NotACollection;
     return .{
         .name = try json.dupeStr(a, v, "name", "Imported collection"),
         .description = try json.dupeStr(a, v, "description", ""),

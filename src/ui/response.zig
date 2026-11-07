@@ -151,7 +151,7 @@ fn preview(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) voi
         .image => {
             // Decode only on demand, with CUI's own PNG/JPEG support.
             if (!t.response.image_attempted) {
-                t.response.image = c.retort_image_memory(ui, resp.preview.items.ptr, @intCast(resp.preview.items.len), &t.response.image_width, &t.response.image_height);
+                t.response.image = c.kest_image_memory(ui, resp.preview.items.ptr, @intCast(resp.preview.items.len), &t.response.image_width, &t.response.image_height);
                 t.response.image_attempted = true;
             }
             if (t.response.image != 0) {

@@ -24,7 +24,7 @@ pub const Environment = struct {
 
     fn writeTo(e: Environment, s: *std.json.Stringify) !void {
         try s.beginObject();
-        try json.field(s, "format", "retort.environment/1");
+        try json.field(s, "format", "kest.environment/1");
         try json.field(s, "name", e.name);
         try s.objectField("variables");
         try s.beginArray();

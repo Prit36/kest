@@ -1,7 +1,7 @@
 .{
-    .name = .retort_cui,
+    .name = .kest_cui,
     .version = "0.1.0",
-    .fingerprint = 0xa7478e59031b6e8e,
+    .fingerprint = 0x0f100764558b273f,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .cui = .{
