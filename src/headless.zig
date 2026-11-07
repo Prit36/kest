@@ -30,7 +30,7 @@ fn wait(ui: *c.cui_ctx, app: *App) !void {
         try app.io.sleep(.fromMilliseconds(2), .awake);
     }
 }
-pub fn run(app: *App, test_mode: bool, snapshot: ?[]const u8, width: f32, height: f32) !void {
+pub fn run(app: *App, test_mode: bool, snapshot: ?[]const u8, width: f32, height: f32, scale: f32) !void {
     const sw = c.cui_sw_create() orelse return error.RendererFailed;
     defer c.cui_sw_destroy(sw);
     const ui = c.cui_create(&.{ .renderer = c.cui_sw_iface(sw), .theme = c.CUI_THEME_DARK, .accent = c.CUI_ACCENT_BLUE }) orelse return error.ContextFailed;
@@ -41,7 +41,7 @@ pub fn run(app: *App, test_mode: bool, snapshot: ?[]const u8, width: f32, height
         c.cui_destroy(ui);
     }
     c.cui_set_reduced_motion(ui, true);
-    c.cui_set_viewport(ui, width, height, 1);
+    c.cui_set_viewport(ui, width, height, scale);
     errdefer if (snapshot) |path| @import("ui_snapshots.zig").capture(ui, sw, app, path) catch {};
     if (test_mode) {
         // Suite interactions begin on the desktop layout; requested snapshot
@@ -59,7 +59,7 @@ pub fn run(app: *App, test_mode: bool, snapshot: ?[]const u8, width: f32, height
         try performance(ui, app);
     }
     for (0..8) |_| frame(ui, app);
-    c.cui_set_viewport(ui, width, height, 1);
+    c.cui_set_viewport(ui, width, height, scale);
     for (0..8) |_| frame(ui, app);
     if (snapshot) |path| {
         try @import("ui_snapshots.zig").capture(ui, sw, app, path);

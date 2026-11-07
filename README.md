@@ -4,6 +4,9 @@ A native HTTP client. The interface uses CUI 1.1.0,
 pinned to commit `d0383c4d3c00b7769f6b11cefdf581e1800f2da3`; networking, validation,
 collections, environment resolution and persistence use Zig 0.17.0.
 There is no browser engine, telemetry, account or runtime package manager.
+Windows text uses DirectWrite grid fitting with grayscale antialiasing at the
+monitor's pixel density. The bundled fonts and CUI layout metrics are retained;
+icons and the fallback text path use CUI's original rasterizer.
 
 ## Build
 
@@ -96,6 +99,7 @@ $env:KEST_DATA = "$PWD/test-output/screenshot-workspace"
 ./test-output/diagnostics/bin/kest.exe --snapshot=test-output/minimum.png --width=640 --height=420
 ./test-output/diagnostics/bin/kest.exe --snapshot=test-output/sidebar.png --width=640 --height=420 --sidebar
 ./test-output/diagnostics/bin/kest.exe --snapshot=test-output/light.png --light
+./test-output/diagnostics/bin/kest.exe --snapshot=test-output/dpi-125.png --scale=1.25
 ```
 
 `--self-test` additionally exercises real loopback requests and the UI, and prints

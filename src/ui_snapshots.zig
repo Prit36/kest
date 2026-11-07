@@ -5,9 +5,9 @@ const c = w.c;
 const App = @import("app/state.zig").App;
 
 pub fn capture(ui: *c.cui_ctx, sw: *c.cui_sw_renderer, app: *App, path: []const u8) !void {
-    const size = c.cui_viewport_size(ui);
-    const width: c_int = @intFromFloat(size.x);
-    const height: c_int = @intFromFloat(size.y);
+    const data = c.cui_get_draw_data(ui);
+    const width = data.*.width_px;
+    const height = data.*.height_px;
     const pixels = try app.gpa.alloc(u8, @as(usize, @intCast(width * height)) * 4);
     defer app.gpa.free(pixels);
     c.cui_sw_render(sw, c.cui_get_draw_data(ui), pixels.ptr, width, height, width * 4, c.CUI_SW_RGBA);

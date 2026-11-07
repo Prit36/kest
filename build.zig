@@ -19,20 +19,24 @@ pub fn build(b: *std.Build) void {
     cui.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/src"));
     cui.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/"));
     cui.addCSourceFiles(.{ .root = dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/"), .files = &.{
-        "src/cui_core.c",         "src/cui_theme.c",            "src/cui_draw.c",               "src/cui_text.c",
-        "src/cui_layout.c",       "src/cui_widgets.c",          "src/cui_controls.c",           "src/cui_textedit.c",
-        "src/cui_overlay.c",      "src/cui_data.c",             "src/cui_actions.c",            "src/cui_disclosure.c",
-        "src/cui_extras.c",       "src/cui_grid.c",             "src/cui_treetable.c",          "src/cui_markdown.c",
-        "src/cui_editor.c",       "src/cui_diff.c",             "src/cui_code.c",               "src/cui_tools.c",
-        "src/cui_hex.c",          "src/cui_chrome.c",           "src/cui_charts.c",             "src/cui_image.c",
-        "src/cui_font_data.c",    "src/cui_inflate.c",          "src/render/cui_render_sw.c",   "src/render/cui_render_gl.c",
+        "src/cui_core.c",         "src/cui_theme.c",            "src/cui_draw.c",
+        "src/cui_layout.c",       "src/cui_widgets.c",          "src/cui_controls.c",
+        "src/cui_textedit.c",     "src/cui_overlay.c",          "src/cui_data.c",
+        "src/cui_actions.c",      "src/cui_disclosure.c",       "src/cui_extras.c",
+        "src/cui_grid.c",         "src/cui_treetable.c",        "src/cui_markdown.c",
+        "src/cui_editor.c",       "src/cui_diff.c",             "src/cui_code.c",
+        "src/cui_tools.c",        "src/cui_hex.c",              "src/cui_chrome.c",
+        "src/cui_charts.c",       "src/cui_image.c",            "src/cui_font_data.c",
+        "src/cui_inflate.c",      "src/render/cui_render_sw.c", "src/render/cui_render_gl.c",
         "src/platform/cui_app.c", "src/platform/cui_dialogs.c", "src/platform/cui_app_win32.c",
     }, .flags = c_flags });
+    cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_text.c"), .flags = c_flags });
+    cui.addCSourceFile(.{ .file = b.path("src/text_win32.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/host.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/controls.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/image.c"), .flags = c_flags });
     cui.addIncludePath(b.path("src"));
-    for ([_][]const u8{ "user32", "gdi32", "opengl32", "shell32", "imm32", "dwmapi", "comdlg32", "ole32" }) |name|
+    for ([_][]const u8{ "user32", "gdi32", "opengl32", "shell32", "imm32", "dwmapi", "comdlg32", "ole32", "dwrite", "uuid" }) |name|
         cui.linkSystemLibrary(name, .{});
     const cui_lib = b.addLibrary(.{ .name = "cui", .root_module = cui, .linkage = .static });
     const cui_bindings = bindings.createModule();
@@ -53,6 +57,16 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("demo_server", server);
     if (diagnostics) exe.root_module.addImport("test_server", server);
     const test_step = b.step("test", "Run engine, HTTP and CUI headless tests");
+    const text_test = b.addExecutable(.{ .name = "text-rendering-test", .root_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    }) });
+    text_test.root_module.addIncludePath(b.path("src"));
+    text_test.root_module.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/"));
+    text_test.root_module.addCSourceFile(.{ .file = b.path("tests/text_rendering.c"), .flags = c_flags });
+    text_test.root_module.linkLibrary(cui_lib);
+    test_step.dependOn(&b.addRunArtifact(text_test).step);
     test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = lib })).step);
     const http = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("tests/integration/http_tests.zig"),

@@ -36,6 +36,7 @@ pub fn main(init: std.process.Init) !void {
     var snapshot: ?[]const u8 = null;
     var width: f32 = 1180;
     var height: f32 = 800;
+    var scale: f32 = 1;
     for (args) |arg| {
         if (std.mem.eql(u8, arg, "--self-test")) test_mode = true;
         if (std.mem.eql(u8, arg, "--demo")) demo_mode = true;
@@ -44,10 +45,12 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.startsWith(u8, arg, "--snapshot=")) snapshot = arg[11..];
         if (std.mem.startsWith(u8, arg, "--width=")) width = std.fmt.parseFloat(f32, arg[8..]) catch 1180;
         if (std.mem.startsWith(u8, arg, "--height=")) height = std.fmt.parseFloat(f32, arg[9..]) catch 800;
+        if (std.mem.startsWith(u8, arg, "--scale=")) scale = std.fmt.parseFloat(f32, arg[8..]) catch return error.InvalidSnapshotScale;
     }
     platform.headless = test_mode or snapshot != null;
     if (!@import("build_options").diagnostics and platform.headless) return error.DiagnosticsNotEnabled;
     if (!std.math.isFinite(width) or !std.math.isFinite(height) or width < 640 or height < 420 or width > 8192 or height > 8192) return error.InvalidSnapshotDimensions;
+    if (!std.math.isFinite(scale) or scale < 1 or scale > 4 or width * scale > 8192 or height * scale > 8192) return error.InvalidSnapshotScale;
     if (platform.headless and init.environ_map.get("KEST_DATA") == null) return error.ScratchKEST_DATARequired;
     const data = if (demo_mode) blk: {
         const base = init.environ_map.get("KEST_DATA") orelse init.environ_map.get("APPDATA") orelse return error.AppDataUnavailable;
@@ -95,7 +98,7 @@ pub fn main(init: std.process.Init) !void {
         if (comptime @import("build_options").diagnostics) {
             if (light) app.prefs.dark = false;
             if (!test_mode) shell.narrow_open = show_sidebar;
-            try @import("headless.zig").run(&app, test_mode, snapshot, width, height);
+            try @import("headless.zig").run(&app, test_mode, snapshot, width, height, scale);
         }
         return;
     }

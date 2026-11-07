@@ -7,11 +7,15 @@ const code = @import("code_state.zig");
 const hl = @import("../utils/highlight.zig");
 const State = code.State;
 const design = @import("design.zig");
-const Paint = struct { state: *State, source: []const u8, lang: hl.Lang, focused: bool };
+const Paint = struct { state: *State, source: []const u8, lang: hl.Lang, focused: bool, char_w: f32 };
 const line_h = 20;
-const char_w: f32 = 7.8;
+// Use the same font advance for text, token origins, hit testing and caret.
+fn cellWidth(ui: *c.cui_ctx) f32 {
+    return c.cui_measure_text(ui, c.CUI_FONT_MONO, 13, "M", 1).width;
+}
 
 pub fn view(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8, read_only: bool, lang: hl.Lang) bool {
+    const char_w = cellWidth(ui);
     var source = source_in;
     const v0 = s.version;
     if (s.search_open) search(ui, s, source);
@@ -28,7 +32,7 @@ pub fn view(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8,
         s.indexed_len = source.len;
     }
     s.scroll_y = @max(0, s.scroll_y - c.kest_editor_scroll(ui, identity) * line_h * 3);
-    const paint = Paint{ .state = s, .source = source, .lang = lang, .focused = focused };
+    const paint = Paint{ .state = s, .source = source, .lang = lang, .focused = focused, .char_w = char_w };
     const result = c.cui_canvas(ui, id, w.fill, w.fill, draw, &paint, @sizeOf(Paint));
     c.kest_editor_register(ui, identity);
     const rect = result.rect;
@@ -104,6 +108,7 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     const ui = ui_opt.?;
     const p: *const Paint = @ptrCast(@alignCast(raw.?));
     const s = p.state;
+    const char_w = p.char_w;
     if (s.index.count() == 0) return;
     const visible: f32 = @max(1, rect.h - 16);
     const total: f32 = @floatFromInt(s.index.count() * line_h);
@@ -153,7 +158,7 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         const n = hl.tokens(row_text, p.lang, &tokens);
         var at: usize = 0;
         for (tokens[0..n]) |tok| {
-            segment(ui, text_x, y, row_text, at, tok.start, w.color(c.CUI_TOKEN_FOREGROUND));
+            segment(ui, char_w, text_x, y, row_text, at, tok.start, w.color(c.CUI_TOKEN_FOREGROUND));
             const token_color: c.cui_color = switch (tok.kind) {
                 .key, .tag, .variable => design.syntax(ui, .key),
                 .string => design.syntax(ui, .string),
@@ -162,10 +167,10 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
                 .comment => design.syntax(ui, .comment),
                 else => w.color(c.CUI_TOKEN_FOREGROUND),
             };
-            segment(ui, text_x, y, row_text, tok.start, tok.end, token_color);
+            segment(ui, char_w, text_x, y, row_text, tok.start, tok.end, token_color);
             at = tok.end;
         }
-        segment(ui, text_x, y, row_text, at, row_text.len, w.color(c.CUI_TOKEN_FOREGROUND));
+        segment(ui, char_w, text_x, y, row_text, at, row_text.len, w.color(c.CUI_TOKEN_FOREGROUND));
         if (p.focused and s.caret >= bounds[0] and s.caret <= bounds[1]) {
             const caret_x = x + @as(f32, @floatFromInt(s.caret - bounds[0])) * char_w;
             c.cui_draw_line(ui, .{ .x = caret_x, .y = y }, .{ .x = caret_x, .y = y + 17 }, 1.5, w.color(c.CUI_TOKEN_ACCENT));
@@ -177,7 +182,7 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     }
 }
 
-fn segment(ui: *c.cui_ctx, x: f32, y: f32, source: []const u8, lo: usize, hi: usize, tint: c.cui_color) void {
+fn segment(ui: *c.cui_ctx, char_w: f32, x: f32, y: f32, source: []const u8, lo: usize, hi: usize, tint: c.cui_color) void {
     if (lo >= hi) return;
     c.cui_draw_text(ui, c.CUI_FONT_MONO, 13, .{ .x = x + @as(f32, @floatFromInt(lo)) * char_w, .y = y }, tint, source[lo..hi].ptr, @intCast(hi - lo));
 }
