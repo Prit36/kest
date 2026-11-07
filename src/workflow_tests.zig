@@ -108,6 +108,11 @@ fn dragChecks(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]co
     try capture(ui, sw, app, snapshot, "drag-into");
     release(ui, app, frame);
     try check(@src(), first.parent == folder and folder.expanded);
+    // The folder stays open after the drop, so the moved item is visible.
+    for (0..3) |_| frame(ui, app);
+    var visible = false;
+    for (app.treeRows()) |r| visible = visible or r.node == first;
+    try check(@src(), folder.expanded and visible);
 
     // Escape cancels a drag; releasing afterwards changes nothing.
     press(ui, app, frame, rowPoint(ui, app, second, 0.5));
@@ -120,6 +125,15 @@ fn dragChecks(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]co
     try check(@src(), !sidebar.dragActive());
     release(ui, app, frame);
     try check(@src(), second.parent == collection);
+    // After drags and a cancelled drag, a plain click still selects and opens.
+    {
+        const at = rowPoint(ui, app, first, 0.5);
+        press(ui, app, frame, at);
+        release(ui, app, frame);
+        try check(@src(), app.selected == first);
+        const t = app.current() orelse return error.WorkflowRegression;
+        try check(@src(), t.link != null and std.mem.eql(u8, &t.link.?.request, &first.id));
+    }
 
     // Holding a drag near an edge scrolls a long tree (the shared self-test
     // workspace holds over a thousand rows), and stops away from the edge.
@@ -149,6 +163,7 @@ fn dragChecks(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]co
         const held = sidebar.treeScroll();
         for (0..4) |_| frame(ui, app);
         try check(@src(), sidebar.treeScroll() == held);
+        std.debug.print("CUI drag autoscroll: {s}, offset {d:.0} -> {d:.0} px in 12 frames, then held at {d:.0}\n", .{ if (up) "up" else "down", before, scrolled, held });
         // Cancel so this check moves nothing.
         c.cui_input_key(ui, c.CUI_KEY_ESCAPE, true, 0);
         frame(ui, app);

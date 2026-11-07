@@ -240,10 +240,24 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
     const pressed = down and !was_down;
     was_down = down;
     const can_drag = app.filter.len == 0 and !app.modal_open and !app.palette_open and menu_owner == null;
+    // A drop is applied after the tree has synced its open/closed state for
+    // this frame; moving earlier would let that sync close the target folder
+    // the move just opened.
+    var pending_move: ?struct { node: *col.Node, drop: Drop } = null;
     if (!down) {
         if (dragging and !drag_cancelled) if (press) |p| if (drop) |d| {
-            tree.moveAt(app, p.node, d.target, d.index);
-            app.rows_dirty = true;
+            pending_move = .{ .node = p.node, .drop = d };
+        };
+        // A plain click on a request opens it even when its row is already
+        // selected (a dropped item is selected without opening), where the
+        // tree reports no selection change.
+        if (!dragging and !drag_cancelled) if (press) |p| {
+            const near = @abs(mouse.x - p.x) <= drag_threshold and @abs(mouse.y - p.y) <= drag_threshold;
+            const open = if (app.current()) |t| if (t.link) |link| std.mem.eql(u8, &link.request, &p.node.id) else false else false;
+            if (near and p.node.kind == .request and !open) {
+                app.selected = p.node;
+                commands.openRequest(app, p.node);
+            }
         };
         press = null;
         dragging = false;
@@ -327,6 +341,10 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
         if (app.selected.?.kind == .request) commands.openRequest(app, app.selected.?);
     }
     if (events.activated >= 0) commands.openRequest(app, rows[@intCast(events.activated)].node);
+    if (pending_move) |m| {
+        tree.moveAt(app, m.node, m.drop.target, m.drop.index);
+        app.rows_dirty = true;
+    }
     if (app.rows_dirty) c.cui_request_redraw(ui);
 }
 

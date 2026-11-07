@@ -1021,7 +1021,60 @@ was added: it would only flash for a moment.
   Only the changed collection is saved; rows rebuild once.
 - `workflow_tests.zig` covers the threshold, reorder before a row, drop into
   a folder, Escape cancel, autoscroll in both directions and invalid targets.
-  Captures: `workspace-workflow-drag-{reorder,into}.png`.
+  Captures: `workspace-workflow-drag-{reorder,into}.png`. The autoscroll
+  check prints its measurement (e.g. offset 33491 → 33329 px over 12 frames,
+  then held once the pointer leaves the edge).
+
+### Real Windows input (req. 50, 51)
+
+`tests/integration/os_input.ps1` starts the real ReleaseFast app, with its
+real window and GPU surface, on a private desktop. It sends the Win32
+messages Windows delivers for mouse, keyboard and committed text
+(`WM_MOUSEMOVE`, `WM_LBUTTONDOWN/UP`, `WM_KEYDOWN/UP`, `WM_CHAR` via
+`PostMessageW`) to the app's actual window procedure. It then closes the
+window and checks the files the app saved. It passed 3 of 3 runs:
+
+- a press that wobbles 2px is a click and moves nothing;
+- dragging Gamma onto the top of Alpha saves `[Folder A, Gamma, Alpha]`;
+- dragging Beta onto Folder A's middle saves it inside the folder;
+- Escape during a drag leaves everything in place;
+- clicking Alpha, clicking the URL, End, then typing saves
+  `…/alpha/typed-é日本😀`. That covers ASCII, Latin-1, CJK (the
+  characters an IME commits) and an emoji sent as a UTF-16 surrogate pair;
+- the app exits with code 0 after `WM_CLOSE`.
+
+It found two real bugs, both fixed and covered by headless regressions:
+
+1. A drop into a collapsed folder opened it and was then closed again in the
+   same frame by the tree's open-state sync, hiding the dropped item. The
+   move is now applied after that sync.
+2. A dropped item is selected without being opened, so clicking it again did
+   nothing (CUI reports only selection *changes*). A plain click on a
+   request now opens it whenever it isn't the current tab.
+
+The physical cursor is never over a window on a hidden desktop, so Windows
+answers each `TrackMouseEvent` with an immediate `WM_MOUSELEAVE`. With
+`KEST_SYNTHETIC_POINTER` set (only by the harness), `host.c` ignores that one
+notification. Nothing changes otherwise.
+
+What this does not cover, and why:
+
+- **Screen readers.** UI Automation sees the window ("Kest") with 0
+  descendant elements: CUI's Win32 backend has no `WM_GETOBJECT` provider.
+  Req. 50 asks for screen-reader semantics "where supported by the native
+  framework"; CUI does not support them, so adding a provider means
+  extending the UI library, not Kest. Accessible names do exist for every
+  icon button (CUI labels, tooltips) for when CUI gains that support.
+- **IME composition.** Committed IME text arrives as `WM_CHAR` and works (CJK
+  above). CUI handles no `WM_IME_*` messages, so the composition and
+  candidate windows use Windows' default position rather than following the
+  caret. That is also a CUI backend limitation.
+- **Pixels.** PrintWindow cannot read the GPU swap chain on a hidden desktop
+  (the images are blank), so rendering evidence remains the software-renderer
+  captures.
+- **Multi-monitor and mixed DPI.** This machine has one 1920×1080 monitor at
+  96 DPI. Moving a window across monitors with different scales cannot be
+  exercised here; `WM_DPICHANGED` handling exists in CUI and `host.c`.
 
 ### Sidebar search highlighting and toasts
 
@@ -1046,9 +1099,11 @@ was added: it would only flash for a moment.
 
 ### Remaining limitations (not done or not verifiable here)
 
-- No real OS input, clipboard, IME, screen reader or GPU-output verification;
-  all interaction checks inject CUI events into a software renderer.
-- Mixed-DPI multi-monitor moves and monitor hot-plug are untested.
+- Real Windows mouse/keyboard/committed-text input is verified by
+  `tests/integration/os_input.ps1` (above). Not verifiable here: screen
+  readers (CUI exposes no UI Automation tree), IME composition-window
+  placement (CUI handles no `WM_IME_*`), real clipboard, GPU pixels on a
+  hidden desktop, and mixed-DPI multi-monitor moves (one monitor available).
 - Settings text fields only re-sync from `settings` on load; code that
   changes `settings` directly (only test fixtures today) leaves stale text.
 

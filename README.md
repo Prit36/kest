@@ -178,7 +178,15 @@ as `-body.png`, `-light.png`, `-minimum.png` and `-focus.png`.
 These flags require `-Ddiagnostics=true`; normal distribution builds omit them.
 
 The existing `tests/performance/startup.ps1` runs the native window on a private
-Windows desktop. See [verified coverage](docs/supported_features.md),
+Windows desktop. `tests/integration/os_input.ps1` does the same and drives the
+real window procedure with Windows mouse, keyboard and text messages (tree
+dragging, Escape, typing Unicode), then checks the files the app saved:
+
+```bash
+powershell -File tests/integration/os_input.ps1 -Exe zig-out/bin/kest.exe -Data <empty folder>
+```
+
+See [verified coverage](docs/supported_features.md),
 and [measurements](docs/performance.md). The [CUI 1.1 update](docs/cui-1.1-update.md)
 records component choices, compatibility work and validation.
 

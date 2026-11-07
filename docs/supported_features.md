@@ -37,7 +37,8 @@ does not establish coverage for this interface.
 | Hide/restore request details to focus on response | Layout focus state and response height U; restoring through a section tab U; focused response S |
 | Narrow workspace sheet at 640×420 | Toggle U; compact and unobstructed workspace images S |
 | Request Params/Body/Headers and settings control | Actual pane/body-type clicks U; params/body/settings S |
-| Collection tree drag reordering and drop into folders | Threshold, insertion line, into-folder outline, Escape cancel and invalid targets U; both indicators S; autoscroll near edges W |
+| Collection tree drag reordering and drop into folders | Threshold, insertion line, into-folder outline, Escape cancel, edge autoscroll and invalid targets U; both indicators S; reorder, drop into folder, Escape and click threshold through real Win32 messages (`tests/integration/os_input.ps1`) |
+| Real Windows input path | Mouse, keys and committed text (accented, CJK, surrogate-pair emoji) through the real window procedure, saved files checked (`tests/integration/os_input.ps1`); screen readers and IME composition placement unsupported by CUI |
 | Direct-entry tables, empty insertion row and URL sync | Actual key/value typing, continued focus and Tab to value U; populated table S; unused insertion row excluded from request data |
 | Minimum-size row visibility and response space | Populated row AND insertion row fully visible U; JSON viewport at least 60 px with empty request details U/S |
 | Joined method/URL composer and standard/custom method menu | Actual GET/POST/custom selection and custom typing U; dark/light S |

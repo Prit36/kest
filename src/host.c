@@ -45,8 +45,14 @@ static void remember_normal_geometry(void) {
 }
 #define KEST_WAKE (WM_APP + 73)
 #define KEST_FLUSH 0x5254
+/* tests/integration/os_input.ps1 posts real mouse messages to a window on a
+ * private desktop. The physical cursor is never over that window, so Windows
+ * answers every TrackMouseEvent with an immediate WM_MOUSELEAVE; only with
+ * KEST_SYNTHETIC_POINTER set is that one notification ignored. */
+static bool synthetic_pointer;
 static LRESULT CALLBACK dispatch(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == KEST_WAKE) return 0;
+    if (msg == WM_MOUSELEAVE && synthetic_pointer) return 0;
     if (msg == WM_TIMER && wp == KEST_FLUSH) {
         KillTimer(h, KEST_FLUSH);
         events |= 1;
@@ -63,6 +69,7 @@ static LRESULT CALLBACK dispatch(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 void kest_host_attach(cui_app *app) {
     window = (HWND)cui_app_native_window(app);
     previous = (WNDPROC)SetWindowLongPtrW(window, GWLP_WNDPROC, (LONG_PTR)dispatch);
+    synthetic_pointer = GetEnvironmentVariableW(L"KEST_SYNTHETIC_POINTER", NULL, 0) > 0;
     caption_valid = false;
     normal_valid = false;
     last_maximized = false;
