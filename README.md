@@ -180,7 +180,8 @@ These flags require `-Ddiagnostics=true`; normal distribution builds omit them.
 The existing `tests/performance/startup.ps1` runs the native window on a private
 Windows desktop. `tests/integration/os_input.ps1` does the same and drives the
 real window procedure with Windows mouse, keyboard and text messages (tree
-dragging, Escape, typing Unicode), then checks the files the app saved:
+dragging, Escape, typing Unicode, IME placement), then checks the files the app saved.
+`-Dpi 144` repeats everything after a simulated move to a 150% monitor:
 
 ```bash
 powershell -File tests/integration/os_input.ps1 -Exe zig-out/bin/kest.exe -Data <empty folder>

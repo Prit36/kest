@@ -9,13 +9,18 @@
 #
 # Checks: a click that wobbles 2px moves nothing; dragging reorders before a
 # row and drops into a folder; Escape cancels a drag; typed ASCII, accented,
-# CJK and a surrogate-pair emoji reach the URL and are saved; the UI
-# Automation tree the window exposes is reported.
+# CJK and a surrogate-pair emoji reach the URL and are saved; the IME
+# composition window follows the URL caret; with -Dpi, all of it after a
+# simulated move to a monitor at that DPI. The UI Automation tree the window
+# exposes is reported.
 param(
     [Parameter(Mandatory)][string]$Exe,
     [Parameter(Mandatory)][string]$Data,
     [string]$Shots = '',
-    [double]$Pace = 1
+    [double]$Pace = 1,
+    # Simulate moving the window to a monitor at this DPI (e.g. 144 = 150%)
+    # before any input: the real WM_DPICHANGED path, then every check at that scale.
+    [int]$Dpi = 0
 )
 $ErrorActionPreference = 'Stop'
 
@@ -43,6 +48,7 @@ public static class Os {
     [DllImport("user32")] static extern int GetWindowThreadProcessId(IntPtr hwnd, out int pid);
     [DllImport("user32")] static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32", EntryPoint = "PostMessageW")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
+    [DllImport("user32", EntryPoint = "SendMessageW")] public static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
     [DllImport("user32")] public static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32")] public static extern bool GetClientRect(IntPtr hwnd, out RECT r);
     [DllImport("user32")] static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
@@ -148,6 +154,12 @@ try {
     $hwnd = [Os]::MainWindow($desk, $id)
     if ($hwnd -eq [IntPtr]::Zero) { throw 'No window' }
     $scale = [Os]::GetDpiForWindow($hwnd) / 96.0
+    if ($Dpi -gt 0) {
+        $from = [int]([Os]::GetDpiForWindow($hwnd))
+        [void][Os]::SendMessage($hwnd, 0x8000 + 75, [IntPtr]$Dpi, [IntPtr]$from)
+        Start-Sleep -Milliseconds ([int](900 * $Pace))
+        $scale = $Dpi / 96.0
+    }
     $rc = New-Object Os+RECT; [void][Os]::GetClientRect($hwnd, [ref]$rc)
     "window: client {0}x{1} px, scale {2}" -f $rc.Right, $rc.Bottom, $scale
 
@@ -192,9 +204,15 @@ try {
     Start-Sleep -Milliseconds ([int](300 * $Pace))
     SendMove 800 132 $false; SendDown 800 132; SendUp 800 132
     SendKey $VK_END
+    # The IME composition window follows the caret (read back from the
+    # window's own input context, client pixels).
+    function ImePoint { $r = [Os]::SendMessage($hwnd, 0x8000 + 74, [IntPtr]0, [IntPtr]0).ToInt64(); if ($r -lt 0) { $null } else { @{ x = $r -band 0xFFFF; y = ($r -shr 16) -band 0xFFFF } } }
+    $imeBefore = ImePoint
     $typed = "/typed-$([char]0xE9)$([char]0x65E5)$([char]0x672C)$([char]0xD83D)$([char]0xDE00)"
     SendType $typed
     Start-Sleep -Milliseconds ([int](400 * $Pace))
+    $imeAfter = ImePoint
+    "ime composition point: before typing {0}, after typing {1}" -f $(if ($imeBefore) { "$($imeBefore.x),$($imeBefore.y)" } else { 'none' }), $(if ($imeAfter) { "$($imeAfter.x),$($imeAfter.y)" } else { 'none' })
     if ($Shots) { [void][Os]::Shot($hwnd, (Join-Path $Shots 'os-typed.png')) }
 
     # Screen readers: what UI Automation can see of the window.
@@ -224,5 +242,7 @@ Check (($inside -join ',') -eq 'Beta') 'Beta dropped into Folder A'
 $alpha = Get-Content -Raw -Encoding UTF8 (Join-Path $dir "$($ids.Alpha).json") | ConvertFrom-Json
 "saved Alpha url: $($alpha.url)"
 Check ($alpha.url -eq "https://example.invalid/alpha$typed") 'typed ASCII, accented, CJK and emoji text saved in the URL'
+# The URL field spans about x 427..1060, y 113..151 (logical) at this size.
+Check ($imeBefore -and $imeAfter -and $imeAfter.x -gt $imeBefore.x -and $imeAfter.x -ge (Px 427) -and $imeAfter.x -le (Px 1060) -and $imeAfter.y -ge (Px 105) -and $imeAfter.y -le (Px 155)) 'IME composition window sits at the URL caret and follows typing'
 if ($failures.Count) { "FAILED: $($failures.Count)"; exit 1 }
 'all OS input checks passed'

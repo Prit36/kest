@@ -5,6 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <dwmapi.h>
+#include <imm.h>
 static HWND window;
 static WNDPROC previous;
 static int events;
@@ -50,9 +51,66 @@ static void remember_normal_geometry(void) {
  * answers every TrackMouseEvent with an immediate WM_MOUSELEAVE; only with
  * KEST_SYNTHETIC_POINTER set is that one notification ignored. */
 static bool synthetic_pointer;
+
+/* IME: CUI's text fields and editors report their caret through
+ * platform.set_text_input_rect, which its Win32 backend leaves unset. Kest
+ * places the composition window at the caret and keeps the candidate list
+ * just below the caret line, so CJK input appears where the text goes. */
+static cui_rect ime_caret;
+static bool ime_known;
+static float ime_scale = 1;   /* CUI's own DPI scale, the one its input mapping uses */
+static void ime_apply(void) {
+    if (!window || !ime_known) return;
+    HIMC imc = ImmGetContext(window);
+    if (!imc) return;
+    float s = ime_scale;
+    LONG x = (LONG)(ime_caret.x * s), y = (LONG)(ime_caret.y * s);
+    LONG bottom = (LONG)((ime_caret.y + ime_caret.h) * s);
+    COMPOSITIONFORM composition = { .dwStyle = CFS_POINT, .ptCurrentPos = { x, y } };
+    ImmSetCompositionWindow(imc, &composition);
+    CANDIDATEFORM candidate = { .dwIndex = 0, .dwStyle = CFS_EXCLUDE, .ptCurrentPos = { x, bottom },
+                                .rcArea = { x, y, x + (LONG)(ime_caret.w * s) + 1, bottom } };
+    ImmSetCandidateWindow(imc, &candidate);
+    ImmReleaseContext(window, imc);
+}
+static void ime_caret_moved(void *user, cui_rect caret) {
+    (void)user;
+    if (ime_known && caret.x == ime_caret.x && caret.y == ime_caret.y && caret.h == ime_caret.h) return;
+    ime_caret = caret;
+    ime_known = true;
+    ime_apply();
+}
+/* Test-only (KEST_SYNTHETIC_POINTER): where the IME composition window is,
+ * read back from the window's own input context, in client pixels. */
+#define KEST_IME_QUERY (WM_APP + 74)
+static LRESULT ime_query(void) {
+    HIMC imc = ImmGetContext(window);
+    if (!imc) return -1;
+    COMPOSITIONFORM composition = {0};
+    BOOL ok = ImmGetCompositionWindow(imc, &composition);
+    ImmReleaseContext(window, imc);
+    if (!ok) return -1;
+    return MAKELRESULT((WORD)composition.ptCurrentPos.x, (WORD)composition.ptCurrentPos.y);
+}
+
+/* Test-only (KEST_SYNTHETIC_POINTER): behave as if the window had moved to a
+ * monitor at `dpi`, by sending the WM_DPICHANGED Windows sends then, with the
+ * suggested rectangle scaled about the window's top-left corner. */
+#define KEST_DPI_SIMULATE (WM_APP + 75)
+static LRESULT dpi_simulate(HWND h, unsigned dpi, unsigned from) {
+    RECT r;
+    if (dpi < 48 || dpi > 480 || !from || !GetWindowRect(h, &r)) return 0;
+    LONG w = (r.right - r.left) * (LONG)dpi / (LONG)from, ht = (r.bottom - r.top) * (LONG)dpi / (LONG)from;
+    RECT suggested = { 0, 0, w, ht };
+    return SendMessageW(h, WM_DPICHANGED, MAKEWPARAM(dpi, dpi), (LPARAM)&suggested);
+}
+
 static LRESULT CALLBACK dispatch(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == KEST_WAKE) return 0;
     if (msg == WM_MOUSELEAVE && synthetic_pointer) return 0;
+    if (msg == KEST_IME_QUERY && synthetic_pointer) return ime_query();
+    if (msg == KEST_DPI_SIMULATE && synthetic_pointer) return dpi_simulate(h, (unsigned)wp, (unsigned)lp);
+    if (msg == WM_IME_STARTCOMPOSITION) ime_apply();
     if (msg == WM_TIMER && wp == KEST_FLUSH) {
         KillTimer(h, KEST_FLUSH);
         events |= 1;
@@ -141,6 +199,8 @@ static cui_color over(cui_color base, cui_color scrim) {
 }
 void kest_host_sync_chrome(cui_ctx *ui) {
     if (!window) return;
+    if (ui->platform.set_text_input_rect != ime_caret_moved) ui->platform.set_text_input_rect = ime_caret_moved;
+    if (cui_dpi_scale(ui) != ime_scale) { ime_scale = cui_dpi_scale(ui); ime_apply(); }
     cui_color bg = CUI_C(ui, BACKGROUND), fg = CUI_C(ui, FOREGROUND);
     /* Read this frame's actual animated scrims, including sheets, the palette
      * and closing dialogs. Kest's scrims are all black, so their order does

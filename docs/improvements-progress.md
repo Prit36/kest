@@ -1043,7 +1043,7 @@ window and checks the files the app saved. It passed 3 of 3 runs:
   characters an IME commits) and an emoji sent as a UTF-16 surrogate pair;
 - the app exits with code 0 after `WM_CLOSE`.
 
-It found two real bugs, both fixed and covered by headless regressions:
+It found three real bugs (the IME one is described below), both fixed and covered by headless regressions:
 
 1. A drop into a collapsed folder opened it and was then closed again in the
    same frame by the tree's open-state sync, hiding the dropped item. The
@@ -1065,16 +1065,25 @@ What this does not cover, and why:
   framework"; CUI does not support them, so adding a provider means
   extending the UI library, not Kest. Accessible names do exist for every
   icon button (CUI labels, tooltips) for when CUI gains that support.
-- **IME composition.** Committed IME text arrives as `WM_CHAR` and works (CJK
-  above). CUI handles no `WM_IME_*` messages, so the composition and
-  candidate windows use Windows' default position rather than following the
-  caret. That is also a CUI backend limitation.
+- **IME composition (fixed).** Committed IME text arrives as `WM_CHAR` and
+  works (CJK above). CUI's fields and editors report their caret through
+  `platform.set_text_input_rect`, but its Win32 backend never installed that
+  hook, so composition and candidate windows sat at Windows' default spot.
+  `host.c` now installs it and places the composition window at the caret
+  (candidates below the caret line) with Imm32, re-applied on
+  `WM_IME_STARTCOMPOSITION` and on scale changes. The harness reads the
+  position back from the window's own input context: x 611 at the end of
+  the URL, 690 after typing, y 122 (the field row).
 - **Pixels.** PrintWindow cannot read the GPU swap chain on a hidden desktop
   (the images are blank), so rendering evidence remains the software-renderer
   captures.
-- **Multi-monitor and mixed DPI.** This machine has one 1920×1080 monitor at
-  96 DPI. Moving a window across monitors with different scales cannot be
-  exercised here; `WM_DPICHANGED` handling exists in CUI and `host.c`.
+- **Mixed DPI (simulated).** This machine has one 1920×1080 monitor, so a
+  physical move between monitors is not possible here. `-Dpi 120` / `-Dpi 144`
+  sends the app the same `WM_DPICHANGED` Windows sends on such a move (via a
+  test-only `host.c` message), then runs every check at that scale. All pass
+  at 100%, 125% and 150%. Clicks, drags and typing map correctly, and the IME
+  point scales (917,182 at 150% = 611,122 × 1.5). Not covered: real monitor
+  hot-plug and the window manager's own rectangle choice.
 
 ### Sidebar search highlighting and toasts
 
@@ -1100,10 +1109,11 @@ What this does not cover, and why:
 ### Remaining limitations (not done or not verifiable here)
 
 - Real Windows mouse/keyboard/committed-text input is verified by
-  `tests/integration/os_input.ps1` (above). Not verifiable here: screen
-  readers (CUI exposes no UI Automation tree), IME composition-window
-  placement (CUI handles no `WM_IME_*`), real clipboard, GPU pixels on a
-  hidden desktop, and mixed-DPI multi-monitor moves (one monitor available).
+  `tests/integration/os_input.ps1` (above), including IME placement and
+  simulated 125%/150% monitor moves. Not verifiable or not supported here:
+  screen readers (CUI exposes no UI Automation tree; req. 50 scopes this to
+  framework support), the real clipboard, GPU pixels on a hidden desktop, and
+  a physical second monitor (one is available).
 - Settings text fields only re-sync from `settings` on load; code that
   changes `settings` directly (only test fixtures today) leaves stale text.
 
