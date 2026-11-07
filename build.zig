@@ -57,6 +57,18 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("demo_server", server);
     if (diagnostics) exe.root_module.addImport("test_server", server);
     const test_step = b.step("test", "Run engine, HTTP and CUI headless tests");
+    const chrome_test = b.addExecutable(.{ .name = "window-chrome-test", .root_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    }) });
+    chrome_test.root_module.addIncludePath(b.path("src"));
+    chrome_test.root_module.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/include"));
+    chrome_test.root_module.addCSourceFile(.{ .file = b.path("tests/window_chrome.c"), .flags = c_flags });
+    chrome_test.root_module.linkLibrary(cui_lib);
+    const chrome_run = b.addRunArtifact(chrome_test);
+    test_step.dependOn(&chrome_run.step);
+    b.step("test-chrome", "Check native title bar theme and modal colors in a hidden window").dependOn(&chrome_run.step);
     const text_test = b.addExecutable(.{ .name = "text-rendering-test", .root_module = b.createModule(.{
         .target = target,
         .optimize = optimize,

@@ -2,6 +2,7 @@
 #include <cui/cui_app.h>
 #include <cui/cui_render.h>
 void kest_host_attach(cui_app *app);
+void kest_host_sync_chrome(cui_ctx *ui);
 void kest_host_wake(void);
 void kest_host_schedule(unsigned ms);
 int kest_host_events(void);

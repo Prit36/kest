@@ -71,7 +71,6 @@ fn topbar(ui: *c.cui_ctx, app: *App, width: f32) void {
     if (w.icon(ui, c.CUI_ICON_PANEL_LEFT, "Toggle workspace (Ctrl B)")) {
         toggleSidebar(ui, app);
     }
-    @import("brand.zig").view(ui);
     c.cui_spacer(ui);
     if (w.iconMenu(ui, w.fmt("{s}###active-environment", .{if (app.active_env) |e| e.name else "No environment"}), c.CUI_ICON_DATABASE, if (width < 800) 170 else 200, w.color(if (app.active_env != null) c.CUI_TOKEN_FOREGROUND else c.CUI_TOKEN_TEXT_MUTED))) {
         c.cui_menu_label(ui, "ACTIVE ENVIRONMENT");

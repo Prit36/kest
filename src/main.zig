@@ -126,6 +126,7 @@ pub fn main(init: std.process.Init) !void {
         }
         shell.view(platform.context.?, &app);
         c.cui_end_frame(platform.context);
+        c.kest_host_sync_chrome(platform.context);
         c.kest_quiet_caret(platform.context);
     }
 }

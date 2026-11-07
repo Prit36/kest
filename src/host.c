@@ -4,9 +4,13 @@
 #include "cui_internal.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <dwmapi.h>
 static HWND window;
 static WNDPROC previous;
 static int events;
+static COLORREF caption_color, caption_text;
+static BOOL caption_dark;
+static bool caption_valid;
 #define KEST_WAKE (WM_APP + 73)
 #define KEST_FLUSH 0x5254
 static LRESULT CALLBACK dispatch(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -22,6 +26,45 @@ static LRESULT CALLBACK dispatch(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 void kest_host_attach(cui_app *app) {
     window = (HWND)cui_app_native_window(app);
     previous = (WNDPROC)SetWindowLongPtrW(window, GWLP_WNDPROC, (LONG_PTR)dispatch);
+    caption_valid = false;
+}
+static cui_color over(cui_color base, cui_color scrim) {
+    unsigned a = scrim.a, inv = 255 - a;
+    return (cui_color){ (base.r * inv + scrim.r * a + 127) / 255,
+                        (base.g * inv + scrim.g * a + 127) / 255,
+                        (base.b * inv + scrim.b * a + 127) / 255, 255 };
+}
+void kest_host_sync_chrome(cui_ctx *ui) {
+    if (!window) return;
+    cui_color bg = CUI_C(ui, BACKGROUND), fg = CUI_C(ui, FOREGROUND);
+    /* Read this frame's actual animated scrims, including sheets, the palette
+     * and closing dialogs. Kest's scrims are all black, so their order does
+     * not affect the composite. Menus and tooltips have no blocker flag. */
+    for (int i = 0; i < ui->float_count; i++) {
+        cui_node *n = &ui->nodes[ui->float_roots[i]];
+        if (!(n->flags & CUI_NF_BLOCKER)) continue;
+        bg = over(bg, n->bg);
+        fg = over(fg, n->bg);
+    }
+    COLORREF color = RGB(bg.r, bg.g, bg.b), text = RGB(fg.r, fg.g, fg.b);
+    BOOL dark = fg.r + fg.g + fg.b > bg.r + bg.g + bg.b;
+    if (!caption_valid || dark != caption_dark) {
+        /* 20 is supported on current Windows 10/11; older Windows 10 uses 19. */
+        if (FAILED(DwmSetWindowAttribute(window, 20, &dark, sizeof dark)))
+            DwmSetWindowAttribute(window, 19, &dark, sizeof dark);
+        caption_dark = dark;
+    }
+    /* Custom caption/text colors are available on Windows 11. Older systems
+     * retain the native caption with the matching light/dark appearance. */
+    if (!caption_valid || color != caption_color) {
+        DwmSetWindowAttribute(window, 35, &color, sizeof color);
+        caption_color = color;
+    }
+    if (!caption_valid || text != caption_text) {
+        DwmSetWindowAttribute(window, 36, &text, sizeof text);
+        caption_text = text;
+    }
+    caption_valid = true;
 }
 void kest_host_wake(void) { if (window) PostMessageW(window, KEST_WAKE, 0, 0); }
 void kest_host_schedule(unsigned ms) { if (window) SetTimer(window, KEST_FLUSH, ms, NULL); }
