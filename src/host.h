@@ -20,6 +20,9 @@ bool retort_menu_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts
 bool retort_dropdown_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts);
 bool retort_reveal(cui_ctx *ui, cui_id scroll_id, cui_id target, bool horizontal);
 void retort_focus(cui_ctx *ui, const char *id);
+void retort_collection_style(cui_ctx *ui, const char *id, cui_color background);
+void retort_collection_top(cui_ctx *ui, const char *id);
+void retort_collection_name(cui_ctx *ui, const char *name, const char *method, const char *icon, cui_color color);
 bool retort_button_ex(cui_ctx *ui, const char *label, const cui_button_opts *opts);
 bool retort_select_ex(cui_ctx *ui, const char *id, const char *const *items, int count, int *index, const cui_select_opts *opts);
 cui_texture retort_image_memory(cui_ctx *ui, const unsigned char *bytes, int length, int *out_width, int *out_height);

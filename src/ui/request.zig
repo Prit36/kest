@@ -12,9 +12,10 @@ pub const bar = @import("composer.zig").view;
 
 pub fn minimumHeight(t: *const tab.Tab) f32 {
     return switch (t.pane) {
-        .params => if (t.params.rows.items.len > 0 or t.params.bulk != null) 142 else 108,
-        .headers => if (t.headers.rows.items.len > 0 or t.headers.bulk != null) 142 else 108,
-        .body, .settings => 140,
+        .params => if (t.params.rows.items.len > 0 or t.params.bulk != null) 148 else 112,
+        .headers => if (t.headers.rows.items.len > 0 or t.headers.bulk != null) 148 else 112,
+        .body => if (t.body_kind == .multipart or t.body_kind == .form_urlencoded) 148 else 140,
+        .settings => 140,
     };
 }
 
@@ -137,11 +138,11 @@ fn settings(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
 }
 
 fn setting(ui: *c.cui_ctx, label: []const u8, detail: []const u8, id: [*:0]const u8, value: *@import("model.zig").TextBuffer, suffix: ?[*:0]const u8) bool {
-    w.row(ui, .{ .gap = 16, .min_height = 42 });
+    w.row(ui, .{ .width = w.fill, .gap = 16, .min_height = 42 });
     defer w.end(ui);
     w.column(ui, .{ .width = w.fill, .gap = 4 });
-    w.text(ui, label, .{ .size = 13, .font = c.CUI_FONT_MEDIUM });
-    w.text(ui, detail, .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
+    w.text(ui, label, .{ .width = w.fill, .size = 13, .font = c.CUI_FONT_MEDIUM });
+    w.text(ui, detail, .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
     w.end(ui);
     return w.field(ui, id, value, .{ .width = w.px(128), .suffix = suffix });
 }

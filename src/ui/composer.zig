@@ -11,7 +11,7 @@ const url = @import("../utils/url.zig");
 const methods = [_][]const u8{ "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS" };
 
 pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab) void {
-    w.column(ui, .{ .width = w.fill, .pad_x = 14, .pad_y = 10, .gap = 5 });
+    w.column(ui, .{ .id = "composer-area", .width = w.fill, .pad_x = 14, .pad_y = 10, .gap = 5 });
     defer w.end(ui);
     w.row(ui, .{ .id = "request-composer", .gap = 8, .height = w.px(38), .width = w.fill });
     w.row(ui, .{ .id = "url-group", .width = w.fill, .height = w.fill, .border = 1, .border_color = w.color(c.CUI_TOKEN_BORDER_STRONG), .radius = 4, .clip = true, .pad_x = 2 });
@@ -50,7 +50,7 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab) void {
     if (w.action(ui, "save-request", "", c.CUI_ICON_SAVE, false, 30, 32, 3)) commands.save(app, t);
     c.cui_tooltip(ui, if (t.link == null) "Save to collection (Ctrl S)" else "Save request (Ctrl S)");
     w.end(ui);
-    if (w.button(ui, if (t.running()) "Cancel" else "Send", .{ .variant = if (t.running()) c.CUI_BUTTON_DANGER else c.CUI_BUTTON_PRIMARY, .size = c.CUI_SIZE_LG, .icon_right = if (t.running()) c.CUI_ICON_SQUARE else c.CUI_ICON_ARROW_RIGHT, .tooltip = "Send request", .shortcut = "Ctrl Enter", .width = w.px(86) })) {
+    if (w.button(ui, if (t.running()) "Cancel" else "Send", .{ .variant = if (t.running()) c.CUI_BUTTON_DANGER else c.CUI_BUTTON_PRIMARY, .size = c.CUI_SIZE_LG, .icon_right = if (t.running()) c.CUI_ICON_SQUARE else c.CUI_ICON_ARROW_RIGHT, .tooltip = if (t.running()) "Cancel request (Ctrl Enter)" else "Send request (Ctrl Enter)", .shortcut = "Ctrl Enter", .width = w.px(86) })) {
         if (t.running()) commands.cancel(t) else commands.send(app, t);
     }
     w.end(ui);

@@ -46,6 +46,9 @@ pub fn run(app: *App, test_mode: bool, snapshot: ?[]const u8, width: f32, height
     if (test_mode) {
         // Suite interactions begin on the desktop layout; requested snapshot
         // dimensions are restored below. Tests exercise compact layout explicitly.
+        // Scratch workspaces survive runs; start from a deterministic console
+        // state. Individual compact regressions exercise the open console.
+        app.prefs.log_open = false;
         c.cui_set_viewport(ui, 1180, 800, 1);
         try tests(ui, app);
         try workspaceUx(ui, app, sw, snapshot);
@@ -117,6 +120,24 @@ fn tests(ui: *c.cui_ctx, app: *App) !void {
         t.pane = pane;
         frame(ui, app);
     }
+    const old_log = app.prefs.log_open;
+    const old_body = t.body_kind;
+    t.pane = .body;
+    for ([_]@import("core/request.zig").BodyKind{ .json, .form_urlencoded, .multipart }) |kind| {
+        t.body_kind = kind;
+        for ([_]bool{ false, true }) |log_open| {
+            app.prefs.log_open = log_open;
+            for (0..8) |_| frame(ui, app);
+            const footer = c.cui_get_rect(ui, c.cui_make_id(ui, "status"));
+            const panel = tabRect(ui, t, "response-panel");
+            if (footer.h <= 0 or footer.y + footer.h > 420 or panel.h <= 0 or panel.y + panel.h > footer.y)
+                std.debug.print("Compact body={s} log={}: footer={any}, response={any}\n", .{ @tagName(kind), log_open, footer, panel });
+            try expect(@src(), footer.h > 0 and footer.y + footer.h <= 420);
+            try expect(@src(), panel.h > 0 and panel.y + panel.h <= footer.y);
+        }
+    }
+    app.prefs.log_open = old_log;
+    t.body_kind = old_body;
     t.pane = .params;
     c.cui_set_viewport(ui, 1180, 800, 1);
     for (0..12) |_| frame(ui, app);
@@ -131,6 +152,9 @@ fn tabRect(ui: *c.cui_ctx, t: *@import("app/tab.zig").Tab, id: [*:0]const u8) c.
 
 fn workspaceUx(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]const u8) !void {
     const t = app.current().?;
+    const old_log_open = app.prefs.log_open;
+    defer app.prefs.log_open = old_log_open;
+    app.prefs.log_open = false;
     const original_dark = app.prefs.dark;
     defer app.prefs.dark = original_dark;
     app.prefs.dark = true;
@@ -189,6 +213,8 @@ fn workspaceUx(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]c
     const next_row = c.cui_get_rect(ui, c.cui_make_id(ui, "key"));
     c.cui_pop_id(ui);
     c.cui_pop_id(ui);
+    if (next_row.h < 30 or next_row.y + next_row.h > tabRect(ui, t, "response-panel").y)
+        std.debug.print("Parameter insertion={any}, response={any}, log={}\n", .{ next_row, tabRect(ui, t, "response-panel"), app.prefs.log_open });
     try expect(@src(), next_row.h >= 30 and next_row.y + next_row.h <= tabRect(ui, t, "response-panel").y);
     const response_before = tabRect(ui, t, "response-panel");
     const nav = tabRect(ui, t, "toggle-details");

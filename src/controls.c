@@ -4,6 +4,49 @@
 #include "cui_internal.h"
 void retort_focus(cui_ctx *ui, const char *id) { ui->focus = cui_make_id(ui, id); }
 
+void retort_collection_top(cui_ctx *ui, const char *key) {
+    /* The pinned CUI grid owns a separate scroll state from its public id. */
+    cui_scroll_state *s = cui_state(ui, cui_make_id(ui, key) ^ 0x5C011u, sizeof *s);
+    s->x = s->tx = s->y = s->ty = 0;
+    cui_request_redraw(ui);
+}
+
+/* Keep the native tree's navigation/selection, with browser-like rows.
+ * All geometry changes are local; dependency sources stay untouched. */
+void retort_collection_style(cui_ctx *ui, const char *key, cui_color background) {
+    cui_id id = cui_make_id(ui, key);
+    for (int i = cui__current(ui); i >= 0; i = ui->nodes[i].parent) {
+        cui_node *n = &ui->nodes[i];
+        if (n->id == id) {
+            n->border = 0; n->radius = CUI_CORNERS(0);
+            n->bg = cui_color_of(ui, background);
+            break;
+        }
+    }
+}
+
+void retort_collection_name(cui_ctx *ui, const char *name, const char *method, const char *icon, cui_color color) {
+    int row = cui__current(ui);
+    if (row >= 0) { ui->nodes[row].paint = NULL; ui->nodes[row].paint_data = NULL; }
+    cui_tree_table_name(ui, method ? method : name, method ? NULL : icon);
+    int label = ui->last_node;
+    if (method) {
+        ui->nodes[label].text_color = cui_color_of(ui, color);
+        ui->nodes[label].font = CUI_FONT_MONO;
+        ui->nodes[label].font_size = 10;
+        ui->nodes[label].w = CUI_PX(44);
+        ui->nodes[label].flags |= CUI_NF_KEEP_W;
+        cui__leaf(ui, 0, CUI_PX(8), CUI_PX(1));
+        cui_text_opts opts = {0}; opts.nowrap = true; opts.size = 12;
+        cui_text_ex(ui, name, &opts);
+        label = ui->last_node;
+    }
+    ui->nodes[label].w = CUI_FILL;
+    ui->nodes[label].min_w = 1;
+    int cell = cui__current(ui);
+    if (cell >= 0) ui->nodes[cell].pad[1] = 4;
+}
+
 typedef struct { int kind; bool selected, hovered; } retort_control_paint;
 static void paint_control(cui_ctx *ui, cui_node *n, void *raw) {
     retort_control_paint *p = raw;
@@ -22,6 +65,7 @@ bool retort_control_begin(cui_ctx *ui, const char *key, bool selected, float wid
     box.id = key;
     box.width = width < 0 ? CUI_FILL : width > 0 ? CUI_PX(width) : CUI_FIT;
     box.height = CUI_PX(height);
+    box.clip = true;
     box.dir = CUI_ROW; box.align = CUI_ALIGN_CENTER;
     box.gap = 8; box.pad_x = kind == 0 ? 6 : (kind == 3 && width > 0 && width <= 36) ? 0 : 10;
     if (kind == 3) box.justify = CUI_JUSTIFY_CENTER;
@@ -69,6 +113,7 @@ bool retort_dropdown_begin(cui_ctx *ui, const char *label, const cui_menu_opts *
     cui_id popup_id = cui_make_id(ui, label) ^ 0x3E40u;
     cui_popup *popup = cui__popup_get(ui, popup_id, false);
     cui_button_opts button = {0};
+    button.size = CUI_SIZE_SM;
     button.variant = opts->variant; button.icon = opts->icon;
     button.selected = popup && popup->open;
     bool clicked;
@@ -105,6 +150,13 @@ bool retort_menu_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts
         n->border = 0; n->radius = CUI_CORNERS(4);
         for (int i = first + 1; i < ui->node_count && ui->nodes[i].parent == first; i++)
             ui->nodes[i].text_color = cui_color_of(ui, color);
+        if (width > 0) {
+            n->flags |= CUI_NF_CLIP;
+            for (int i = first + 1; i < ui->node_count && ui->nodes[i].parent == first; i++) {
+                cui_node *child = &ui->nodes[i];
+                if (child->text && child->font != CUI_FONT_ICONS) { child->w = CUI_FILL; child->min_w = 1; }
+            }
+        }
     }
     return open;
 }

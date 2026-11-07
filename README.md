@@ -24,9 +24,28 @@ macOS hosts have not been implemented or tested.
 `ReleaseFast` is the recommended distribution build: Zig optimizes for runtime
 speed and the CUI/rendering/image C sources use `-O3`. Executable size is not
 the target. Release executables are stripped, and the normal app excludes the
-headless UI tests and loopback server. Plain `zig build` remains a debug build.
+headless UI tests. The bundled loopback fixture server starts only in demo mode. Plain `zig build` remains a debug build.
 
 ## Workspace and shortcuts
+
+### Repeatable demo workspace
+
+Double-click `Demo.cmd`, or run `kest.exe --demo` (from source:
+`zig build run -Doptimize=ReleaseFast -- --demo`). Every launch creates a fresh,
+separate workspace under `%APPDATA%\kest-demo\<session-id>`; when `RETORT_DATA`
+is set, demo sessions go under that folder's `kest-demo` subdirectory. Your normal
+collections and preferences are not loaded or changed. Demo sessions are retained
+on disk so you can inspect or export your experiments.
+
+The built-in loopback API starts automatically on a free port and stops with the
+app. No internet, account, Python, or other server setup is needed. Five collections
+include fictional people/orders, every body type, enabled/disabled rows, a real
+sample upload, status codes, redirects, a three-second timeout/cancel example,
+Markdown/HTML/image/binary responses, empty folders, and a long nested tree.
+Three environments use the same local API with different dummy variable values.
+Eight tabs send automatically so real responses, headers, history, and activity
+are ready to inspect. All data is fictional; people/order endpoints return fixed
+fixtures rather than implementing CRUD. Closing and reopening Demo starts over.
 
 The default data folder is `%APPDATA%\retort-cui`. `RETORT_DATA` selects another
 folder.

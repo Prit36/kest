@@ -86,9 +86,9 @@ pub fn menuItem(ui: *c.cui_ctx, label: []const u8) bool {
 }
 pub fn empty(ui: *c.cui_ctx, title: [*:0]const u8, detail: [*:0]const u8) void {
     c.cui_spacer(ui);
-    column(ui, .{ .pad_x = 20, .gap = 6, .@"align" = c.CUI_ALIGN_CENTER });
-    text(ui, std.mem.span(title), .{ .font = c.CUI_FONT_MEDIUM, .size = 14, .@"align" = c.CUI_TEXT_CENTER });
-    if (c.cui_viewport_size(ui).y >= 600) text(ui, std.mem.span(detail), .{ .size = 12, .color = color(c.CUI_TOKEN_TEXT_MUTED), .@"align" = c.CUI_TEXT_CENTER });
+    column(ui, .{ .width = fill, .pad_x = 20, .gap = 6, .@"align" = c.CUI_ALIGN_CENTER });
+    text(ui, std.mem.span(title), .{ .width = fill, .font = c.CUI_FONT_MEDIUM, .size = 14, .@"align" = c.CUI_TEXT_CENTER });
+    if (c.cui_viewport_size(ui).y >= 600) text(ui, std.mem.span(detail), .{ .width = fill, .size = 12, .color = color(c.CUI_TOKEN_TEXT_MUTED), .@"align" = c.CUI_TEXT_CENTER });
     end(ui);
     c.cui_spacer(ui);
 }

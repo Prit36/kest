@@ -103,6 +103,14 @@ pub const Server = struct {
         if (content_length > take) try r.discardAll(content_length - take);
 
         const is_head = std.mem.eql(u8, method, "HEAD");
+        if (std.mem.eql(u8, target, "/demo/users")) {
+            try respond(w, 200, "OK", "application/json", is_head, @embedFile("demo_users.json"), null);
+            return true;
+        }
+        if (std.mem.eql(u8, target, "/demo/orders")) {
+            try respond(w, 200, "OK", "application/json", is_head, @embedFile("demo_orders.json"), null);
+            return true;
+        }
         if (std.mem.eql(u8, target, "/markdown")) {
             try respond(w, 200, "OK", "text/markdown; charset=utf-8", is_head, "# Loopback Markdown\n\n**Formatted response** with a [link](https://example.test).\n\n- [ ] Read-only task\n\n```json\n{\"answer\":42}\n```\n", null);
             return true;

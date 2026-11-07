@@ -50,6 +50,7 @@ pub fn build(b: *std.Build) void {
     const lib = b.createModule(.{ .root_source_file = b.path("src/lib.zig"), .target = target, .optimize = optimize });
     lib.addAnonymousImport("fixtures", .{ .root_source_file = b.path("tests/fixtures/fixtures.zig") });
     const server = b.createModule(.{ .root_source_file = b.path("tests/integration/test_server.zig"), .target = target, .optimize = optimize });
+    exe.root_module.addImport("demo_server", server);
     if (diagnostics) exe.root_module.addImport("test_server", server);
     const test_step = b.step("test", "Run engine, HTTP and CUI headless tests");
     test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = lib })).step);
@@ -62,10 +63,15 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(http).step);
     const check_exe = appExecutable(b, "kest-check", target, optimize, cui_lib, cui_bindings, true);
     check_exe.root_module.addImport("test_server", server);
+    check_exe.root_module.addImport("demo_server", server);
     const check = b.addRunArtifact(check_exe);
     check.addArg("--self-test");
     check.setEnvironmentVariable("RETORT_DATA", "test-output/workspace");
     test_step.dependOn(&check.step);
+    const demo_check = b.addRunArtifact(check_exe);
+    demo_check.addArgs(&.{ "--demo", "--snapshot=test-output/demo-test.png" });
+    demo_check.setEnvironmentVariable("RETORT_DATA", "test-output/demo-test-workspaces");
+    test_step.dependOn(&demo_check.step);
     const bench = b.addExecutable(.{ .name = "bench", .root_module = b.createModule(.{
         .root_source_file = b.path("tests/performance/bench.zig"),
         .target = target,

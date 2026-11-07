@@ -20,8 +20,8 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     const resp = &job.resp;
     w.column(ui, .{ .id = "response-content", .width = w.fill, .height = w.fill, .clip = true });
     if (resp.error_text.len > 0 or resp.stop != .complete or resp.spill_path != null) {
-        w.column(ui, .{ .pad_x = 12, .pad_y = 6, .gap = 4 });
-        if (resp.error_text.len > 0) w.text(ui, resp.error_text, .{ .size = 12, .color = w.color(c.CUI_TOKEN_DANGER) });
+        w.column(ui, .{ .width = w.fill, .pad_x = 12, .pad_y = 6, .gap = 4 });
+        if (resp.error_text.len > 0) w.text(ui, resp.error_text, .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_DANGER) });
         if (resp.stop != .complete) w.text(ui, w.fmt("Incomplete response: {s}", .{@tagName(resp.stop)}), .{ .size = 12, .color = w.color(c.CUI_TOKEN_WARNING) });
         if (resp.spill_path != null) w.muted(ui, "Showing the first 8 MiB. Save response keeps the entire body.");
         w.end(ui);
@@ -68,10 +68,10 @@ fn content(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) voi
 
 fn empty(ui: *c.cui_ctx, running: bool) void {
     c.cui_spacer(ui);
-    w.column(ui, .{ .gap = 8, .@"align" = c.CUI_ALIGN_CENTER, .pad_x = 20 });
+    w.column(ui, .{ .width = w.fill, .gap = 8, .@"align" = c.CUI_ALIGN_CENTER, .pad_x = 20 });
     if (c.cui_viewport_size(ui).y >= 600) c.cui_icon(ui, c.CUI_ICON_ARROW_RIGHT, 24, w.color(c.CUI_TOKEN_TEXT_MUTED));
-    w.text(ui, if (running) "Sending request..." else "No response yet", .{ .size = 13, .font = c.CUI_FONT_MEDIUM, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .@"align" = c.CUI_TEXT_CENTER });
-    if (c.cui_viewport_size(ui).y >= 600) w.text(ui, if (running) "You can keep working while the request runs." else "Send your request to see the response here.", .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_MUTED), .@"align" = c.CUI_TEXT_CENTER });
+    w.text(ui, if (running) "Sending request..." else "No response yet", .{ .width = w.fill, .size = 13, .font = c.CUI_FONT_MEDIUM, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .@"align" = c.CUI_TEXT_CENTER });
+    if (c.cui_viewport_size(ui).y >= 600) w.text(ui, if (running) "You can keep working while the request runs." else "Send your request to see the response here.", .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_MUTED), .@"align" = c.CUI_TEXT_CENTER });
     w.end(ui);
     c.cui_spacer(ui);
 }

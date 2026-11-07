@@ -42,7 +42,7 @@ pub fn suite(ui: *c.cui_ctx, sw: *c.cui_sw_renderer, app: *App, path: []const u8
         c.cui_set_viewport(ui, old_size.x, old_size.y, 1);
     }
     const stem = path[0 .. path.len - std.fs.path.extension(path).len];
-    const scenes = [_][]const u8{ "body", "settings", "history", "variables", "focus", "light", "minimum", "sidebar", "response-headers", "stacked", "body-minimum", "environment-editor", "activity" };
+    const scenes = [_][]const u8{ "body", "settings", "history", "variables", "focus", "light", "minimum", "sidebar", "response-headers", "stacked", "body-minimum", "environment-editor", "activity", "multipart", "multipart-minimum", "activity-minimum" };
     for (scenes, 0..) |scene, i| {
         t.pane = old_pane;
         t.body_kind = old_kind;
@@ -85,6 +85,17 @@ pub fn suite(ui: *c.cui_ctx, sw: *c.cui_sw_renderer, app: *App, path: []const u8
                 }
             },
             12 => app.prefs.log_open = true,
+            13, 14 => {
+                t.pane = .body;
+                t.body_kind = .multipart;
+                if (i == 14) c.cui_set_viewport(ui, 640, 420, 1);
+            },
+            15 => {
+                c.cui_set_viewport(ui, 640, 420, 1);
+                t.pane = .body;
+                t.body_kind = .multipart;
+                app.prefs.log_open = true;
+            },
             else => unreachable,
         }
         for (0..8) |_| frame(ui, app);

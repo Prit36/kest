@@ -45,7 +45,7 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8) 
     heading(ui, "Value");
     if (files) {
         c.cui_separator(ui);
-        slot(ui, 44);
+        w.text(ui, "File", .{ .width = w.px(44), .size = 11, .@"align" = c.CUI_TEXT_CENTER, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     }
     c.cui_separator(ui);
     if (compact) {
@@ -75,8 +75,9 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8) 
         if (insertion) commit = key_changed or value_changed else changed = changed or key_changed or value_changed;
         if (files) {
             c.cui_separator(ui);
-            w.column(ui, .{ .width = w.px(44), .@"align" = c.CUI_ALIGN_CENTER });
-            changed = c.cui_checkbox_ex(ui, "File", &r.is_file, &.{}) or changed;
+            w.column(ui, .{ .width = w.px(44), .height = w.fill, .@"align" = c.CUI_ALIGN_CENTER, .justify = c.CUI_JUSTIFY_CENTER });
+            changed = c.cui_checkbox_ex(ui, "##file", &r.is_file, &.{}) or changed;
+            c.cui_tooltip(ui, "Upload value as a file");
             w.end(ui);
         }
         c.cui_separator(ui);

@@ -84,7 +84,7 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
     w.column(ui, .{ .pad_x = 10, .pad_y = 8 });
     if (w.field(ui, "collection-filter", &app.filter, .{ .placeholder = "Find a request...", .icon = c.CUI_ICON_SEARCH, .size = c.CUI_SIZE_SM })) {
         app.rows_dirty = true;
-        c.cui_scroll_to(ui, "collection-rows", 0);
+        c.retort_collection_top(ui, "collection-rows");
         if (app.filter.len == 0) revealed_request = 0;
     }
     w.end(ui);
@@ -142,8 +142,9 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
         }
     }
     const columns = [_]c.cui_grid_column{
-        .{ .title = "Collection / request", .width = @max(140, c.cui_get_rect(ui, c.cui_make_id(ui, "collection-browser")).w - 42) },
-        .{ .title = "", .width = 38, .fixed = true },
+        // One flexible column avoids CUI caching the first frame's sidebar
+        // width and assigning spare space to the actions column on resize.
+        .{ .title = "Collection / request", .width = 1, .fixed = true },
     };
     c.cui_tree_table_begin_ex(ui, "collection-rows", &columns, columns.len, nodes.ptr, @intCast(nodes.len), &.{
         .height = w.fill,
@@ -152,22 +153,24 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
         .guides = true,
         .cursor = &cursor,
     });
+    c.retort_collection_style(ui, "collection-rows", @import("design.zig").sidebar(app.prefs.dark));
     while (true) {
         const index = c.cui_tree_table_row(ui);
         if (index < 0) break;
         const n = rows[@intCast(index)].node;
         const icon = if (n.kind == .request) c.CUI_ICON_FILE else if (n.kind == .collection) c.CUI_ICON_BOX else c.CUI_ICON_FOLDER;
-        c.cui_tree_table_name(ui, if (n.kind == .request) w.fmt("{s}  {s}", .{ n.method, n.name }) else w.z(n.name), icon);
+        c.retort_collection_name(ui, w.z(n.name), if (n.kind == .request) w.z(n.method) else null, icon, w.methodColor(n.method));
         c.cui_push_id(ui, w.z(&n.id));
         if (c.cui_context_menu_begin(ui, "node-menu")) {
             nodeMenu(ui, app, n);
             c.cui_context_menu_end(ui);
         }
-        c.cui_data_grid_cell(ui);
-        if (c.retort_dropdown_begin(ui, "Item actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_START })) {
+        w.column(ui, .{ .id = "collection-item-actions", .width = w.px(28), .height = w.px(28) });
+        if (c.retort_dropdown_begin(ui, "Item actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .variant = c.CUI_BUTTON_GHOST, .placement = c.CUI_PLACE_BOTTOM_END })) {
             nodeMenu(ui, app, n);
             c.cui_menu_end(ui);
         }
+        w.end(ui);
         c.cui_pop_id(ui);
     }
     const events = c.cui_tree_table_end(ui);
@@ -257,7 +260,7 @@ fn history(ui: *c.cui_ctx, app: *App) void {
         w.row(ui, .{ .width = w.fill, .gap = 8 });
         w.text(ui, e.method, .{ .size = 10, .font = c.CUI_FONT_MONO, .color = w.methodColor(e.method) });
         c.cui_spacer(ui);
-        w.text(ui, w.fmt("{d}  /  {d} ms", .{ e.status, e.time_ms }), .{ .size = 10, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
+        w.text(ui, w.fmt("{s}  /  {d} ms", .{ if (e.status == 0) "Failed" else w.fmt("{d}", .{e.status}), e.time_ms }), .{ .size = 10, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
         w.end(ui);
         w.text(ui, e.url, .{ .size = 12, .nowrap = true, .width = w.fill });
         w.end(ui);

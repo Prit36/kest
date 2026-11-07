@@ -30,6 +30,7 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     var test_mode = false;
+    var demo_mode = false;
     var show_sidebar = false;
     var light = false;
     var snapshot: ?[]const u8 = null;
@@ -37,6 +38,7 @@ pub fn main(init: std.process.Init) !void {
     var height: f32 = 800;
     for (args) |arg| {
         if (std.mem.eql(u8, arg, "--self-test")) test_mode = true;
+        if (std.mem.eql(u8, arg, "--demo")) demo_mode = true;
         if (std.mem.eql(u8, arg, "--sidebar")) show_sidebar = true;
         if (std.mem.eql(u8, arg, "--light")) light = true;
         if (std.mem.startsWith(u8, arg, "--snapshot=")) snapshot = arg[11..];
@@ -47,11 +49,18 @@ pub fn main(init: std.process.Init) !void {
     if (!@import("build_options").diagnostics and platform.headless) return error.DiagnosticsNotEnabled;
     if (!std.math.isFinite(width) or !std.math.isFinite(height) or width < 640 or height < 420 or width > 8192 or height > 8192) return error.InvalidSnapshotDimensions;
     if (platform.headless and init.environ_map.get("RETORT_DATA") == null) return error.ScratchRETORT_DATARequired;
-    const data = if (init.environ_map.get("RETORT_DATA")) |d| try gpa.dupe(u8, d) else blk: {
+    const data = if (demo_mode) blk: {
+        const base = init.environ_map.get("RETORT_DATA") orelse init.environ_map.get("APPDATA") orelse return error.AppDataUnavailable;
+        const id = @import("core/collection.zig").newId(io);
+        break :blk try std.fs.path.join(gpa, &.{ base, "kest-demo", &id });
+    } else if (init.environ_map.get("RETORT_DATA")) |d| try gpa.dupe(u8, d) else blk: {
         const base = init.environ_map.get("APPDATA") orelse return error.AppDataUnavailable;
         break :blk try std.fs.path.join(gpa, &.{ base, "retort-cui" });
     };
     defer gpa.free(data);
+    var demo_server: @import("demo_server").Server = undefined;
+    if (demo_mode) try demo_server.start(io);
+    defer if (demo_mode) demo_server.stop();
     var store = try Store.open(gpa, io, data);
     try store.startWriter();
     defer store.close();
@@ -77,6 +86,11 @@ pub fn main(init: std.process.Init) !void {
     shell.sidebar_ratio = app.prefs.sidebar_width / @max(640, app.prefs.window_width);
     w.arena = .init(gpa);
     defer w.arena.deinit();
+    if (demo_mode) {
+        try @import("demo.zig").populate(&app, demo_server.port);
+        try @import("demo.zig").warm(&app);
+        if (platform.headless) try @import("demo.zig").validate(&app);
+    }
     if (platform.headless) {
         if (comptime @import("build_options").diagnostics) {
             if (light) app.prefs.dark = false;
@@ -85,7 +99,7 @@ pub fn main(init: std.process.Init) !void {
         }
         return;
     }
-    const window = c.cui_app_create(&.{ .title = "Kest", .width = @intFromFloat(app.prefs.window_width), .height = @intFromFloat(app.prefs.window_height), .min_width = 640, .min_height = 420, .theme = if (app.prefs.dark) c.CUI_THEME_DARK else c.CUI_THEME_LIGHT, .accent = c.CUI_ACCENT_BLUE }) orelse return error.WindowCreationFailed;
+    const window = c.cui_app_create(&.{ .title = if (demo_mode) "Kest (Demo)" else "Kest", .width = @intFromFloat(app.prefs.window_width), .height = @intFromFloat(app.prefs.window_height), .min_width = 640, .min_height = 420, .theme = if (app.prefs.dark) c.CUI_THEME_DARK else c.CUI_THEME_LIGHT, .accent = c.CUI_ACCENT_BLUE }) orelse return error.WindowCreationFailed;
     platform.window = window;
     platform.context = c.cui_app_ui(window);
     defer {

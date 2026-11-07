@@ -45,7 +45,15 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
         }
     } else {
         const before = app.prefs.split;
-        c.cui_split_begin(ui, "request-response", &app.prefs.split, &.{ .vertical = true, .min_first = request.minimumHeight(t), .min_second = 128, .width = w.fill, .height = w.fill });
+        // Minimums must fit the actual space after shell/composer/activity
+        // chrome. Otherwise CUI grows the split beyond the window's footer.
+        const size = c.cui_viewport_size(ui);
+        const composer = c.cui_get_rect(ui, c.cui_make_id(ui, "composer-area"));
+        const log_height = if (app.prefs.log_open) @import("activity.zig").height(size.y) else 0;
+        const available = @max(144, size.y - 28 - log_height - (if (composer.h > 0) composer.y + composer.h else 135));
+        const request_min = @min(request.minimumHeight(t), @max(116, available - 102));
+        const response_min = @min(128, @max(64, available - request_min - 6));
+        c.cui_split_begin(ui, "request-response", &app.prefs.split, &.{ .vertical = true, .min_first = request_min, .min_second = response_min, .width = w.fill, .height = w.fill });
         request.view(ui, app, t);
         c.cui_split_next(ui);
         response.view(ui, app, t);

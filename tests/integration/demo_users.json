@@ -1,0 +1,233 @@
+{
+  "data": [
+    {
+      "id": 1,
+      "name": "Avery Chen",
+      "email": "avery.chen@example.test",
+      "active": true,
+      "roles": [
+        "viewer"
+      ],
+      "profile": {
+        "team": "Engineering",
+        "timezone": "Asia/Kolkata",
+        "address": {
+          "city": "Bengaluru",
+          "country": "India"
+        }
+      },
+      "last_login": "2026-11-07T08:30:00Z"
+    },
+    {
+      "id": 2,
+      "name": "Morgan Lee",
+      "email": "morgan.lee@example.test",
+      "active": true,
+      "roles": [
+        "viewer"
+      ],
+      "profile": {
+        "team": "Support",
+        "timezone": "Asia/Kolkata",
+        "address": {
+          "city": "Bengaluru",
+          "country": "India"
+        }
+      },
+      "last_login": "2026-11-07T08:30:00Z"
+    },
+    {
+      "id": 3,
+      "name": "Sam Patel",
+      "email": "sam.patel@example.test",
+      "active": true,
+      "roles": [
+        "editor",
+        "reviewer"
+      ],
+      "profile": {
+        "team": "Design",
+        "timezone": "Asia/Kolkata",
+        "address": {
+          "city": "Bengaluru",
+          "country": "India"
+        }
+      },
+      "last_login": "2026-11-07T08:30:00Z"
+    },
+    {
+      "id": 4,
+      "name": "Jordan Rivera",
+      "email": "jordan.rivera@example.test",
+      "active": false,
+      "roles": [
+        "viewer"
+      ],
+      "profile": {
+        "team": "Engineering",
+        "timezone": "Asia/Kolkata",
+        "address": {
+          "city": "Bengaluru",
+          "country": "India"
+        }
+      },
+      "last_login": null
+    },
+    {
+      "id": 5,
+      "name": "Alex Kim",
+      "email": "alex.kim@example.test",
+      "active": true,
+      "roles": [
+        "viewer"
+      ],
+      "profile": {
+        "team": "Support",
+        "timezone": "Asia/Kolkata",
+        "address": {
+          "city": "Bengaluru",
+          "country": "India"
+        }
+      },
+      "last_login": "2026-11-07T08:30:00Z"
+    },
+    {
+      "id": 6,
+      "name": "Taylor Brooks",
+      "email": "taylor.brooks@example.test",
+      "active": true,
+      "roles": [
+        "editor",
+        "reviewer"
+      ],
+      "profile": {
+        "team": "Design",
+        "timezone": "Asia/Kolkata",
+        "address": {
+          "city": "Bengaluru",
+          "country": "India"
+        }
+      },
+      "last_login": "2026-11-07T08:30:00Z"
+    },
+    {
+      "id": 7,
+      "name": "Casey Singh",
+      "email": "casey.singh@example.test",
+      "active": true,
+      "roles": [
+        "viewer"
+      ],
+      "profile": {
+        "team": "Engineering",
+        "timezone": "Asia/Kolkata",
+        "address": {
+          "city": "Bengaluru",
+          "country": "India"
+        }
+      },
+      "last_login": "2026-11-07T08:30:00Z"
+    },
+    {
+      "id": 8,
+      "name": "Riley Quinn",
+      "email": "riley.quinn@example.test",
+      "active": false,
+      "roles": [
+        "viewer"
+      ],
+      "profile": {
+        "team": "Support",
+        "timezone": "Asia/Kolkata",
+        "address": {
+          "city": "Bengaluru",
+          "country": "India"
+        }
+      },
+      "last_login": null
+    },
+    {
+      "id": 9,
+      "name": "Jamie Park",
+      "email": "jamie.park@example.test",
+      "active": true,
+      "roles": [
+        "editor",
+        "reviewer"
+      ],
+      "profile": {
+        "team": "Design",
+        "timezone": "Asia/Kolkata",
+        "address": {
+          "city": "Bengaluru",
+          "country": "India"
+        }
+      },
+      "last_login": "2026-11-07T08:30:00Z"
+    },
+    {
+      "id": 10,
+      "name": "Drew Martin",
+      "email": "drew.martin@example.test",
+      "active": true,
+      "roles": [
+        "viewer"
+      ],
+      "profile": {
+        "team": "Engineering",
+        "timezone": "Asia/Kolkata",
+        "address": {
+          "city": "Bengaluru",
+          "country": "India"
+        }
+      },
+      "last_login": "2026-11-07T08:30:00Z"
+    },
+    {
+      "id": 11,
+      "name": "Robin Shaw",
+      "email": "robin.shaw@example.test",
+      "active": true,
+      "roles": [
+        "viewer"
+      ],
+      "profile": {
+        "team": "Support",
+        "timezone": "Asia/Kolkata",
+        "address": {
+          "city": "Bengaluru",
+          "country": "India"
+        }
+      },
+      "last_login": "2026-11-07T08:30:00Z"
+    },
+    {
+      "id": 12,
+      "name": "Cameron Wells",
+      "email": "cameron.wells@example.test",
+      "active": false,
+      "roles": [
+        "editor",
+        "reviewer"
+      ],
+      "profile": {
+        "team": "Design",
+        "timezone": "Asia/Kolkata",
+        "address": {
+          "city": "Bengaluru",
+          "country": "India"
+        }
+      },
+      "last_login": null
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 25,
+    "total": 12
+  },
+  "meta": {
+    "source": "Kest local demo",
+    "notice": "Fictional people; sample responses are fixed fixtures."
+  }
+}

@@ -36,7 +36,7 @@ pub fn view(ui: *c.cui_ctx, resp: *Response) void {
     }
 }
 fn cell(ui: *c.cui_ctx, text: []const u8, heading: bool) void {
-    w.column(ui, .{ .width = w.fill, .pad_x = 10 });
+    w.column(ui, .{ .width = w.fill, .pad_x = 10, .clip = true });
     w.text(ui, text, .{ .width = w.fill, .size = if (heading) 11 else 12, .font = if (heading) c.CUI_FONT_MEDIUM else c.CUI_FONT_BODY, .color = w.color(if (heading) c.CUI_TOKEN_TEXT_SECONDARY else c.CUI_TOKEN_FOREGROUND), .nowrap = true });
     w.end(ui);
     if (!heading) c.cui_tooltip(ui, w.z(text));

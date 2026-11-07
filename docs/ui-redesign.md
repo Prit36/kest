@@ -114,6 +114,18 @@ Snapshots include `-history-empty`, `-history-filtered` and
 
 ## CUI 1.1 follow-up
 
+The UI polish pass gives the collection browser one flexible column, so names
+truncate before the fixed 28px action buttons and the buttons follow the right
+edge during resizing. Rows use the sidebar surface without table dividers;
+request methods have a consistent-width semantic label. Native tree navigation,
+selection and menus remain in use. Search resets the grid's actual scroll state.
+Dropdown triggers fit compact toolbar rows and bounded labels preserve their
+chevrons. Settings descriptions, response messages, header cells and empty states
+respect pane widths. Multipart file toggles have a dedicated header and centered
+checkbox; running requests show a Cancel tooltip and failed history shows Failed.
+The sidebar regression covers long names, grow/shrink cycles, dark/light and the
+compact sheet. Diagnostic captures also include multipart at desktop/minimum size.
+
 The current application uses native CUI document tabs, tree table, path bar and
 activity console. The original custom document-strip painter has been removed.
 Native tabs retain request method/name, stable identity, unsaved state, close

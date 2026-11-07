@@ -55,6 +55,50 @@ pub fn run(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, path: ?[]const u8,
         app.history_query.set(old_query);
         c.cui_set_viewport(ui, 1180, 800, 1);
     }
+    // Long names must yield to the menu, and menus must follow the right
+    // edge when the sidebar grows, shrinks, or moves into the compact sheet.
+    const first_node = app.collections.items[0];
+    const saved_name = first_node.name;
+    first_node.name = try app.gpa.dupe(u8, "A very long collection name that must never push its actions outside the sidebar");
+    defer {
+        app.gpa.free(first_node.name);
+        first_node.name = saved_name;
+    }
+    app.mode = .collections;
+    app.prefs.sidebar_open = true;
+    const saved_selection = app.selected;
+    defer app.selected = saved_selection;
+    @import("ui/sidebar.zig").reveal(app, first_node);
+    for ([_]bool{ true, false }) |dark| {
+        app.prefs.dark = dark;
+        for ([_]f32{ 0.01, 0.36, 0.01 }) |ratio| {
+            shell.sidebar_ratio = ratio;
+            for ([_]bool{ false, true }) |narrow| {
+                shell.narrow_open = narrow;
+                c.cui_set_viewport(ui, if (narrow) 640 else 1180, if (narrow) 420 else 800, 1);
+                for (0..5) |_| frame(ui, app);
+                if (narrow) c.cui_push_id_int(ui, @bitCast(c.cui_make_id(ui, "Workspace") ^ 0x5ee7));
+                c.retort_collection_top(ui, "collection-rows");
+                if (narrow) c.cui_pop_id(ui);
+                for (0..3) |_| frame(ui, app);
+                const browser = rect(ui, "collection-browser");
+                if (narrow) c.cui_push_id_int(ui, @bitCast(c.cui_make_id(ui, "Workspace") ^ 0x5ee7));
+                c.cui_push_id_int(ui, 0);
+                c.cui_push_id(ui, w.z(&first_node.id));
+                const actions = c.cui_get_rect(ui, c.cui_make_id(ui, "collection-item-actions"));
+                c.cui_pop_id(ui);
+                c.cui_pop_id(ui);
+                if (narrow) c.cui_pop_id(ui);
+                if (actions.w != 28 or actions.h != 28 or actions.x <= browser.x + browser.w - 44 or actions.x + actions.w > browser.x + browser.w or actions.y < browser.y or actions.y + actions.h > browser.y + browser.h)
+                    std.debug.print("Sidebar bounds dark={} narrow={} ratio={d}: browser={any}, actions={any}\n", .{ dark, narrow, ratio, browser, actions });
+                try expect(actions.w == 28 and actions.h == 28);
+                try expect(actions.x > browser.x + browser.w - 44);
+                try expect(actions.x + actions.w <= browser.x + browser.w);
+                try expect(actions.y >= browser.y and actions.y + actions.h <= browser.y + browser.h);
+                if (dark and !narrow and ratio == 0.36) try capture(ui, sw, app, path, "sidebar-wide-long-name");
+            }
+        }
+    }
     // The saved history was produced by the real loopback integration suite.
     const saved_history = app.history;
     var temporary_history = true;
