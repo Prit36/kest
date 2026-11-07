@@ -67,10 +67,12 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
 // Status, duration and size sit beside the response tabs, where they are
 // read first. Narrow panels keep the status code and duration.
 fn summary(ui: *c.cui_ctx, r: *Response, width: f32) void {
-    w.row(ui, .{ .id = "response-summary", .gap = 10, .pad_right = 8 });
+    w.row(ui, .{ .id = "response-summary", .gap = 10, .pad_right = 8, .@"align" = c.CUI_ALIGN_CENTER });
     defer w.end(ui);
     const status = if (r.status == 0) "Failed" else if (width >= 520 and r.reason.len > 0 and r.reason.len <= 24) w.fmt("{d} {s}", .{ r.status, r.reason }) else w.fmt("{d}", .{r.status});
+    w.row(ui, .{ .height = w.px(20), .pad_x = 7, .radius = 4, .@"align" = c.CUI_ALIGN_CENTER, .bg = w.tinted(ui, w.statusToken(r.status), 0.14) });
     w.text(ui, status, .{ .size = 12, .font = c.CUI_FONT_MEDIUM, .color = w.statusColor(r.status), .nowrap = true });
+    w.end(ui);
     w.text(ui, w.fmt("{d} ms", .{r.time_ms}), .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
     if (width >= 440) w.text(ui, w.bytes(r.total.load(.monotonic)), .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
 }

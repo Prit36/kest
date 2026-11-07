@@ -1,15 +1,36 @@
 //! T3 Code's default neutral dark/light palette, mapped to native CUI roles.
 //! Source: pingdotgg/t3code, packages/shared/src/themePalettes.ts.
-//! Motion stays disabled.
+//! Motion is short and settles: CUI's durations run at `motion_scale`, so
+//! hover fades take ~70 ms and menus/dialogs ~150 ms. Headless frames stay still.
 const c = @import("c.zig").c;
+
+/// Multiplier on CUI's motion tokens. Below 1 is faster than CUI's defaults.
+pub const motion_scale: f32 = 0.5;
+/// 1 = dark, 0 = light. Eases between palettes when the appearance changes.
+pub var blend: f32 = 1;
 
 fn rgb(value: u32) c.cui_color {
     return .{ .r = @intCast(value >> 16), .g = @intCast((value >> 8) & 255), .b = @intCast(value & 255), .a = 255 };
 }
+fn channel(a: u32, b: u32, t: f32) u8 {
+    const x: f32 = @floatFromInt(a);
+    const y: f32 = @floatFromInt(b);
+    return @intFromFloat(@round(x + (y - x) * t));
+}
+/// Light value `day` blended toward dark value `night` by the current blend.
+fn pick(day: u32, night: u32) c.cui_color {
+    return .{ .r = channel(day >> 16, night >> 16, blend), .g = channel((day >> 8) & 255, (night >> 8) & 255, blend), .b = channel(day & 255, night & 255, blend), .a = 255 };
+}
+fn pickf(day: f32, night: f32) f32 {
+    return day + (night - day) * blend;
+}
 pub fn apply(ui: *c.cui_ctx, dark: bool) void {
-    c.cui_set_reduced_motion(ui, true);
+    const still = @import("platform.zig").headless;
+    c.cui_set_reduced_motion(ui, still);
     c.cui_set_theme(ui, if (dark) c.CUI_THEME_DARK else c.CUI_THEME_LIGHT);
     const t = c.cui_theme_get(ui);
+    t.*.motion = if (still) 0 else motion_scale;
+    blend = @import("std").math.clamp(c.cui_animate_spring(ui, c.cui_make_id(ui, "kest-appearance"), if (dark) 1 else 0, 0.36, 0), 0, 1);
     const tokens = [_]c_int{
         c.CUI_TOKEN_BACKGROUND,    c.CUI_TOKEN_SURFACE,           c.CUI_TOKEN_SURFACE_RAISED,
         c.CUI_TOKEN_SURFACE_MUTED, c.CUI_TOKEN_FOREGROUND,        c.CUI_TOKEN_TEXT_SECONDARY,
@@ -31,48 +52,47 @@ pub fn apply(ui: *c.cui_ctx, dark: bool) void {
         0xe0e6f7, 0xffffff, 0x047857, 0xbb4d00, 0xc10007, 0x1b4ed8,
         0xf4f4f5, 0xe4e4e7, 0x1b4ed8,
     };
-    for (tokens, if (dark) night else day) |token, value| t.*.colors[@intCast(token)] = rgb(value);
+    for (tokens, day, night) |token, light_value, dark_value| t.*.colors[@intCast(token)] = pick(light_value, dark_value);
     t.*.colors[c.CUI_TOKEN_CONTROL_ON] = t.*.colors[c.CUI_TOKEN_ACCENT];
     t.*.colors[c.CUI_TOKEN_CONTROL_GLYPH] = t.*.colors[c.CUI_TOKEN_ACCENT_FOREGROUND];
-    t.*.colors[c.CUI_TOKEN_CONTROL_TRACK] = rgb(if (dark) 0x222222 else 0xd4d4d8);
-    t.*.colors[c.CUI_TOKEN_CONTROL_TRACK_HOVER] = rgb(if (dark) 0x363636 else 0xbdbdbd);
+    t.*.colors[c.CUI_TOKEN_CONTROL_TRACK] = pick(0xd4d4d8, 0x222222);
+    t.*.colors[c.CUI_TOKEN_CONTROL_TRACK_HOVER] = pick(0xbdbdbd, 0x363636);
     t.*.colors[c.CUI_TOKEN_CONTROL_THUMB] = rgb(0xffffff);
     t.*.colors[c.CUI_TOKEN_CONTROL_THUMB_ON] = rgb(0xffffff);
-    t.*.colors[c.CUI_TOKEN_SCRIM] = .{ .r = 0, .g = 0, .b = 0, .a = if (dark) 170 else 84 };
+    t.*.colors[c.CUI_TOKEN_SCRIM] = .{ .r = 0, .g = 0, .b = 0, .a = @intFromFloat(@round(pickf(84, 170))) };
     // Menus/toasts use tone fields in addition to semantic tokens.
     t.*.tone_sky = t.*.colors[c.CUI_TOKEN_INFO];
-    t.*.tone_teal = rgb(if (dark) 0x2dd4bf else 0x0f766e);
+    t.*.tone_teal = pick(0x0f766e, 0x2dd4bf);
     t.*.tone_green = t.*.colors[c.CUI_TOKEN_SUCCESS];
     t.*.tone_amber = t.*.colors[c.CUI_TOKEN_WARNING];
     t.*.tone_rose = t.*.colors[c.CUI_TOKEN_DANGER];
-    t.*.tone_orchid = rgb(if (dark) 0xf472b6 else 0xbe185d);
-    t.*.tone_violet = rgb(if (dark) 0xa78bfa else 0x6d28d9);
+    t.*.tone_orchid = pick(0xbe185d, 0xf472b6);
+    t.*.tone_violet = pick(0x6d28d9, 0xa78bfa);
     t.*.radius_control = 3;
     t.*.radius_panel = 6;
     t.*.radius_surface = 6;
-    t.*.shadow_floating[0] = .{ .y = 8, .blur = 20, .spread = -4, .alpha = if (dark) 0.24 else 0.10 };
-    t.*.shadow_floating[1] = .{ .y = 1, .blur = 2, .spread = 0, .alpha = if (dark) 0.30 else 0.08 };
+    t.*.shadow_floating[0] = .{ .y = 8, .blur = 20, .spread = -4, .alpha = pickf(0.10, 0.24) };
+    t.*.shadow_floating[1] = .{ .y = 1, .blur = 2, .spread = 0, .alpha = pickf(0.08, 0.30) };
     t.*.control_sm = 28;
     t.*.control_md = 32;
     t.*.control_lg = 38;
     t.*.text_body = 13;
     t.*.text_sm = 12;
     t.*.text_xs = 11;
-    t.*.motion = 0;
 }
 
-pub fn sidebar(dark: bool) c.cui_color {
-    return rgb(if (dark) 0x000000 else 0xfafafa);
+pub fn sidebar() c.cui_color {
+    return pick(0xfafafa, 0x000000);
 }
 
 pub const Syntax = enum { key, string, number, keyword, comment };
 pub fn syntax(ui: *c.cui_ctx, role: Syntax) c.cui_color {
-    const dark = c.cui_get_theme_mode(ui) == c.CUI_THEME_DARK;
-    return rgb(switch (role) {
-        .key => if (dark) 0x93c5fd else 0x1d4ed8,
-        .string => if (dark) 0x86efac else 0x166534,
-        .number => if (dark) 0xfdba74 else 0x9a3412,
-        .keyword => if (dark) 0xc4b5fd else 0x6d28d9,
-        .comment => if (dark) 0x818181 else 0x71717b,
-    });
+    _ = ui;
+    return switch (role) {
+        .key => pick(0x1d4ed8, 0x93c5fd),
+        .string => pick(0x166534, 0x86efac),
+        .number => pick(0x9a3412, 0xfdba74),
+        .keyword => pick(0x6d28d9, 0xc4b5fd),
+        .comment => pick(0x71717b, 0x818181),
+    };
 }

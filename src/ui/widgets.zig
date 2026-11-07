@@ -98,8 +98,15 @@ pub fn empty(ui: *c.cui_ctx, title: [*:0]const u8, detail: [*:0]const u8) void {
 pub fn methodColor(method: []const u8) c.cui_color {
     return color(if (std.mem.eql(u8, method, "GET") or std.mem.eql(u8, method, "HEAD")) c.CUI_TOKEN_SUCCESS else if (std.mem.eql(u8, method, "POST")) c.CUI_TOKEN_WARNING else if (std.mem.eql(u8, method, "DELETE")) c.CUI_TOKEN_DANGER else if (std.mem.eql(u8, method, "PUT")) c.CUI_TOKEN_INFO else c.CUI_TOKEN_TEXT_SECONDARY);
 }
+pub fn statusToken(status: u16) c_int {
+    return if (status >= 200 and status < 300) c.CUI_TOKEN_SUCCESS else if (status >= 300 and status < 400) c.CUI_TOKEN_INFO else if (status >= 400 or status == 0) c.CUI_TOKEN_DANGER else c.CUI_TOKEN_WARNING;
+}
 pub fn statusColor(status: u16) c.cui_color {
-    return color(if (status >= 200 and status < 300) c.CUI_TOKEN_SUCCESS else if (status >= 300 and status < 400) c.CUI_TOKEN_INFO else if (status >= 400 or status == 0) c.CUI_TOKEN_DANGER else c.CUI_TOKEN_WARNING);
+    return color(statusToken(status));
+}
+/// A resolved token color at reduced opacity, for tinted backgrounds.
+pub fn tinted(ui: *c.cui_ctx, token: c_int, alpha: f32) c.cui_color {
+    return c.cui_alpha(c.cui_token_color(ui, @intCast(token)), alpha);
 }
 pub fn bytes(value: u64) [:0]const u8 {
     if (value < 1024) return fmt("{d} B", .{value});

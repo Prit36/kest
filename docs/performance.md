@@ -93,9 +93,10 @@ over three seconds; exit code 0. The headless harness separately confirmed
 settled redraw=false and no scheduled CUI wakeup. These are observational runs,
 not a controlled memory comparison with earlier revisions.
 
-The [workspace redesign](ui-redesign.md) enables reduced motion in the native
-interface, keeps all network and disk work on the existing worker paths, and
-adds no periodic animation or polling work. Measurements of earlier revisions
+The [workspace redesign](ui-redesign.md) uses short motion that always settles
+(CUI tokens at half duration), keeps all network and disk work on the existing
+worker paths, and adds no periodic animation or polling work. With motion on, two
+private-desktop runs reached first idle in 138-168 ms at 0.000% idle CPU. Measurements of earlier revisions
 below remain historical baselines, not controlled before/after comparisons.
 
 ## Earlier size experiment

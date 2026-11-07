@@ -66,12 +66,14 @@ void kest_collection_name(cui_ctx *ui, const char *name, const char *method, con
     if (cell >= 0) ui->nodes[cell].pad[1] = 4;
 }
 
-typedef struct { int kind; bool selected, hovered; } kest_control_paint;
+typedef struct { int kind; bool selected; float hover; } kest_control_paint;
 static void paint_control(cui_ctx *ui, cui_node *n, void *raw) {
     kest_control_paint *p = raw;
     cui_rect r = n->rect;
-    if (p->kind == 2 && (p->selected || p->hovered)) {
-        cui_draw_rect(ui, (cui_rect){r.x + 3, r.y + 5, r.w - 6, r.h - 10}, CUI_CORNERS(3), p->selected ? CUI_C(ui, ACTIVE) : CUI_C(ui, HOVER));
+    if (p->kind == 2 && p->selected) {
+        cui_draw_rect(ui, (cui_rect){r.x + 3, r.y + 5, r.w - 6, r.h - 10}, CUI_CORNERS(3), CUI_C(ui, ACTIVE));
+    } else if (p->kind == 2 && p->hover > 0.01f) {
+        cui_draw_rect(ui, (cui_rect){r.x + 3, r.y + 5, r.w - 6, r.h - 10}, CUI_CORNERS(3), cui_alpha(CUI_C(ui, HOVER), p->hover));
     } else if (p->kind == 0 && p->selected) {
         cui_draw_rect(ui, (cui_rect){r.x, r.y + 7, 2, r.h - 14}, CUI_CORNERS(1), CUI_C(ui, ACCENT));
     }
@@ -80,6 +82,10 @@ static void paint_control(cui_ctx *ui, cui_node *n, void *raw) {
 bool kest_control_begin(cui_ctx *ui, const char *key, bool selected, float width, float height, int kind) {
     cui_id id = cui_make_id(ui, key);
     cui_interact hit = cui__interact(ui, id, CUI_IF_FOCUSABLE);
+    /* Hover fades with CUI's own hover token, so app controls answer exactly
+     * like CUI buttons; with motion off the tween snaps. */
+    float *hover = cui_state(ui, id ^ 0x40E7u, sizeof(float));
+    cui__tween(ui, hover, hit.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     cui_box box = {0};
     box.id = key;
     box.width = width < 0 ? CUI_FILL : width > 0 ? CUI_PX(width) : CUI_FIT;
@@ -89,16 +95,15 @@ bool kest_control_begin(cui_ctx *ui, const char *key, bool selected, float width
     box.gap = 8; box.pad_x = kind == 0 ? 6 : (kind == 3 && width > 0 && width <= 36) ? 0 : 10;
     if (kind == 3) box.justify = CUI_JUSTIFY_CENTER;
     box.radius = kind == 3 || kind == 0 ? 3 : 0;
-    if (kind == 0 && selected) box.bg = CUI_C(ui, ACTIVE);
-    else if (kind == 3 && selected) box.bg = CUI_C(ui, ACTIVE);
-    else if (hit.hovered && kind != 2) box.bg = CUI_C(ui, HOVER);
+    if ((kind == 0 || kind == 3) && selected) box.bg = CUI_C(ui, ACTIVE);
+    else if (*hover > 0.01f && kind != 2) box.bg = cui_alpha(CUI_C(ui, HOVER), *hover);
     if (hit.focus_visible) { box.border = 1; box.border_color = CUI_C(ui, FOCUS_RING); }
     cui_box_begin(ui, &box);
     int at = ui->last_node;
     cui__mark_interactive(ui, at, CUI_IF_FOCUSABLE);
     if (kind == 2 || (kind == 0 && selected)) {
         kest_control_paint *p = CUI_PAINT_DATA(ui, kest_control_paint);
-        p->kind = kind; p->selected = selected; p->hovered = hit.hovered;
+        p->kind = kind; p->selected = selected; p->hover = *hover;
         ui->nodes[at].paint = paint_control;
         ui->nodes[at].paint_data = p;
     }

@@ -27,7 +27,7 @@ pub fn reveal(app: *App, node: *col.Node) void {
 
 pub fn view(ui: *c.cui_ctx, app: *App) void {
     const size = c.cui_viewport_size(ui);
-    w.column(ui, .{ .id = "collection-browser", .width = w.fill, .height = if (size.x < 840) w.px(@max(200, size.y - 120)) else w.fill, .bg = @import("design.zig").sidebar(app.prefs.dark), .clip = true });
+    w.column(ui, .{ .id = "collection-browser", .width = w.fill, .height = if (size.x < 840) w.px(@max(200, size.y - 120)) else w.fill, .bg = @import("design.zig").sidebar(), .clip = true });
     defer w.end(ui);
     w.row(ui, .{ .height = w.px(38), .pad_left = 4, .pad_right = 6, .width = w.fill });
     const titles = [_][]const u8{ "Collections", "History", "Environments" };
@@ -153,7 +153,7 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
         .guides = true,
         .cursor = &cursor,
     });
-    c.kest_collection_style(ui, "collection-rows", @import("design.zig").sidebar(app.prefs.dark));
+    c.kest_collection_style(ui, "collection-rows", @import("design.zig").sidebar());
     while (true) {
         const index = c.cui_tree_table_row(ui);
         if (index < 0) break;

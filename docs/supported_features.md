@@ -31,7 +31,7 @@ does not establish coverage for this interface.
 | T3 Code neutral dark/light palettes, blue actions and monochrome K identity | Both S; instant theme changes U; control geometry retained |
 | Inset pane tabs and document/collection selection markers | Dark/light S; existing pointer/keyboard interaction checks U |
 | Separate code syntax palette and flat primary actions | JSON/body S; mode and editing checks U |
-| Reduced motion throughout the native interface | Enabled for every context/frame; motion=0 U; settled wakeup check U |
+| Short, settling motion in the native interface | motion_scale 0.5; headless motion=0 U; native idle CPU 0.000% after settling |
 | Native document tabs, new/close, reorder and overflow reveal | Pointer new/close, active-tab reveal, Shift+arrow reorder and dirty-close confirmation U; mouse dragging W |
 | Resizable sidebar; adaptive side-by-side/stacked request-response split | Both layouts S; width-based adaptation U; layout/split preferences round-trip T; divider dragging W; explicit layout picker W |
 | Hide/restore request details to focus on response | Actual chevron clicks and response height U; focused response S |

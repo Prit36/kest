@@ -73,8 +73,14 @@ Dialogs use concrete Create/Save/Move actions. Name dialogs accept Enter and
 focus their field on repeated opens. Environment/settings changes already save
 as edited, so those dialogs offer Close. The environment table fits at 640x420.
 
-Transitions, theme changes and the caret are steady: reduced motion is enabled
-for every native and headless frame. Nothing starts an animation or polling loop.
+Motion is brief and always settles. The native app runs CUI's motion tokens at
+half their default duration (`design.motion_scale = 0.5`): hover fades take about
+70 ms, menus and popovers about 140 ms, dialogs about 170 ms, and exits are faster
+than entrances. Kest's own tabs, rows and icon buttons fade their hover with the
+same token as CUI buttons. Appearance changes cross-fade the palette in about
+180 ms. The caret stays steady, and nothing loops: an idle window schedules no
+frames (0.000% idle CPU on a private desktop). Headless frames keep motion off,
+so snapshots and interaction checks stay deterministic.
 
 ## Verification
 

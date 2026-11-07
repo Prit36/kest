@@ -20,11 +20,16 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     const resp = &job.resp;
     w.column(ui, .{ .id = "response-content", .width = w.fill, .height = w.fill, .clip = true });
     if (resp.error_text.len > 0 or resp.stop != .complete or resp.spill_path != null) {
-        w.column(ui, .{ .width = w.fill, .pad_x = 12, .pad_y = 6, .gap = 4 });
-        if (resp.error_text.len > 0) w.text(ui, resp.error_text, .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_DANGER) });
-        if (resp.stop != .complete) w.text(ui, w.fmt("Incomplete response: {s}", .{@tagName(resp.stop)}), .{ .size = 12, .color = w.color(c.CUI_TOKEN_WARNING) });
+        w.column(ui, .{ .width = w.fill, .pad_x = 12, .pad_top = 10, .pad_bottom = 6, .gap = 8 });
+        if (resp.error_text.len > 0) _ = c.cui_alert_ex(ui, if (resp.status == 0) "Request failed" else "Response error", &.{ .description = w.z(resp.error_text), .tone = c.CUI_TONE_DANGER, .icon = c.CUI_ICON_CIRCLE_ALERT });
+        if (resp.stop != .complete) _ = c.cui_alert_ex(ui, "Incomplete response", &.{ .description = w.fmt("The transfer stopped early ({s}). The part received is shown below.", .{stopReason(resp.stop)}), .tone = c.CUI_TONE_WARNING });
         if (resp.spill_path != null) w.muted(ui, "Showing the first 8 MiB. Save response keeps the entire body.");
         w.end(ui);
+    }
+    // A failed request has no body: the alert is the whole answer.
+    if (resp.status == 0 and resp.preview.items.len == 0 and t.response.pane != .headers) {
+        w.end(ui);
+        return;
     }
     content(ui, app, t, resp);
     w.end(ui);
@@ -66,13 +71,37 @@ fn content(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) voi
 }
 
 fn empty(ui: *c.cui_ctx, running: bool) void {
+    const tall = c.cui_viewport_size(ui).y >= 600;
     c.cui_spacer(ui);
-    w.column(ui, .{ .width = w.fill, .gap = 8, .@"align" = c.CUI_ALIGN_CENTER, .pad_x = 20 });
-    if (c.cui_viewport_size(ui).y >= 600) c.cui_icon(ui, c.CUI_ICON_ARROW_RIGHT, 24, w.color(c.CUI_TOKEN_TEXT_MUTED));
-    w.text(ui, if (running) "Sending request..." else "No response yet", .{ .width = w.fill, .size = 13, .font = c.CUI_FONT_MEDIUM, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .@"align" = c.CUI_TEXT_CENTER });
-    if (c.cui_viewport_size(ui).y >= 600) w.text(ui, if (running) "You can keep working while the request runs." else "Send your request to see the response here.", .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_MUTED), .@"align" = c.CUI_TEXT_CENTER });
+    w.column(ui, .{ .width = w.fill, .gap = 10, .@"align" = c.CUI_ALIGN_CENTER, .pad_x = 20 });
+    if (running) {
+        c.cui_spinner(ui, 20);
+        w.text(ui, "Sending request...", .{ .size = 13, .font = c.CUI_FONT_MEDIUM, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        if (tall) hint(ui, "Ctrl Enter", "to cancel");
+    } else {
+        if (tall) c.cui_icon(ui, c.CUI_ICON_SEND, 22, w.color(c.CUI_TOKEN_TEXT_MUTED));
+        w.text(ui, "No response yet", .{ .size = 13, .font = c.CUI_FONT_MEDIUM, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        if (tall) hint(ui, "Ctrl Enter", "to send the request");
+    }
     w.end(ui);
     c.cui_spacer(ui);
+}
+
+fn hint(ui: *c.cui_ctx, keys: [*:0]const u8, label: []const u8) void {
+    w.row(ui, .{ .gap = 6, .@"align" = c.CUI_ALIGN_CENTER });
+    c.cui_kbd(ui, keys);
+    w.text(ui, label, .{ .size = 12, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
+    w.end(ui);
+}
+
+fn stopReason(stop: response.Stop) []const u8 {
+    return switch (stop) {
+        .complete => "complete",
+        .too_large => "response size limit reached",
+        .canceled => "canceled",
+        .timed_out => "timed out",
+        .failed => "connection broke",
+    };
 }
 
 fn hex(ui: *c.cui_ctx, resp: *response.Response) void {
