@@ -1,0 +1,13 @@
+.{
+    .name = .retort_cui,
+    .version = "0.1.0",
+    .fingerprint = 0xa7478e59031b6e8e,
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+        .cui = .{
+            .url = "https://codeload.github.com/yappologistic/CUI/tar.gz/145407d7296554a1f2a2909fcc4769d75774716f",
+            .hash = "N-V-__8AAOy7mwFhtyBlrRef6cwz29bGmt2SsKyyZ7zFmE_i",
+        },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "tests", "assets", "docs", "tools", "README.md", "LICENSE" },
+}
