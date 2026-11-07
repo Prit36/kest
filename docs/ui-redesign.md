@@ -90,7 +90,7 @@ Existing loopback, undo, import/export, bounded-response and reload checks remai
 Diagnostic captures include actual loopback JSON, populated params, body,
 settings, history, environments, focused response, dark/light, stacked and compact
 views, response headers and the compact environment dialog. All use explicit
-scratch RETORT_DATA. See performance.md for the native private-desktop startup,
+scratch KEST_DATA. See performance.md for the native private-desktop startup,
 idle and exit observations and the separate UI CPU sample.
 
 OS clipboard, accessibility, IME/complex scripts and real desktop input remain

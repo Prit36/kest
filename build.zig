@@ -66,11 +66,11 @@ pub fn build(b: *std.Build) void {
     check_exe.root_module.addImport("demo_server", server);
     const check = b.addRunArtifact(check_exe);
     check.addArg("--self-test");
-    check.setEnvironmentVariable("RETORT_DATA", "test-output/workspace");
+    check.setEnvironmentVariable("KEST_DATA", "test-output/workspace");
     test_step.dependOn(&check.step);
     const demo_check = b.addRunArtifact(check_exe);
     demo_check.addArgs(&.{ "--demo", "--snapshot=test-output/demo-test.png" });
-    demo_check.setEnvironmentVariable("RETORT_DATA", "test-output/demo-test-workspaces");
+    demo_check.setEnvironmentVariable("KEST_DATA", "test-output/demo-test-workspaces");
     test_step.dependOn(&demo_check.step);
     const bench = b.addExecutable(.{ .name = "bench", .root_module = b.createModule(.{
         .root_source_file = b.path("tests/performance/bench.zig"),

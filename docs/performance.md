@@ -113,7 +113,7 @@ runtime speed now takes priority over a 1 MB executable budget.
 `tests/performance/startup.ps1` created a private Windows desktop, started the
 real executable there, measured idle, posted close messages to its windows and
 checked exit. It never switched the developer's desktop or sent real input.
-`RETORT_DATA` pointed to `test-output/native-idle`.
+`KEST_DATA` pointed to `test-output/native-idle`.
 
 | Run | Time to first idle | Working set | Private bytes | Idle CPU |
 | --- | --- | --- | --- | --- |

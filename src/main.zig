@@ -48,12 +48,12 @@ pub fn main(init: std.process.Init) !void {
     platform.headless = test_mode or snapshot != null;
     if (!@import("build_options").diagnostics and platform.headless) return error.DiagnosticsNotEnabled;
     if (!std.math.isFinite(width) or !std.math.isFinite(height) or width < 640 or height < 420 or width > 8192 or height > 8192) return error.InvalidSnapshotDimensions;
-    if (platform.headless and init.environ_map.get("RETORT_DATA") == null) return error.ScratchRETORT_DATARequired;
+    if (platform.headless and init.environ_map.get("KEST_DATA") == null) return error.ScratchKEST_DATARequired;
     const data = if (demo_mode) blk: {
-        const base = init.environ_map.get("RETORT_DATA") orelse init.environ_map.get("APPDATA") orelse return error.AppDataUnavailable;
+        const base = init.environ_map.get("KEST_DATA") orelse init.environ_map.get("APPDATA") orelse return error.AppDataUnavailable;
         const id = @import("core/collection.zig").newId(io);
         break :blk try std.fs.path.join(gpa, &.{ base, "kest-demo", &id });
-    } else if (init.environ_map.get("RETORT_DATA")) |d| try gpa.dupe(u8, d) else blk: {
+    } else if (init.environ_map.get("KEST_DATA")) |d| try gpa.dupe(u8, d) else blk: {
         const base = init.environ_map.get("APPDATA") orelse return error.AppDataUnavailable;
         break :blk try std.fs.path.join(gpa, &.{ base, "retort-cui" });
     };

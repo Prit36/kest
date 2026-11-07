@@ -32,7 +32,7 @@ headless UI tests. The bundled loopback fixture server starts only in demo mode.
 
 Double-click `Demo.cmd`, or run `kest.exe --demo` (from source:
 `zig build run -Doptimize=ReleaseFast -- --demo`). Every launch creates a fresh,
-separate workspace under `%APPDATA%\kest-demo\<session-id>`; when `RETORT_DATA`
+separate workspace under `%APPDATA%\kest-demo\<session-id>`; when `KEST_DATA`
 is set, demo sessions go under that folder's `kest-demo` subdirectory. Your normal
 collections and preferences are not loaded or changed. Demo sessions are retained
 on disk so you can inspect or export your experiments.
@@ -47,7 +47,7 @@ Eight tabs send automatically so real responses, headers, history, and activity
 are ready to inspect. All data is fictional; people/order endpoints return fixed
 fixtures rather than implementing CRUD. Closing and reopening Demo starts over.
 
-The default data folder is `%APPDATA%\retort-cui`. `RETORT_DATA` selects another
+The default data folder is `%APPDATA%\retort-cui`. `KEST_DATA` selects another
 folder.
 
 Ctrl+Enter sends or cancels; Ctrl+N creates a request; Ctrl+S saves; Ctrl+D
@@ -84,14 +84,14 @@ zig build bench -Doptimize=ReleaseFast
 Tests use loopback HTTP and scratch folders. CUI UI tests run directly in a
 software context: no native window, system clipboard or real input is used.
 The test step builds a separate, uninstalled `kest-check` executable and
-supplies `RETORT_DATA=test-output/workspace`. Headless execution refuses to start
-without an explicit `RETORT_DATA`.
+supplies `KEST_DATA=test-output/workspace`. Headless execution refuses to start
+without an explicit `KEST_DATA`.
 
 Render a real application image without opening a window:
 
 ```powershell
 zig build -Doptimize=ReleaseFast -Ddiagnostics=true --prefix test-output/diagnostics
-$env:RETORT_DATA = "$PWD/test-output/screenshot-workspace"
+$env:KEST_DATA = "$PWD/test-output/screenshot-workspace"
 ./test-output/diagnostics/bin/kest.exe --snapshot=test-output/workspace.png
 ./test-output/diagnostics/bin/kest.exe --snapshot=test-output/minimum.png --width=640 --height=420
 ./test-output/diagnostics/bin/kest.exe --snapshot=test-output/sidebar.png --width=640 --height=420 --sidebar

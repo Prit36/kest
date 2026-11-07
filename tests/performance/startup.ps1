@@ -6,7 +6,7 @@
 #   zig build -Doptimize=ReleaseFast
 #   powershell -File tests/performance/startup.ps1 -Exe zig-out/bin/retort.exe -Data <folder> [-Runs 5] [-IdleSeconds 10]
 #
-# -Data becomes RETORT_DATA: the app reads and writes only there.
+# -Data becomes KEST_DATA: the app reads and writes only there.
 param(
     [Parameter(Mandatory)][string]$Exe,
     [Parameter(Mandatory)][string]$Data,
@@ -74,7 +74,7 @@ public static class Hidden {
 $Exe = (Resolve-Path $Exe).Path
 New-Item -ItemType Directory -Force $Data | Out-Null
 $Data = (Resolve-Path $Data).Path
-$env:RETORT_DATA = $Data
+$env:KEST_DATA = $Data
 $name = "retort-measure-$PID"
 $desk = [Hidden]::NewDesktop($name)
 $cwd = Split-Path $Exe
