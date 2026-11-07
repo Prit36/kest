@@ -7,6 +7,54 @@ Zig uses `ReleaseFast`, and CUI, both renderers, the host and image decoder use
 `-O3`. The earlier size experiment below uses `ReleaseSmall`.
 These are observed runs, not guarantees. The machine's OS caches were warm.
 
+## Workspace memory and interaction optimization
+
+The November 7 performance pass replaces per-field OS page allocations with
+the C heap, releases response row indexes and search buffers on clear, limits
+retained frame scratch to 256 KiB, and releases restoration scratch after each
+tab. History parsing reuses at most 512 KiB of scratch between entries. JSON
+tree toggles update the affected rows rather than rebuilding the entire list;
+collapsing locates the subtree boundary with binary search, with a remaining
+linear move of the row indices after it. Expand-all still walks the document.
+
+The pass also fixes tab allocations leaked by missing saved-request links,
+invalidates cached text/search indexes on source-length changes, and refreshes
+the editor's source pointer after edits that can reallocate its buffer.
+
+The native workload is reproducible with `tests/performance/workspace.ps1`:
+40 restored drafts, each with 100 header pairs and a 256 KiB text body.
+The same generated input was copied into separate before/after directories.
+Three sequential runs per executable used the existing private-desktop harness
+and three seconds of idle observation, with warm OS caches.
+
+| Native workload | Before | After |
+| --- | --- | --- |
+| Median working set | 101.2 MiB | 71.1 MiB |
+| Median private bytes | 127.8 MiB | 97.6 MiB |
+| Median time to first idle | 157.0 ms | 156.9 ms |
+| Observed normalized idle CPU, all runs | 0.000% | 0.000% |
+
+Memory improved in this workload; these startup samples do **not** demonstrate
+a startup speed improvement. All six processes exited 0. Working set is measured
+after startup settles, rather than peak restoration memory. These measurements
+predate the final history-scratch reuse and editor-pointer fix; the workload has
+no history and does not edit text. GPU rendering and full native click latency
+remain outside the headless frame measurements.
+
+Added regression coverage compares incremental JSON toggles with a complete
+rebuild, including hidden and empty containers. The CUI harness checks that
+response clearing releases index/search capacity, supports repeated resets,
+and refreshes search when the source length changes at the same address.
+The final Debug and ReleaseFast checks passed all 89 engine/HTTP tests and
+the CUI harness. The final ReleaseFast 200-frame UI sample measured 0.174 ms
+median and 0.348 ms p99, with settled redraw false and no scheduled wakeup.
+These frame timings exclude rasterization, GPU submission and display.
+
+```powershell
+powershell -NoProfile -File tests/performance/workspace.ps1 -Data test-output/my-perf-workspace
+powershell -NoProfile -File tests/performance/startup.ps1 -Exe zig-out/bin/kest.exe -Data test-output/my-perf-workspace -Runs 3 -IdleSeconds 3
+```
+
 ## CUI 1.1 distribution
 
 The current production executable is 2,570,240 bytes. Debug and ReleaseFast

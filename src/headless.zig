@@ -52,6 +52,7 @@ pub fn run(app: *App, test_mode: bool, snapshot: ?[]const u8, width: f32, height
         try @import("ui_interaction_tests.zig").run(ui, app, frame, click, chord);
         try integration(ui, app);
         try @import("sidebar_tests.zig").run(ui, app, sw, snapshot, frame, click);
+        try memoryLifecycle(app);
         try performance(ui, app);
     }
     for (0..8) |_| frame(ui, app);
@@ -401,6 +402,35 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
 }
 fn noWake(_: *App) void {}
 fn noSchedule(_: *App, _: u64) void {}
+
+fn memoryLifecycle(app: *App) !void {
+    var view = @import("app/tab.zig").ResponseView.init(app.gpa);
+    defer view.deinit();
+    const text = "first\nsecond\nthird";
+    try view.code_raw.index.build(app.gpa, text);
+    view.code_raw.query.set("second");
+    view.code_raw.research(text);
+    try expect(@src(), view.code_raw.matches.items.len == 1);
+    view.code_raw.scroll_y = 100;
+    try view.tree_hits.append(app.gpa, 1);
+    view.reset();
+    try expect(@src(), view.code_raw.index.starts.capacity == 0 and view.code_raw.index.lines.capacity == 0);
+    try expect(@src(), view.code_raw.matches.capacity == 0 and view.tree_hits.capacity == 0);
+    try expect(@src(), view.code_raw.scroll_y == 0);
+    // Search caching tracks its own source rather than the rendered index.
+    var source = [_]u8{ 'a', 'b', 'a' };
+    view.code_raw.query.set("a");
+    view.code_raw.refreshSearch(&source);
+    try expect(@src(), view.code_raw.matches.items.len == 2);
+    view.code_raw.refreshSearch(source[0..1]);
+    try expect(@src(), view.code_raw.matches.items.len == 1);
+    // Reusing a response after clear and clearing it again are both safe.
+    try view.code_pretty.index.build(app.gpa, text);
+    view.reset();
+    view.reset();
+    try expect(@src(), view.code_pretty.index.starts.capacity == 0);
+    std.debug.print("CUI memory: response clear releases indexes/search, repeated reset and source-length search invalidation passed\n", .{});
+}
 
 fn performance(ui: *c.cui_ctx, app: *App) !void {
     // Let transient toast deadlines expire, then require an entirely idle UI.

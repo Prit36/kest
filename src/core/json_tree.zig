@@ -131,8 +131,38 @@ pub const Tree = struct {
 
     pub fn toggle(t: *Tree, a: Allocator, i: u32) !void {
         if (!t.isContainer(i)) return;
+        const row = t.rowOf(i) orelse {
+            t.collapsed.toggle(i);
+            return;
+        };
+        const end = i + t.nodes.items[i].skip;
+        if (t.isCollapsed(i)) {
+            // Count and insert just this subtree; unrelated nodes need no walk.
+            var count: usize = 0;
+            var j = i + 1;
+            while (j <= end) : (j += 1) {
+                count += 1;
+                if (t.isContainer(j) and t.isCollapsed(j)) j += t.nodes.items[j].skip;
+            }
+            const added = try t.rows.addManyAt(a, row + 1, count);
+            j = i + 1;
+            for (added) |*slot| {
+                slot.* = j;
+                if (t.isContainer(j) and t.isCollapsed(j)) j += t.nodes.items[j].skip;
+                j += 1;
+            }
+        } else {
+            // Find the first row beyond the subtree in logarithmic time, then
+            // move the remaining row indices once. No document-wide rebuild.
+            var lo = row + 1;
+            var hi = t.rows.items.len;
+            while (lo < hi) {
+                const mid = lo + (hi - lo) / 2;
+                if (t.rows.items[mid] <= end) lo = mid + 1 else hi = mid;
+            }
+            t.rows.replaceRangeAssumeCapacity(row + 1, lo - row - 1, &.{});
+        }
         t.collapsed.toggle(i);
-        try t.refresh(a);
     }
 
     /// Collapses everything below the root, or opens everything.
@@ -248,4 +278,18 @@ test "limits and bad input" {
     var scalar = try Tree.build(a, "42", 10);
     defer scalar.deinit(a);
     try testing.expectEqual(@as(usize, 1), scalar.rows.items.len);
+}
+
+test "incremental toggles match rebuilding, including hidden and empty containers" {
+    const a = testing.allocator;
+    var tree = try Tree.build(a, doc, 1000);
+    defer tree.deinit(a);
+    var reference = try Tree.build(a, doc, 1000);
+    defer reference.deinit(a);
+    for ([_]u32{ 2, 4, 9, 0, 2, 9, 0, 4, 2, 9, 0, 0 }) |index| {
+        try tree.toggle(a, index);
+        reference.collapsed.toggle(index);
+        try reference.refresh(a);
+        try testing.expectEqualSlices(u32, reference.rows.items, tree.rows.items);
+    }
 }

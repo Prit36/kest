@@ -1,7 +1,9 @@
 //! UI-independent editable buffers used by the existing application model.
 const std = @import("std");
 const c = @import("c.zig").c;
-const a = std.heap.page_allocator;
+// Fields are often only a few bytes. Sharing heap pages avoids a virtual
+// allocation and a committed OS page for every method, key and value.
+const a = std.heap.c_allocator;
 pub const Rect = struct { x: f32 = 0, y: f32 = 0, w: f32 = 0, h: f32 = 0 };
 pub const TextBuffer = struct {
     data: []u8 = &.{},

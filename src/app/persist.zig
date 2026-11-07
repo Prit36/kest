@@ -58,7 +58,7 @@ pub fn load(app: *App) !void {
         const skipped = try app.history.loadLines(text);
         if (skipped > 0) app.log.add(app.nowMs(), .warn, "Some history lines couldn't be read and were dropped");
     }
-    restoreTabs(app, a);
+    restoreTabs(app);
 }
 
 fn sortCollections(app: *App) void {
@@ -116,10 +116,15 @@ pub fn saveEnv(app: *App, e: *const state.Env) void {
     app.store.writeOwned(ws.envPath(&buf, &e.id), text);
 }
 
-fn restoreTabs(app: *App, a: Allocator) void {
+fn restoreTabs(app: *App) void {
     var restored: usize = 0;
     for (app.prefs.open_tabs, 0..) |o, i| {
         if (restored == max_restored_tabs) break;
+        // Parsed requests and serialized hashes are temporary. Release them
+        // per tab instead of holding up to forty large bodies until startup ends.
+        var scratch = std.heap.ArenaAllocator.init(app.gpa);
+        defer scratch.deinit();
+        const a = scratch.allocator();
         const t = restoreTab(app, a, o) catch null orelse continue;
         app.tabs.append(app.gpa, t) catch {
             t.destroy();
@@ -132,15 +137,22 @@ fn restoreTabs(app: *App, a: Allocator) void {
 }
 
 fn restoreTab(app: *App, a: Allocator, o: ws.OpenTab) !?*Tab {
+    // Resolve missing links before allocating a tab (a null result is not an
+    // error and would bypass the allocation's errdefer).
+    const collection = if (o.collection) |id| findCollection(app, &id) else null;
+    const node = if (o.collection != null and o.request != null)
+        (collection orelse return null).find(&o.request.?) orelse return null
+    else
+        null;
     const id = o.draft orelse col.newId(app.io);
     const t = try Tab.create(app.gpa, id, app.next_tab_uid);
     app.next_tab_uid += 1;
     errdefer t.destroy();
     var saved_text: ?[]const u8 = null;
     if (o.collection != null and o.request != null) {
-        const c = findCollection(app, &o.collection.?) orelse return null;
-        const n = c.find(&o.request.?) orelse return null;
-        const r = cs.loadRequest(app.store, a, &c.id, &n.id) catch return null;
+        const c = collection.?;
+        const n = node.?;
+        const r = try cs.loadRequest(app.store, a, &c.id, &n.id);
         try t.fromRequest(r);
         t.link = .{ .collection = c.id, .request = n.id };
         saved_text = try r.toJson(a);

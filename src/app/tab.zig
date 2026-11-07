@@ -197,14 +197,14 @@ pub const ResponseView = struct {
         v.hex = null;
         if (v.stripped) |h| v.gpa.free(h);
         v.stripped = null;
-        v.tree_hits.clearRetainingCapacity();
+        v.tree_hits.clearAndFree(v.gpa);
         v.tree_hit_at = 0;
-        v.code_pretty.caret = 0;
-        v.code_pretty.anchor = 0;
-        v.code_pretty.version += 1;
-        v.code_raw.caret = 0;
-        v.code_raw.anchor = 0;
-        v.code_raw.version += 1;
+        // Row indexes and search results can dwarf the response itself. A
+        // cleared response must also release these derived buffers and scroll.
+        v.code_pretty.deinit();
+        v.code_pretty = .init(v.gpa);
+        v.code_raw.deinit();
+        v.code_raw = .init(v.gpa);
     }
 
     pub fn deinit(v: *ResponseView) void {

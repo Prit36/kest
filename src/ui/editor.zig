@@ -21,10 +21,11 @@ pub fn view(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8,
         keys(ui, s, source, read_only);
         if (!read_only) source = s.text();
     }
-    if (s.indexed_version != s.version or s.indexed_ptr != @intFromPtr(source.ptr)) {
+    if (s.indexed_version != s.version or s.indexed_ptr != @intFromPtr(source.ptr) or s.indexed_len != source.len) {
         s.index.build(s.gpa, source) catch {};
         s.indexed_version = s.version;
         s.indexed_ptr = @intFromPtr(source.ptr);
+        s.indexed_len = source.len;
     }
     s.scroll_y = @max(0, s.scroll_y - c.retort_editor_scroll(ui, identity) * line_h * 3);
     const paint = Paint{ .state = s, .source = source, .lang = lang, .focused = focused };
@@ -48,7 +49,8 @@ pub fn view(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8,
     return v0 != s.version;
 }
 
-fn keys(ui: *c.cui_ctx, s: *State, source: []const u8, read_only: bool) void {
+fn keys(ui: *c.cui_ctx, s: *State, source_in: []const u8, read_only: bool) void {
+    var source = source_in;
     const mods = c.cui_key_mods(ui);
     const shift = mods & c.CUI_MOD_SHIFT != 0;
     const ctrl = mods & c.CUI_MOD_PRIMARY != 0;
@@ -67,6 +69,8 @@ fn keys(ui: *c.cui_ctx, s: *State, source: []const u8, read_only: bool) void {
         if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_Y) or c.cui_shortcut(ui, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT, c.CUI_KEY_Z)) _ = s.redoEdit();
         const entered = c.retort_editor_text(ui);
         if (!ctrl and entered != null and entered[0] != 0) s.replaceSelection(std.mem.span(entered), true);
+        // Paste/undo/typing may reallocate the buffer before navigation runs.
+        source = s.text();
     }
     if (c.cui_key_pressed(ui, c.CUI_KEY_LEFT)) _ = s.command(if (ctrl) (if (shift) .select_word_left else .move_word_left) else (if (shift) .select_left else .move_left), source, read_only);
     if (c.cui_key_pressed(ui, c.CUI_KEY_RIGHT)) _ = s.command(if (ctrl) (if (shift) .select_word_right else .move_word_right) else (if (shift) .select_right else .move_right), source, read_only);

@@ -20,7 +20,9 @@ fn toggleSidebar(ui: *c.cui_ctx, app: *App) void {
 }
 
 pub fn view(ui: *c.cui_ctx, app: *App) void {
-    _ = w.arena.reset(.retain_capacity);
+    // Imports and bulk edits may use megabytes of temporary text in one frame.
+    // Keep a small reusable arena without retaining that high-water mark forever.
+    _ = w.arena.reset(.{ .retain_with_limit = 256 * 1024 });
     commands.drainDone(app);
     if (app.store.takeFailure()) |failure| {
         defer app.gpa.free(failure);

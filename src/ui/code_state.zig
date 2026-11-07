@@ -34,6 +34,7 @@ pub const State = struct {
     indexed_version: u64 = 0,
     /// A viewer's text is someone else's: indexed again when it changes.
     indexed_ptr: usize = 0,
+    indexed_len: usize = 0,
     index: lines.Index = .{},
     scroll_x: f32 = 0,
     scroll_y: f32 = 0,
@@ -56,6 +57,8 @@ pub const State = struct {
     match_at: usize = 0,
     matches_truncated: bool = false,
     searched_version: u64 = 0,
+    searched_ptr: usize = 0,
+    searched_len: usize = 0,
 
     pub fn init(gpa: Allocator) State {
         return .{ .gpa = gpa };
@@ -276,13 +279,15 @@ pub const State = struct {
 
     /// Finds `query` again if it or the text changed.
     pub fn refreshSearch(s: *State, from: []const u8) void {
-        if (s.searched_version == s.version and s.indexed_ptr == @intFromPtr(from.ptr)) return;
-        s.searched_version = s.version;
+        if (s.searched_version == s.version and s.searched_ptr == @intFromPtr(from.ptr) and s.searched_len == from.len) return;
         s.research(from);
     }
 
     pub fn research(s: *State, from: []const u8) void {
         s.matches_truncated = search.findAll(s.gpa, from, s.query.text(), &s.matches) catch false;
+        s.searched_version = s.version;
+        s.searched_ptr = @intFromPtr(from.ptr);
+        s.searched_len = from.len;
         if (s.match_at >= s.matches.items.len) s.match_at = 0;
     }
 

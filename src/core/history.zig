@@ -116,12 +116,15 @@ pub const History = struct {
     /// many lines were skipped.
     pub fn loadLines(h: *History, text: []const u8) !usize {
         var skipped: usize = 0;
+        var ar = std.heap.ArenaAllocator.init(h.gpa);
+        defer ar.deinit();
         var it = std.mem.splitScalar(u8, text, '\n');
         while (it.next()) |line_in| {
             const line = std.mem.trim(u8, line_in, " \r\t");
             if (line.len == 0) continue;
-            var ar = std.heap.ArenaAllocator.init(h.gpa);
-            defer ar.deinit();
+            // Reuse JSON parser scratch across entries without retaining an
+            // oversized history line for the remainder of startup.
+            _ = ar.reset(.{ .retain_with_limit = 512 * 1024 });
             const v = std.json.parseFromSliceLeaky(std.json.Value, ar.allocator(), line, .{}) catch {
                 skipped += 1;
                 continue;
