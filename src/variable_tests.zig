@@ -131,7 +131,7 @@ pub fn run(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]const
         c.cui_push_id_int(ui, @intCast(t.uid));
         defer c.cui_pop_id(ui);
         const pid = c.cui_make_id(ui, "suggestions");
-        c.cui_push_id_int(ui, @intCast(pid));
+        c.cui_push_id_int(ui, @bitCast(pid));
         defer c.cui_pop_id(ui);
         break :blk c.cui_get_rect(ui, c.cui_make_id(ui, "suggestion-0"));
     };

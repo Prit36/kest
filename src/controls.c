@@ -840,21 +840,30 @@ int kest_response_header_navigation(cui_ctx *ui, int count) {
 }
 
 static void paint_table_row(cui_ctx *ui, cui_node *n, void *raw) {
-    (void)raw;
+    int flags = raw ? *(int *)raw : 0;
     float scale = ui->scale > 0 ? ui->scale : 1;
     float y = floorf((n->rect.y + n->rect.h) * scale) / scale - 1 / scale;
     cui_draw_rect(ui, (cui_rect){n->rect.x, y, n->rect.w, 1 / scale}, CUI_CORNERS(0), CUI_C(ui, BORDER_SUBTLE));
+    /* Where dragged rows will land: a line above or below this row. */
+    if (flags & KEST_ROW_DROP_ABOVE) cui_draw_rect(ui, (cui_rect){n->rect.x, n->rect.y - 1, n->rect.w, 2}, CUI_CORNERS(1), CUI_C(ui, ACCENT));
+    if (flags & KEST_ROW_DROP_BELOW) cui_draw_rect(ui, (cui_rect){n->rect.x, n->rect.y + n->rect.h - 1, n->rect.w, 2}, CUI_CORNERS(1), CUI_C(ui, ACCENT));
 }
 
-void kest_table_row_begin(cui_ctx *ui) {
+void kest_table_row_begin(cui_ctx *ui, int flags) {
     cui_id id = cui_make_id(ui, "kv-row");
     cui_rect r = cui__prev_rect(ui, id);
     bool hovered = ui->hot_layer == ui->current_layer && cui__rect_contains(r, ui->mx, ui->my);
     bool focused = ui->focus == cui_make_id(ui, "key") || ui->focus == cui_make_id(ui, "value");
-    cui_row_begin(ui, &(cui_box){ .id = "kv-row", .height = CUI_PX(KEST_TABLE_STRIDE), .width = CUI_FILL, .align = CUI_ALIGN_CENTER, .bg = hovered ? CUI_C(ui, HOVER) : focused ? CUI_C(ui, SURFACE_MUTED) : (cui_color){0} });
+    cui_color bg = (flags & KEST_ROW_SELECTED) ? cui_alpha(CUI_C(ui, ACCENT), hovered ? 0.2f : 0.14f) : hovered ? CUI_C(ui, HOVER) : focused ? CUI_C(ui, SURFACE_MUTED) : (cui_color){0};
+    cui_row_begin(ui, &(cui_box){ .id = "kv-row", .height = CUI_PX(KEST_TABLE_STRIDE), .width = CUI_FILL, .align = CUI_ALIGN_CENTER, .bg = bg });
+    int *data = CUI_PAINT_DATA(ui, int);
+    *data = flags;
     ui->nodes[ui->last_node].paint = paint_table_row;
+    ui->nodes[ui->last_node].paint_data = data;
     ui->nodes[ui->last_node].flags |= CUI_NF_PAINT_AFTER;
 }
+void kest_set_cursor(cui_ctx *ui, cui_cursor cursor) { cui__set_cursor(ui, cursor); }
+bool kest_row_hovered(cui_ctx *ui) { return ui->hot_layer == ui->current_layer && cui__rect_contains(cui__prev_rect(ui, cui_make_id(ui, "kv-row")), ui->mx, ui->my); }
 
 bool kest_table_menu_begin(cui_ctx *ui, const char *key, bool row, const char *notice, cui_color color) {
     cui_id id = cui_make_id(ui, key), pid = id ^ 0x3E40u;

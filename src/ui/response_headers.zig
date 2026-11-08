@@ -41,6 +41,10 @@ fn heading(ui: *c.cui_ctx, id: [*:0]const u8, label: []const u8, weight: f32) vo
     w.end(ui);
 }
 
+/// The name column's share of the width, kept while the app runs.
+var split: f32 = @import("../app/tab.zig").Table.default_share;
+var resizing = false;
+
 pub fn view(ui: *c.cui_ctx, t: *Tab, resp: *Response) void {
     c.kest_response_header_source(ui, resp, @intCast(resp.headers.items.len));
     w.column(ui, .{ .id = "received-headers", .width = w.fill, .height = w.fill, .pad_x = w.design.space.group, .pad_top = w.design.space.tight, .pad_bottom = w.design.space.normal });
@@ -52,9 +56,12 @@ pub fn view(ui: *c.cui_ctx, t: *Tab, resp: *Response) void {
     _ = c.kest_response_header_navigation(ui, @intCast(resp.headers.items.len));
     const pixel = 1 / @max(1, c.cui_dpi_scale(ui));
     w.column(ui, .{ .id = "response-header-grid", .width = w.fill, .height = w.fill, .max_height = c.KEST_TABLE_HEADER + pixel + @as(f32, @floatFromInt(resp.headers.items.len)) * c.KEST_TABLE_STRIDE, .clip = true });
+    _ = @import("key_value.zig").columnSplit(ui, "response-header-name-column", "response-header-value-column", &split, &resizing, true);
+    const name_weight = split * 10;
+    const value_weight = (1 - split) * 10;
     w.row(ui, .{ .id = "response-header-heading", .width = w.fill, .height = w.px(c.KEST_TABLE_HEADER), .bg = w.color(c.CUI_TOKEN_SURFACE_MUTED), .@"align" = c.CUI_ALIGN_CENTER });
-    heading(ui, "response-header-name-column", "Header", 2);
-    heading(ui, "response-header-value-column", "Value", 3);
+    heading(ui, "response-header-name-column", "Header", name_weight);
+    heading(ui, "response-header-value-column", "Value", value_weight);
     if (c.kest_table_menu_begin(ui, "table-actions", false, null, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
         if (w.menuItem(ui, if (text.clipboardSafe(resp.raw_headers)) "Copy response headers" else "Copy escaped response headers")) copyAll(ui, resp);
         c.cui_menu_end(ui);
@@ -68,9 +75,9 @@ pub fn view(ui: *c.cui_ctx, t: *Tab, resp: *Response) void {
     for (@as(usize, @intCast(first))..@as(usize, @intCast(last))) |i| {
         const header = resp.headers.items[i];
         c.cui_push_id_int(ui, @intCast(i));
-        c.kest_table_row_begin(ui);
-        const name_enter = cell(ui, "key", header.name, 2);
-        const value_enter = cell(ui, "value", header.value, 3);
+        c.kest_table_row_begin(ui, 0);
+        const name_enter = cell(ui, "key", header.name, name_weight);
+        const value_enter = cell(ui, "value", header.value, value_weight);
         if (name_enter or value_enter) inspect_row = i;
         if (c.kest_table_menu_begin(ui, "row-actions", true, null, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
             if (w.menuItem(ui, "Inspect header")) inspect_row = i;

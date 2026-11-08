@@ -188,7 +188,7 @@ static void table_frame(cui_ctx *ui, char *key, char *value, bool details) {
     kest_table_navigation(ui, ids, 1);
     cui_column_begin(ui, &(cui_box){ .width = CUI_PX(500), .pad_left = 0.25f, .pad_top = 0.25f });
     cui_push_id_int(ui, 1);
-    kest_table_row_begin(ui);
+    kest_table_row_begin(ui, 0);
     kest_table_input(ui, "key", key, 128, &(cui_input_opts){ .width = CUI_FILL, .placeholder = "e.g. Accept" });
     kest_table_input(ui, "value", value, 128, &(cui_input_opts){ .width = CUI_FILL, .placeholder = "e.g. application/json" });
     if (kest_table_menu_begin(ui, "row-actions", true, NULL, CUI_COLOR_TEXT_SECONDARY)) cui_menu_end(ui);

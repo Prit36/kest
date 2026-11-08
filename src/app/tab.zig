@@ -33,6 +33,29 @@ pub const Table = struct {
     /// A real editable insertion row, outside request data until first input.
     /// Promoting the same pointer/uid preserves focus, selection and native undo.
     entry: ?*Row = null,
+    /// The name column's share of the width the two text columns get.
+    key_share: f32 = default_share,
+    resizing: bool = false,
+    /// Rows picked with their grips (uids), for bulk actions.
+    selected: std.ArrayList(u32) = .empty,
+    select_anchor: ?u32 = null,
+    /// The order last chosen from a heading, for its arrow.
+    sort: Sort = .none,
+    /// A grip pressed, and once moved, the rows being dragged.
+    drag: ?Drag = null,
+    /// The rows as bulk text before the last bulk change, for Undo.
+    undo_text: ?[]u8 = null,
+    undo_toast: i32 = 0,
+
+    pub const default_share: f32 = 0.4;
+    pub const Sort = enum { none, key_up, key_down, value_up, value_down };
+    pub const Drag = struct {
+        uid: u32,
+        start_y: f32,
+        moving: bool = false,
+        /// Insert before this index of `rows` (rows.len: at the end).
+        target: usize = 0,
+    };
 
     pub fn init(gpa: Allocator) Table {
         return .{ .gpa = gpa };
@@ -42,6 +65,171 @@ pub const Table = struct {
         t.clear();
         t.rows.deinit(t.gpa);
         if (t.bulk) |*b| b.deinit();
+        t.selected.deinit(t.gpa);
+        if (t.undo_text) |u| t.gpa.free(u);
+    }
+
+    pub fn indexOf(t: *const Table, uid: u32) ?usize {
+        for (t.rows.items, 0..) |r, i| if (r.uid == uid) return i;
+        return null;
+    }
+
+    pub fn isSelected(t: *const Table, uid: u32) bool {
+        return std.mem.indexOfScalar(u32, t.selected.items, uid) != null;
+    }
+
+    /// A plain click on a grip: just this row.
+    pub fn selectOnly(t: *Table, uid: u32) void {
+        t.selected.clearRetainingCapacity();
+        t.selected.append(t.gpa, uid) catch {};
+        t.select_anchor = uid;
+    }
+
+    /// Ctrl: this row in or out.
+    pub fn toggleSelected(t: *Table, uid: u32) void {
+        if (std.mem.indexOfScalar(u32, t.selected.items, uid)) |i| {
+            _ = t.selected.orderedRemove(i);
+        } else t.selected.append(t.gpa, uid) catch {};
+        t.select_anchor = uid;
+    }
+
+    /// Shift: every row from the last one picked to this one.
+    pub fn selectTo(t: *Table, uid: u32) void {
+        const anchor = t.select_anchor orelse return t.selectOnly(uid);
+        const a = t.indexOf(anchor) orelse return t.selectOnly(uid);
+        const b = t.indexOf(uid) orelse return;
+        t.selected.clearRetainingCapacity();
+        for (t.rows.items[@min(a, b) .. @max(a, b) + 1]) |r| t.selected.append(t.gpa, r.uid) catch {};
+    }
+
+    pub fn clearSelection(t: *Table) void {
+        t.selected.clearRetainingCapacity();
+        t.select_anchor = null;
+    }
+
+    /// Drops picks of rows that have gone.
+    pub fn pruneSelection(t: *Table) void {
+        var i: usize = 0;
+        while (i < t.selected.items.len) {
+            if (t.indexOf(t.selected.items[i]) == null) _ = t.selected.orderedRemove(i) else i += 1;
+        }
+    }
+
+    /// Keeps the rows as they are, for Undo of the change about to happen.
+    pub fn remember(t: *Table) void {
+        if (t.undo_text) |u| t.gpa.free(u);
+        t.undo_text = t.toBulk(t.gpa) catch null;
+    }
+
+    /// Back to the rows `remember` kept.
+    pub fn restore(t: *Table) !void {
+        const text = t.undo_text orelse return;
+        try t.fromBulk(text);
+        t.gpa.free(text);
+        t.undo_text = null;
+        t.clearSelection();
+    }
+
+    fn lessByKey(_: void, x: *Row, y: *Row) bool {
+        return std.ascii.lessThanIgnoreCase(x.key.text(), y.key.text());
+    }
+    fn lessByValue(_: void, x: *Row, y: *Row) bool {
+        return std.ascii.lessThanIgnoreCase(x.value.text(), y.value.text());
+    }
+
+    /// Sorts the rows (stably: equal names keep their order).
+    pub fn sortBy(t: *Table, order: Sort) void {
+        switch (order) {
+            .none => return,
+            .key_up, .key_down => std.mem.sort(*Row, t.rows.items, {}, lessByKey),
+            .value_up, .value_down => std.mem.sort(*Row, t.rows.items, {}, lessByValue),
+        }
+        if (order == .key_down or order == .value_down) std.mem.reverse(*Row, t.rows.items);
+        t.sort = order;
+    }
+
+    /// Moves the picked rows (or just `uid` when it isn't picked) to before
+    /// index `to`, keeping their order. Returns whether anything moved.
+    pub fn moveRows(t: *Table, uid: u32, to: usize) bool {
+        const group = t.isSelected(uid);
+        const target = @min(to, t.rows.items.len);
+        var moving: std.ArrayList(*Row) = .empty;
+        defer moving.deinit(t.gpa);
+        var staying: std.ArrayList(*Row) = .empty;
+        defer staying.deinit(t.gpa);
+        var insert_at: usize = 0;
+        for (t.rows.items, 0..) |r, i| {
+            const moves = if (group) t.isSelected(r.uid) else r.uid == uid;
+            (if (moves) moving.append(t.gpa, r) else staying.append(t.gpa, r)) catch return false;
+            if (!moves and i < target) insert_at += 1;
+        }
+        if (moving.items.len == 0) return false;
+        staying.insertSlice(t.gpa, insert_at, moving.items) catch return false;
+        // Dropped where they already were: nothing changed.
+        if (std.mem.eql(*Row, staying.items, t.rows.items)) return false;
+        @memcpy(t.rows.items, staying.items);
+        t.sort = .none;
+        return true;
+    }
+
+    /// Deletes the picked rows.
+    pub fn removeSelected(t: *Table) usize {
+        var removed: usize = 0;
+        var i: usize = t.rows.items.len;
+        while (i > 0) {
+            i -= 1;
+            if (t.isSelected(t.rows.items[i].uid)) {
+                t.removeAt(i);
+                removed += 1;
+            }
+        }
+        t.clearSelection();
+        return removed;
+    }
+
+    pub fn setEnabledSelected(t: *Table, enabled: bool) usize {
+        var count: usize = 0;
+        for (t.rows.items) |r| if (t.isSelected(r.uid) and r.enabled != enabled) {
+            r.enabled = enabled;
+            count += 1;
+        };
+        return count;
+    }
+
+    /// The picked rows as tab-separated lines: name, tab, value.
+    pub fn selectedTsv(t: *const Table, a: Allocator) ![]u8 {
+        var out: std.ArrayList(u8) = .empty;
+        for (t.rows.items) |r| if (t.isSelected(r.uid)) {
+            if (out.items.len > 0) try out.append(a, '\n');
+            try out.appendSlice(a, r.key.text());
+            try out.append(a, '\t');
+            try out.appendSlice(a, r.value.text());
+        };
+        return out.items;
+    }
+
+    /// Rows from pasted lines: "name<TAB>value", or a name alone, inserted
+    /// before index `at`. Blank lines are skipped. Returns how many.
+    pub fn pasteTsv(t: *Table, text: []const u8, at: usize) !usize {
+        var lines = std.mem.splitScalar(u8, text, '\n');
+        var where = @min(at, t.rows.items.len);
+        var count: usize = 0;
+        t.clearSelection();
+        while (lines.next()) |raw| {
+            const line = std.mem.trimEnd(u8, raw, "\r");
+            if (std.mem.trim(u8, line, " \t").len == 0) continue;
+            const tab_at = std.mem.indexOfScalar(u8, line, '\t');
+            const key = if (tab_at) |i| line[0..i] else line;
+            const value = if (tab_at) |i| line[i + 1 ..] else "";
+            const r = try t.add(.{ .key = key, .value = value, .has_equals = tab_at != null });
+            _ = t.rows.pop();
+            try t.rows.insert(t.gpa, where, r);
+            t.selected.append(t.gpa, r.uid) catch {};
+            where += 1;
+            count += 1;
+        }
+        if (count > 0) t.sort = .none;
+        return count;
     }
 
     pub fn clear(t: *Table) void {

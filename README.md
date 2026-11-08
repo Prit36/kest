@@ -99,7 +99,10 @@ regular expressions, JSON folding, multiple carets (Alt+click, Alt+drag for a
 column, Ctrl+Alt+Up/Down) and Ctrl+wheel zoom.
 Typing `{{` in the URL, a table cell or the body suggests environment variables;
 references are coloured, and hovering one shows its value. The header table
-suggests common names and values, and the URL field suggests URLs sent before. Switching formats preserves
+suggests common names and values, and the URL field suggests URLs sent before.
+Tables have resizable columns and sortable headings. Their rows can be picked
+with a grip for bulk enable, disable, copy or delete, dragged to reorder, and
+copied or pasted as tab-separated lines. Switching formats preserves
 all text, form fields and the binary path. URL-encoded forms treat values as
 text while retaining multipart file flags for later. Binary mode shows the
 selected file name/size, with Change file, Remove and Refresh. Metadata checks

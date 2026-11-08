@@ -148,3 +148,24 @@ clicks, scrolling, zoom and bracket outline.
 - The URL field suggests URLs sent before that contain what was typed, newest
   first.
 - A list never shows just because a field was focused; it waits for typing.
+
+### Tables
+
+These apply to params, headers, form fields and environment variables; the
+response header table shares the resizable split.
+
+- Drag the boundary between the two headings to resize the columns; a
+  double-click resets the split.
+- Click a heading to sort by name or value (A to Z, then Z to A). Sorting
+  changes the request's order, so a toast offers Undo.
+- Each row has a grip. A click picks the row, Ctrl+click adds or removes one,
+  and Shift+click picks a range. With rows picked, the heading becomes a bar
+  with Enable, Disable, Copy and Delete. Ctrl+C copies them, Ctrl+X cuts them,
+  Delete removes them, and Escape lets go. Deleting offers Undo.
+- Drag a grip to move its row, or every picked row, elsewhere. A line shows
+  where they will land, and Escape cancels.
+- Copied rows are tab-separated lines (`name<TAB>value`), so they paste into
+  spreadsheets. Pasting several lines or tabbed text into a cell adds rows
+  after it, with Undo; a single line still pastes into the cell.
+- Response headers keep the order they were received in; that table resizes but
+  does not sort.

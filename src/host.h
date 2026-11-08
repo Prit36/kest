@@ -55,7 +55,11 @@ int kest_table_navigation(cui_ctx *ui, const unsigned *rows, int count);
 int kest_response_header_navigation(cui_ctx *ui, int count);
 void kest_response_header_source(cui_ctx *ui, const void *source, int count);
 void kest_table_focus(cui_ctx *ui, unsigned row, int column, int index);
-void kest_table_row_begin(cui_ctx *ui);
+enum { KEST_ROW_SELECTED = 1, KEST_ROW_DROP_ABOVE = 2, KEST_ROW_DROP_BELOW = 4 };
+void kest_table_row_begin(cui_ctx *ui, int flags);
+void kest_set_cursor(cui_ctx *ui, cui_cursor cursor);
+/* Whether the pointer is over the row being built (last frame's rect). */
+bool kest_row_hovered(cui_ctx *ui);
 bool kest_table_menu_begin(cui_ctx *ui, const char *id, bool row, const char *notice, cui_color color);
 bool kest_context_menu_begin(cui_ctx *ui, const char *key, cui_id anchor);
 bool kest_right_pressed(cui_ctx *ui, cui_id id);
