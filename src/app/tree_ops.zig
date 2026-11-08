@@ -226,9 +226,13 @@ pub fn finishDelete(app: *App) void {
     app.deleted.clearRetainingCapacity();
     for (app.deleted_envs.items) |d| state.App.freeEnv(app.gpa, d.env);
     app.deleted_envs.clearRetainingCapacity();
+    app.unlinked.clearRetainingCapacity();
 }
 pub fn deleteNode(app: *App, n: *Node) void {
-    if (app.deleted.items.len > 0 and app.nowMs() >= app.undo_until) finishDelete(app);
+    // Past the Undo window, every pending delete is final, environments
+    // included: this delete starts a new window, and its Undo must not bring
+    // back what the old one already gave up.
+    if (app.nowMs() >= app.undo_until) finishDelete(app);
     const root = n.root().id;
     const index = if (n.parent != null) n.indexInParent().? else std.mem.indexOfScalar(*Node, app.collections.items, n).?;
     app.deleted.append(app.gpa, .{ .node = n, .parent = n.parent, .root = root, .index = index }) catch return;
@@ -269,6 +273,7 @@ pub fn undoDelete(app: *App) void {
         _ = app.deleted.pop();
     }
     app.rows_dirty = true;
+    relinkTabs(app);
     while (app.deleted_envs.items.len > 0) {
         const d = app.deleted_envs.items[app.deleted_envs.items.len - 1];
         app.envs.insert(app.gpa, @min(d.index, app.envs.items.len), d.env) catch return;
@@ -289,13 +294,32 @@ fn neighbour(app: *App, n: *Node) ?*Node {
 
 fn closeTabsOf(app: *App, n: *const Node) void {
     for (app.closed_tabs.items) |t| if (t.link) |link| {
-        if (std.mem.eql(u8, &link.request, &n.id)) t.link = null;
+        if (!std.mem.eql(u8, &link.request, &n.id)) continue;
+        app.unlinked.append(app.gpa, .{ .uid = t.uid, .link = link }) catch {};
+        t.link = null;
     };
     if (n.kind == .request) if (tabOf(app, n)) |t| {
+        app.unlinked.append(app.gpa, .{ .uid = t.uid, .link = t.link.? }) catch {};
         t.link = null;
         persist.touchTab(app, t);
     };
     for (n.children.items) |c| closeTabsOf(app, c);
+}
+
+/// Undo of a delete: the tabs it unlinked edit their requests again, unless
+/// they were saved somewhere else meanwhile.
+fn relinkTabs(app: *App) void {
+    for (app.unlinked.items) |u| {
+        for (app.tabs.items) |t| if (t.uid == u.uid and t.link == null) {
+            t.link = u.link;
+            // Dirty again only if it differs from the request's file.
+            persist.touchTab(app, t);
+        };
+        for (app.closed_tabs.items) |t| if (t.uid == u.uid and t.link == null) {
+            t.link = u.link;
+        };
+    }
+    app.unlinked.clearRetainingCapacity();
 }
 
 pub fn addEnvironment(app: *App, name: []const u8) ?*state.Env {

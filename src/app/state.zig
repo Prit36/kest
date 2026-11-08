@@ -79,6 +79,9 @@ pub const NameAction = union(enum) {
 };
 
 pub const Deleted = struct { node: *col.Node, parent: ?*col.Node, root: col.Id, index: usize };
+/// A tab (open or recently closed, by uid) whose link a pending delete
+/// cleared; Undo gives the link back.
+pub const Unlinked = struct { uid: u64, link: @import("tab.zig").Link };
 pub const App = struct {
     gpa: Allocator,
     io: Io,
@@ -109,6 +112,8 @@ pub const App = struct {
     selection_anchor: ?*col.Node = null,
     deleted: std.ArrayList(Deleted) = .empty,
     deleted_envs: std.ArrayList(struct { env: *Env, index: usize, active: bool }) = .empty,
+    /// Tabs unlinked by the deletes in `deleted`; cleared with them.
+    unlinked: std.ArrayList(Unlinked) = .empty,
     undo_until: i64 = 0,
     rename_action: ?NameAction = null,
     rename_text: ui.TextBuffer = .{},
@@ -162,6 +167,9 @@ pub const App = struct {
     save_name: ui.TextBuffer = .{},
     /// A dirty tab whose close is waiting for Save as to finish.
     close_after_save: ?*Tab = null,
+    /// The uid of the tab the Save as dialog saves. Not "the current tab":
+    /// a background tab's close prompt can open the dialog.
+    save_tab: u64 = 0,
     editing_env: ?*Env = null,
     retention_text: ui.TextBuffer = .{},
 
@@ -226,6 +234,7 @@ pub const App = struct {
         @import("tree_ops.zig").finishDelete(a);
         a.deleted.deinit(a.gpa);
         a.deleted_envs.deinit(a.gpa);
+        a.unlinked.deinit(a.gpa);
         a.selection.deinit(a.gpa);
         a.rename_text.deinit();
         for (a.done.items) |j| j.destroy();

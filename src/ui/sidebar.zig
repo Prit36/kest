@@ -471,7 +471,10 @@ fn history(ui: *c.cui_ctx, app: *App) void {
     for (@as(usize, @intCast(first))..@as(usize, @intCast(last))) |i| {
         const index = app.history_visible.items[i];
         const e = app.history.entries.items[index];
-        c.cui_push_id_int(ui, @intCast(index));
+        // Keyed by the entry, not its index: a request finishing while this
+        // row's menu is open can trim the oldest entry and shift every index,
+        // and the open menu must stay with the entry it was opened for.
+        c.cui_push_id_int(ui, historyRowKey(&e));
         const clicked = c.kest_control_begin(ui, "history-entry", false, -1, 44, 0);
         w.column(ui, .{ .width = w.fill, .gap = 2, .pad_x = 4 });
         w.row(ui, .{ .width = w.fill, .gap = 8 });
@@ -505,6 +508,11 @@ fn history(ui: *c.cui_ctx, app: *App) void {
     c.cui_spacer(ui);
     if (w.button(ui, "Clear", .{ .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_GHOST, .icon = c.CUI_ICON_TRASH_2, .tooltip = "Clear request history" })) commands.confirm(app, .clear_history, "Clear history?", "Request history will be deleted.", "Clear");
     w.end(ui);
+}
+
+/// The id scope of a history row and its context menu.
+pub fn historyRowKey(e: *const @import("../core/history.zig").Entry) c_int {
+    return @bitCast(@as(u32, @truncate(e.id)));
 }
 
 // History rows already show the method; drop the scheme so the host and path fit.

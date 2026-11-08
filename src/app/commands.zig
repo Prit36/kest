@@ -129,6 +129,8 @@ pub fn closeNow(app: *App, t: *Tab) void {
         var buf: [64]u8 = undefined;
         const ws = @import("../storage/workspace_store.zig");
         app.store.delete(ws.draftPath(&buf, &t.id));
+        // The flag says a draft file exists; a reopened tab writes a new one.
+        t.has_draft = false;
     }
     if (app.rename_action) |action| if (action == .rename_tab and action.rename_tab == t) {
         app.rename_action = null;
@@ -215,11 +217,35 @@ pub fn save(app: *App, t: *Tab) void {
 }
 
 pub fn beginSaveAs(app: *App, t: *Tab) void {
+    app.save_tab = t.uid;
     app.save_name.set(t.name);
     app.save_name.focus();
     app.save_target = app.selected;
     app.modal = .save_as;
     app.modal_open = true;
+}
+
+/// The Save as dialog's primary action: saves the tab the dialog was opened
+/// for (which need not be the current one), then finishes a pending close.
+pub fn acceptSaveAs(app: *App) void {
+    const tree = @import("tree_ops.zig");
+    const uid = app.save_tab;
+    app.save_tab = 0;
+    // Gone since the dialog opened: there is nothing to save.
+    const t = tabByUid(app, uid) orelse return;
+    const parent = app.save_target orelse (if (app.collections.items.len > 0) app.collections.items[0] else tree.newCollection(app, "My collection")) orelse return;
+    tree.saveTabAs(app, t, tree.containerOf(parent), app.save_name.text());
+    if (app.close_after_save == t) {
+        app.close_after_save = null;
+        if (!t.dirty and t.link != null) closeNow(app, t);
+    }
+}
+
+/// An open tab by its uid.
+pub fn tabByUid(app: *const App, uid: u64) ?*Tab {
+    if (uid == 0) return null;
+    for (app.tabs.items) |t| if (t.uid == uid) return t;
+    return null;
 }
 
 /// A saved request gets its copy beside it; an unsaved one opens as a new tab.
@@ -531,8 +557,19 @@ pub fn formatBody(app: *App, t: *Tab, indent: usize) void {
 
 /// Closed documents retain their edits for this session, bounded to ten tabs.
 pub fn reopenClosed(app: *App) void {
-    if (app.tabs.items.len >= tab_mod.max_open_tabs or app.closed_tabs.items.len == 0) return;
+    if (app.closed_tabs.items.len == 0) return;
     const t = app.closed_tabs.items[app.closed_tabs.items.len - 1];
+    // One tab per saved request: two would both write its file, and renames,
+    // moves and deletes reach only the first. If the request was opened
+    // again since this tab closed, go to that tab instead.
+    if (t.link) |l| for (app.tabs.items, 0..) |open, i| if (open.link) |ol| {
+        if (!std.mem.eql(u8, &ol.request, &l.request)) continue;
+        _ = app.closed_tabs.pop();
+        t.destroy();
+        activate(app, i);
+        return;
+    };
+    if (app.tabs.items.len >= tab_mod.max_open_tabs) return;
     app.tabs.append(app.gpa, t) catch return;
     _ = app.closed_tabs.pop();
     app.active = app.tabs.items.len - 1;

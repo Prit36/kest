@@ -369,12 +369,8 @@ pub fn run(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]const
     app.save_target = collection;
     app.save_name.set("Saved from close");
     app.modal_open = false;
-    // Accept exactly as the dialog's primary button does.
-    tree.saveTabAs(app, draft, collection, app.save_name.text());
-    if (app.close_after_save == draft) {
-        app.close_after_save = null;
-        if (!draft.dirty and draft.link != null) commands.closeNow(app, draft);
-    }
+    // What the dialog's primary button runs.
+    commands.acceptSaveAs(app);
     try check(@src(), !isOpen(app, draft));
 
     // The palette lists grouped actions with shortcuts and runs layout ones.

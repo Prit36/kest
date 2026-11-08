@@ -20,6 +20,7 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
     if (!app.modal_open) {
         // A Save as begun from a close prompt was dismissed: keep the tab.
         app.close_after_save = null;
+        app.save_tab = 0;
         return;
     }
     const title: []const u8 = switch (app.modal) {
@@ -224,14 +225,7 @@ fn accept(app: *App, modal: state.Modal) void {
         .confirm => commands.acceptPending(app),
         .import_curl => imports.previewText(app, app.curl_text.text(), "Pasted cURL"),
         .import_preview => imports.accept(app),
-        .save_as => if (app.current()) |t| {
-            const parent = app.save_target orelse (if (app.collections.items.len > 0) app.collections.items[0] else tree.newCollection(app, "My collection")) orelse return;
-            tree.saveTabAs(app, t, tree.containerOf(parent), app.save_name.text());
-            if (app.close_after_save == t) {
-                app.close_after_save = null;
-                if (!t.dirty and t.link != null) commands.closeNow(app, t);
-            }
-        },
+        .save_as => commands.acceptSaveAs(app),
         .move_to => if (app.move_node) |n| {
             if (app.save_target) |target| {
                 if (app.selection.items.len > 1) @import("sidebar.zig").moveSelection(app, target) else tree.moveTo(app, n, target);

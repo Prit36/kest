@@ -20,6 +20,9 @@ pub const Entry = struct {
     time_ms: u32,
     /// The request's JSON (template form), null if it was too large.
     snapshot: ?[]const u8 = null,
+    /// Stays with the entry while older ones are trimmed and indexes shift;
+    /// UI rows and their menus are keyed by it. Assigned by `add`, never saved.
+    id: u64 = 0,
 };
 
 pub const StatusFilter = enum { any, ok_2xx, redirect_3xx, client_4xx, server_5xx, failed };
@@ -49,6 +52,7 @@ pub const History = struct {
     gpa: Allocator,
     entries: std.ArrayList(Entry) = .empty,
     retention: usize = default_retention,
+    next_id: u64 = 1,
 
     pub fn init(gpa: Allocator) History {
         return .{ .gpa = gpa };
@@ -73,7 +77,8 @@ pub const History = struct {
         errdefer h.gpa.free(url);
         const snapshot = if (e.snapshot) |s| try h.gpa.dupe(u8, s) else null;
         errdefer if (snapshot) |s| h.gpa.free(s);
-        try h.entries.append(h.gpa, .{ .method = method, .url = url, .timestamp_ms = e.timestamp_ms, .status = e.status, .time_ms = e.time_ms, .snapshot = snapshot });
+        try h.entries.append(h.gpa, .{ .method = method, .url = url, .timestamp_ms = e.timestamp_ms, .status = e.status, .time_ms = e.time_ms, .snapshot = snapshot, .id = h.next_id });
+        h.next_id += 1;
         h.trim();
     }
 
@@ -82,6 +87,12 @@ pub const History = struct {
         const drop = h.entries.items.len - h.retention;
         for (h.entries.items[0..drop]) |e| h.free(e);
         h.entries.replaceRangeAssumeCapacity(0, drop, &.{});
+    }
+
+    /// Where the entry with `id` is now, if it is still kept.
+    pub fn indexOf(h: *const History, id: u64) ?usize {
+        for (h.entries.items, 0..) |e, i| if (e.id == id) return i;
+        return null;
     }
 
     pub fn remove(h: *History, index: usize) void {
@@ -174,6 +185,19 @@ test "retention drops the oldest" {
     try t.expectEqualStrings("u2", h.entries.items[0].url);
     h.setRetention(1);
     try t.expectEqualStrings("u4", h.entries.items[0].url);
+}
+
+test "ids follow entries when retention shifts their indexes" {
+    var h = History.init(t.allocator);
+    defer h.deinit();
+    h.retention = 3;
+    for ([_][]const u8{ "a", "b", "c" }) |url| try h.add(.{ .method = "GET", .url = url, .timestamp_ms = 0, .status = 200, .time_ms = 1 });
+    const b = h.entries.items[1].id;
+    try h.add(.{ .method = "GET", .url = "d", .timestamp_ms = 0, .status = 200, .time_ms = 1 });
+    // "a" was trimmed: index 1 is now "c", but "b" is found by its id.
+    try t.expectEqualStrings("c", h.entries.items[1].url);
+    try t.expectEqualStrings("b", h.entries.items[h.indexOf(b).?].url);
+    try t.expect(h.indexOf(h.entries.items[0].id - 1) == null);
 }
 
 test "filters" {

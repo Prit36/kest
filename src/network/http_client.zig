@@ -169,7 +169,10 @@ fn finish(j: *Job, result: transport.Result) void {
     r.time_ms = @intCast(std.math.clamp(j.elapsedMs(), 0, std.math.maxInt(u32)));
     r.timing_known = true;
     r.failure = result.failure;
-    if (j.timed_out) {
+    // The deadline and the last byte can race: the supervisor's wait times
+    // out just as the transfer finishes, and canceling a finished task returns
+    // its result. A transfer that completed is complete, as with Cancel below.
+    if (j.timed_out and result.failure != .none) {
         r.stop = .timed_out;
         r.setError(std.fmt.allocPrint(j.arena.allocator(), "No complete answer within {d} ms", .{j.timeout_ms}) catch "Timed out");
         return;
@@ -219,4 +222,34 @@ fn explain(a: Allocator, res: transport.Result) []const u8 {
     };
     if (res.detail.len == 0) return summary;
     return std.fmt.allocPrint(a, "{s} ({s})", .{ summary, res.detail }) catch summary;
+}
+
+const t = std.testing;
+
+fn noDone(_: ?*anyopaque, _: *Job) void {}
+
+fn testJob(a: Allocator) !*Job {
+    const j = try a.create(Job);
+    j.* = .{ .gpa = a, .io = t.io, .client = undefined, .arena = .init(a), .out = .{ .method = "GET", .url = "https://response.invalid/" }, .unresolved = &.{}, .resp = .init(a, t.io, "."), .callbacks = .{ .on_done = noDone }, .timeout_ms = 50 };
+    return j;
+}
+
+test "a transfer that completed as the deadline passed is complete, not timed out" {
+    const j = try testJob(t.allocator);
+    defer j.destroy();
+    try j.resp.onHead(.{ .status = 200, .reason = "OK", .raw_headers = "", .url = "https://response.invalid/", .redirects = 0 });
+    try j.resp.onData("{}");
+    j.timed_out = true;
+    finish(j, .{ .failure = .none });
+    try t.expectEqual(response.Stop.complete, j.resp.stop);
+    try t.expectEqual(@as(usize, 0), j.resp.error_text.len);
+}
+
+test "a transfer the deadline cut short is timed out" {
+    const j = try testJob(t.allocator);
+    defer j.destroy();
+    j.timed_out = true;
+    finish(j, .{ .failure = .canceled, .detail = "Canceled" });
+    try t.expectEqual(response.Stop.timed_out, j.resp.stop);
+    try t.expect(std.mem.indexOf(u8, j.resp.error_text, "50 ms") != null);
 }
