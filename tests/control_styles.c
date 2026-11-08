@@ -306,7 +306,12 @@ int main(void) {
         for (int n = 0; n < ui->node_count; n++) {
             cui_node *node = &ui->nodes[n];
             if (node->text == document_label) { CHECK(node->text_len == (int)strlen(document_label)); names++; }
-            if (node->text && node->font == CUI_FONT_MONO) { CHECK(node->rect.w == 48); methods++; }
+            if (node->text && node->font == CUI_FONT_MONO) {
+                /* Methods take their own width: no padded slot before the name. */
+                float text_w = cui_measure_text(ui, node->font, node->font_size, node->text, node->text_len).width;
+                CHECK(node->rect.w >= text_w - 0.5f && node->rect.w <= ceilf(text_w) + 0.5f && node->rect.w <= KEST_METHOD_MAX);
+                methods++;
+            }
             if (node->parent >= 0 && ui->nodes[node->parent].id == (document ^ 0xC105Eu) && node->font == CUI_FONT_ICONS)
                 visible_close += node->opacity == 1;
         }

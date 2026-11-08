@@ -10,7 +10,7 @@ const editor = @import("editor.zig");
 
 pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     const raw = t.body_kind == .json or t.body_kind == .text or t.body_kind == .xml;
-    w.row(ui, .{ .id = "body-toolbar", .gap = 4, .pad_x = 12, .height = w.px(36), .width = w.fill });
+    w.row(ui, .{ .id = "body-toolbar", .gap = 4, .pad_left = 2, .pad_right = 12, .height = w.px(36), .width = w.fill });
     const kinds = [_][]const u8{ "No body", "JSON", "Text", "XML", "Form", "Multipart", "File" };
     const names = [_][]const u8{ "No body", "JSON", "Text", "XML", "Form URL encoded", "Multipart form", "Binary / file" };
     if (w.menu(ui, w.fmt("{s}###body-kind", .{kinds[@intCast(@backingInt(t.body_kind))]}), 126, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
@@ -33,7 +33,7 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
             t.body.word_wrap = !t.body.word_wrap;
             t.body.reveal = true;
         }
-        c.kest_tooltip(ui, "Wrap long lines without changing the body");
+        c.kest_tooltip(ui, "Wrap lines");
         if (w.action(ui, "find-body", "", c.CUI_ICON_SEARCH, false, 28, 28, 3)) {
             t.body.search_open = !t.body.search_open;
             t.body.query.focus();
@@ -50,14 +50,13 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
             if (w.menuItem(ui, "Copy body")) w.copy(ui, t.body.text());
             c.cui_menu_separator(ui);
             if (c.cui_menu_item_ex(ui, "Tab moves focus (Ctrl M)", &.{ .checked = t.body.tab_moves_focus })) t.body.tab_moves_focus = !t.body.tab_moves_focus;
-            w.text(ui, "Tab / Shift Tab: indent / outdent\nEnter: auto-indent\nEscape: focus body type", .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
             c.cui_menu_end(ui);
         }
         w.end(ui);
     }
     w.end(ui);
     switch (t.body_kind) {
-        .none => w.empty(ui, "This request has no body", "Choose JSON, text, a form, or a file from the menu above."),
+        .none => w.empty(ui, "No body"),
         .json, .text, .xml => {
             commands.bodyProblem(app, t);
             if (t.body_problem_text.len > 0) {

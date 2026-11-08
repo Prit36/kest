@@ -28,12 +28,12 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     w.column(ui, .{ .id = "response-content", .width = w.fill, .height = w.fill, .clip = true });
     if (t.running() or t.start_failure != .none) {
         w.column(ui, .{ .id = "response-previous", .width = w.fill, .pad_x = 12, .pad_y = 6, .bg = w.color(c.CUI_TOKEN_SURFACE_MUTED) });
-        w.text(ui, if (t.running()) "Previous response shown below; a new request is running." else "Previous response shown below; the new request was not sent.", .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, if (t.running()) "Previous response" else "Previous response · new request not sent", .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         w.end(ui);
     } else if (states.issue(resp)) |issue| @import("response_notice.zig").view(ui, t, issue, resp.error_text, resp.status == 0 and resp.preview.items.len == 0);
     if (resp.isPartial()) {
         w.column(ui, .{ .id = "response-preview-notice", .width = w.fill, .pad_x = 12, .pad_y = 4 });
-        w.text(ui, w.fmt("Showing {d} of {d} received bytes. {s}", .{ resp.preview.items.len, resp.total.load(.monotonic), if (resp.spill_path != null and !resp.spill_failed) "Save response keeps the full received body." else "Only available data can be saved." }), .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, w.fmt("Showing {d} of {d} received bytes", .{ resp.preview.items.len, resp.total.load(.monotonic) }), .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         w.end(ui);
     }
     // A failed request has no body: the alert is the whole answer.
@@ -42,7 +42,7 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
         return;
     }
     if (resp.status > 0 and resp.preview.items.len == 0 and resp.stop == .complete and t.response.pane != .headers) {
-        w.empty(ui, "Empty response body", "The server returned a response without a body.");
+        w.empty(ui, "Empty response body");
         w.end(ui);
         return;
     }
@@ -115,7 +115,7 @@ fn original(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response, id
             .input_limit => "Text exceeds the 8 MiB indexing limit.",
             else => "Text index could not be prepared.",
         };
-        w.text(ui, w.fmt("{s} Viewing up to {d} of {d} available bytes. Use Copy raw body or Save to access available data.", .{ reason, length, source.len }), .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, w.fmt("{s} Viewing {d} of {d} bytes.", .{ reason, length, source.len }), .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         w.end(ui);
         text_view.pendingView(ui, app, t, id, state, source, lang);
         return;
@@ -124,26 +124,14 @@ fn original(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response, id
 }
 
 fn empty(ui: *c.cui_ctx, running: bool) void {
-    const tall = c.cui_viewport_size(ui).y >= 600;
     c.cui_spacer(ui);
     w.column(ui, .{ .width = w.fill, .gap = 10, .@"align" = c.CUI_ALIGN_CENTER, .pad_x = 20 });
     if (running) {
         c.cui_spinner(ui, 14);
-        w.text(ui, "Sending request...", .{ .size = 13, .font = c.CUI_FONT_MEDIUM, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
-        if (tall) hint(ui, "Ctrl Enter", "to cancel");
-    } else {
-        w.text(ui, "Send a request to see its response.", .{ .size = 13, .width = w.fill, .@"align" = c.CUI_TEXT_CENTER, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
-        if (tall) hint(ui, "Ctrl Enter", "to send the request");
+        w.text(ui, "Sending request...", .{ .size = 13, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     }
     w.end(ui);
     c.cui_spacer(ui);
-}
-
-fn hint(ui: *c.cui_ctx, keys: [*:0]const u8, label: []const u8) void {
-    w.row(ui, .{ .gap = 6, .@"align" = c.CUI_ALIGN_CENTER });
-    c.cui_kbd(ui, keys);
-    w.text(ui, label, .{ .size = 12, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
-    w.end(ui);
 }
 
 fn hex(ui: *c.cui_ctx, resp: *response.Response) void {
@@ -193,7 +181,7 @@ fn tree(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) void {
 fn preview(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) void {
     if (resp.class() == .text and isMarkdown(resp)) {
         if (resp.preview.items.len == 0) {
-            w.empty(ui, "Empty Markdown response", "The response body has no content.");
+            w.empty(ui, "Empty response body");
             return;
         }
         // Markdown lays out the entire document. Keep large responses on the
@@ -210,7 +198,6 @@ fn preview(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) voi
             c.cui_scroll_end(ui);
             return;
         }
-        w.muted(ui, "Large Markdown response shown as text (preview limit: 256 KiB).");
     }
     switch (resp.class()) {
         .html => {
@@ -232,10 +219,10 @@ fn preview(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) voi
             }
             if (t.response.image != 0) {
                 if (t.response.image_source_width != @as(u32, @intCast(t.response.image_width)) or t.response.image_source_height != @as(u32, @intCast(t.response.image_height)))
-                    contentNotice(ui, w.fmt("Preview scaled from {d} x {d} to {d} x {d}. Save preserves the original image.", .{ t.response.image_source_width, t.response.image_source_height, t.response.image_width, t.response.image_height }));
+                    contentNotice(ui, w.fmt("Scaled from {d} x {d} to {d} x {d}", .{ t.response.image_source_width, t.response.image_source_height, t.response.image_width, t.response.image_height }));
                 const paint = ImagePaint{ .texture = t.response.image, .width = @floatFromInt(t.response.image_width), .height = @floatFromInt(t.response.image_height) };
                 _ = c.cui_canvas(ui, "image-preview", w.fill, w.fill, paintImage, &paint, @sizeOf(ImagePaint));
-            } else w.empty(ui, "Image cannot be previewed", w.z(if (t.response.preparation_failure == .invalid) "PNG/JPEG preview supports images up to 8192 pixels per side and 16 million pixels. Save the body to inspect other images." else preparation.message(&t.response)));
+            } else w.empty(ui, "Image cannot be previewed");
         },
         .binary => hex(ui, resp),
         else => original(ui, app, t, resp, "text-preview", false, .plain),

@@ -33,12 +33,6 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
         if (w.contentTab(ui, key, label, t.pane == pane and !t.details_collapsed)) {
             selectPane(app, t, pane);
         }
-        switch (pane) {
-            .body => c.kest_tooltip(ui, if (t.hasBodyContent()) "Request body contains content" else "Request body"),
-            .headers => c.kest_tooltip(ui, "Configured request headers; automatic headers are in the table actions menu"),
-            .settings => c.kest_tooltip(ui, if (custom) "Timeout, size, redirect and TLS options; some differ from the defaults" else "Timeout, size, redirect and TLS options"),
-            .params => {},
-        }
     }
     c.cui_spacer(ui);
     w.end(ui);
@@ -63,35 +57,31 @@ fn selectPane(app: *App, t: *tab.Tab, pane: tab.RequestPane) void {
 }
 
 fn settings(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
-    c.cui_scroll_begin(ui, &.{ .id = "request-settings", .height = w.fill, .pad = 16, .gap = 12 });
+    c.cui_scroll_begin(ui, &.{ .id = "request-settings", .height = w.fill, .pad = w.design.space.group, .gap = w.design.space.normal });
     defer c.cui_scroll_end(ui);
     var changed = false;
-    if (setting(ui, "Timeout", "Cancel the request after this duration.", "timeout", &t.timeout_text, "ms")) {
+    if (setting(ui, "Timeout", "timeout", &t.timeout_text, "ms")) {
         t.settings.timeout_ms = std.fmt.parseInt(u32, t.timeout_text.text(), 10) catch 30000;
         changed = true;
     }
-    if (setting(ui, "Response limit", "Stop receiving when the body reaches this size.", "max-size", &t.max_size_text, "MiB")) {
+    if (setting(ui, "Response limit", "max-size", &t.max_size_text, "MiB")) {
         t.settings.max_response_bytes = @as(u64, std.fmt.parseInt(u32, t.max_size_text.text(), 10) catch 256) * 1024 * 1024;
         changed = true;
     }
-    if (setting(ui, "Redirect limit", "Maximum number of redirects to follow.", "redirect-limit", &t.max_redirects_text, null)) {
+    if (setting(ui, "Redirect limit", "redirect-limit", &t.max_redirects_text, null)) {
         t.settings.max_redirects = std.fmt.parseInt(u8, t.max_redirects_text.text(), 10) catch 10;
         changed = true;
     }
     c.cui_separator(ui);
-    changed = c.cui_switch_ex(ui, "Follow redirects", &t.settings.follow_redirects, &.{ .description = "Continue when the server sends a redirect." }) or changed;
-    changed = c.cui_switch_ex(ui, "Verify TLS certificates", &t.settings.verify_tls, &.{ .description = "Recommended. Disabling allows interception of this request." }) or changed;
-    if (!t.settings.verify_tls) w.text(ui, "TLS verification is OFF for this request. The server's identity is not checked.", .{ .size = 12, .color = w.color(c.CUI_TOKEN_WARNING) });
+    changed = c.cui_switch_ex(ui, "Follow redirects", &t.settings.follow_redirects, &.{}) or changed;
+    changed = c.cui_switch_ex(ui, "Verify TLS certificates", &t.settings.verify_tls, &.{}) or changed;
     if (changed) persist.touchTab(app, t);
 }
 
-fn setting(ui: *c.cui_ctx, label: []const u8, detail: []const u8, id: [*:0]const u8, value: *@import("model.zig").TextBuffer, suffix: ?[*:0]const u8) bool {
-    w.row(ui, .{ .width = w.fill, .gap = 16, .min_height = 42 });
+fn setting(ui: *c.cui_ctx, label: []const u8, id: [*:0]const u8, value: *@import("model.zig").TextBuffer, suffix: ?[*:0]const u8) bool {
+    w.row(ui, .{ .width = w.fill, .gap = w.design.space.section, .@"align" = c.CUI_ALIGN_CENTER });
     defer w.end(ui);
-    w.column(ui, .{ .width = w.fill, .gap = 4 });
-    w.text(ui, label, .{ .width = w.fill, .size = 13, .font = c.CUI_FONT_MEDIUM });
-    w.text(ui, detail, .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
-    w.end(ui);
+    w.text(ui, label, .{ .width = w.fill, .size = 13, .nowrap = true });
     return w.field(ui, id, value, .{ .width = w.px(128), .suffix = suffix });
 }
 

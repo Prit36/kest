@@ -11,6 +11,8 @@ pub const Options = struct {
     vars: []const @import("../core/variables.zig").Var = &.{},
     request: ?*const tab.Tab = null,
     app: ?*@import("../app/state.zig").App = null,
+    /// Side inset; off where the container (a dialog) already provides it.
+    inset: bool = true,
 };
 
 fn weighted(weight: f32) c.cui_size {
@@ -30,7 +32,7 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
     c.cui_push_id(ui, opts.kind.scope());
     defer c.cui_pop_id(ui);
     var changed = false;
-    w.column(ui, .{ .id = "kv-editor", .width = w.fill, .height = w.fill, .pad_x = w.design.space.group, .pad_top = w.design.space.tight, .pad_bottom = w.design.space.normal });
+    w.column(ui, .{ .id = "kv-editor", .width = w.fill, .height = w.fill, .pad_x = if (opts.inset) w.design.space.group else 0, .pad_top = w.design.space.tight, .pad_bottom = w.design.space.normal });
     defer w.end(ui);
     if (values.bulk != null) return bulk(ui, values, title);
     const entry = values.insertion() catch null;
@@ -60,12 +62,9 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
     var add = false;
     var auto_headers = false;
     if (c.kest_table_menu_begin(ui, "table-actions", false, if (values.bulk_problem.message.len > 0) w.z(values.bulk_problem.message) else null, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
-        w.muted(ui, title);
         if (c.cui_menu_item_ex(ui, "Add row", &.{ .disabled = entry == null })) add = true;
         if (w.menuItem(ui, "Bulk edit")) openBulk(values);
         if (opts.kind == .headers and opts.request != null and w.menuItem(ui, "Automatic request headers")) auto_headers = true;
-        c.cui_menu_separator(ui);
-        w.text(ui, "Tab / Enter: next cell\nShift Tab: previous cell\nUp / Down: same column\nAlt Down: row actions", .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         c.cui_menu_end(ui);
     }
     w.end(ui);
@@ -90,18 +89,13 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
             c.kest_tooltip(ui, "Include this row");
         }
         w.end(ui);
-        const key_changed = field(ui, "key", &row.key, switch (opts.kind) {
-            .params => "e.g. limit",
-            .headers => "e.g. Accept",
-            .form => "e.g. name",
-            .variables => "e.g. base_url",
+        const key_changed = field(ui, "key", &row.key, if (!insertion) "" else switch (opts.kind) {
+            .params => "Add parameter",
+            .headers => "Add header",
+            .form => "Add field",
+            .variables => "Add variable",
         }, 2);
-        const value_changed = field(ui, "value", &row.value, if (files and row.is_file) "File path" else switch (opts.kind) {
-            .params => "e.g. 25",
-            .headers => "e.g. application/json",
-            .form => "Enter content",
-            .variables => "Enter variable content",
-        }, 3);
+        const value_changed = field(ui, "value", &row.value, if (files and row.is_file) "File path" else "", 3);
         if (value_changed) row.has_equals = true;
         if (insertion) commit = key_changed or value_changed else changed = changed or key_changed or value_changed;
         if (files) {
@@ -111,7 +105,7 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
                     row.has_equals = true;
                     if (insertion) commit = true else changed = true;
                 }
-                c.kest_tooltip(ui, "Choose a file for this field");
+                c.kest_tooltip(ui, "Choose file");
             }
             w.end(ui);
             slot(ui, c.KEST_TABLE_TYPE);
@@ -120,7 +114,6 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
                 if (!insertion) changed = true;
                 c.cui_request_redraw(ui);
             }
-            c.kest_tooltip(ui, if (row.is_file) "File field; switch to text without discarding the value" else "Text field; switch to a file path without discarding the value");
             w.end(ui);
         }
         if (insertion) {
@@ -212,8 +205,8 @@ fn inspect(ui: *c.cui_ctx, values: *tab.Table, files: bool, opts: Options) void 
     };
     if (!c.kest_table_details_begin(ui, "row-inspector")) return;
     w.text(ui, if (opts.kind == .headers) "Configured request header" else "Row details", .{ .font = c.CUI_FONT_MEDIUM, .size = 13 });
-    w.muted(ui, if (row.enabled) "Enabled" else "Disabled; not used when sending");
-    if (opts.kind == .form) w.muted(ui, if (files and row.is_file) "File field" else if (!files and row.is_file) "Text field; file type retained for multipart" else "Text field");
+    if (!row.enabled) w.muted(ui, "Disabled");
+    if (opts.kind == .form) w.muted(ui, if (files and row.is_file) "File field" else "Text field");
     c.kest_document_list_begin(ui, "row-inspector-content", @min(220, c.cui_viewport_size(ui).y - 240));
     w.text(ui, row.key.text(), .{ .font = c.CUI_FONT_MONO, .size = 12, .width = w.fill });
     w.text(ui, row.value.text(), .{ .font = c.CUI_FONT_MONO, .size = 12, .width = w.fill });

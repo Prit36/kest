@@ -142,19 +142,17 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
         if (t.running()) c.cui_spinner(ui, 12);
         w.text(ui, label, .{ .size = 12, .font = c.CUI_FONT_MEDIUM, .color = w.color(value.token), .nowrap = true });
         c.kest_item_end(ui);
-        c.kest_tooltip(ui, if (t.running()) "Current request is running; click for execution details" else if (t.start_failure != .none) "Request was not sent; click for details" else if (r != null and r.?.status > 0) w.z(states.category(r.?.status)) else "Execution outcome; click for details");
+        if (!t.running() and t.start_failure == .none and r != null and r.?.status > 0) c.kest_tooltip(ui, w.z(states.category(r.?.status)));
         if (clicked) c.cui_popover_open(ui, "response-details");
         w.end(ui);
         if (show_duration) {
             w.row(ui, .{ .id = "response-duration" });
             w.text(ui, value.duration, .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
-            c.kest_tooltip(ui, if (t.running()) "Elapsed time for the current request" else "Total request duration, including redirects; a dash means no measurement");
             w.end(ui);
         }
         if (show_size) {
             w.row(ui, .{ .id = "response-size" });
             w.text(ui, value.size, .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
-            c.kest_tooltip(ui, "Decoded response byte count; body warnings describe preview and storage limits");
             w.end(ui);
         }
         w.end(ui);
@@ -223,7 +221,7 @@ fn details(ui: *c.cui_ctx, t: *tab.Tab) void {
     w.text(ui, if (t.running()) "Current request details" else "Execution details", .{ .size = 13, .font = c.CUI_FONT_MEDIUM });
     c.kest_document_list_begin(ui, "response-detail-content", @min(260, c.cui_viewport_size(ui).y - 152));
     if (t.job) |job| {
-        field(ui, "State", "Sending; prior response content is separate");
+        field(ui, "State", "Sending");
         field(ui, "Elapsed", duration(@intCast(@max(0, job.elapsedMs()))));
         field(ui, "Received so far", bytes(job.resp.total.load(.monotonic)));
         field(ui, "Request URL", job.out.url);
@@ -234,10 +232,7 @@ fn details(ui: *c.cui_ctx, t: *tab.Tab) void {
         const r = &job.resp;
         field(ui, "HTTP outcome", states.category(r.status));
         if (r.status > 0) field(ui, "Status", w.fmt("{d} {s}", .{ r.status, r.reason }));
-        if (states.issue(r)) |issue| {
-            field(ui, "Transfer", issue.title);
-            field(ui, "Explanation", issue.hint);
-        } else field(ui, "Transfer", "Complete");
+        field(ui, "Transfer", if (states.issue(r)) |issue| issue.title else "Complete");
         field(ui, "Duration", if (r.timing_known) w.fmt("{s} ({d} ms)", .{ duration(r.time_ms), r.time_ms }) else "Not measured");
         field(ui, "Decoded body received", if (hasSize(r)) w.fmt("{s} ({d} bytes)", .{ bytes(r.total.load(.monotonic)), r.total.load(.monotonic) }) else "Unknown; no HTTP response");
         field(ui, "Headers", w.fmt("{d}", .{r.headers.items.len}));
@@ -245,7 +240,7 @@ fn details(ui: *c.cui_ctx, t: *tab.Tab) void {
         if (r.url.len > 0) field(ui, "Response URL", r.url);
         field(ui, "Redirects followed", w.fmt("{d}", .{r.redirects}));
         if (r.status > 0) field(ui, "Connection", if (r.reused_connection) "Reused" else "New");
-        if (r.isPartial()) field(ui, "Preview", w.fmt("{d} of {d} received bytes shown; {s}", .{ r.preview.items.len, r.total.load(.monotonic), if (r.spill_path != null and !r.spill_failed) "save keeps the full received body" else "only available data can be saved" }));
+        if (r.isPartial()) field(ui, "Preview", w.fmt("{d} of {d} received bytes shown", .{ r.preview.items.len, r.total.load(.monotonic) }));
     }
     c.cui_scroll_end(ui);
     _ = w.menuItem(ui, "Close");

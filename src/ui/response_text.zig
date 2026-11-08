@@ -114,7 +114,7 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, id: [*:0]const u8, s: *State, so
     s.layout_pending = !s.layout_failure and (if (s.geometry) |*geometry| !geometry.config.eql(config) else true);
     find.bar(ui, app, t, id, s, source, owner);
     if (s.geometry == null) {
-        w.text(ui, if (s.layout_failure) "Text layout could not be prepared. Showing a text window; Copy raw body and Save retain available data." else "Preparing text layout. Showing a bounded text window.", .{ .size = 11, .width = w.fill, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, if (s.layout_failure) "Text layout could not be prepared." else "Preparing text layout...", .{ .size = 11, .width = w.fill, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         fallbackView(ui, app, id, s, source, lang, inline_limit);
         return;
     }
@@ -155,7 +155,7 @@ fn fallbackView(ui: *c.cui_ctx, app: *App, id: [*:0]const u8, s: *State, source:
         fallback.reveal = true;
     }
     s.layout_fallback_offset = base;
-    if (base > 0) w.text(ui, w.fmt("Viewing bytes {d}-{d} of {d}. Line numbers are relative to this window.", .{ base + 1, end, source.len }), .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+    if (base > 0) w.text(ui, w.fmt("Viewing bytes {d}-{d} of {d}", .{ base + 1, end, source.len }), .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     const caret_before = fallback.caret;
     const anchor_before = fallback.anchor;
     _ = editor.view(ui, id, fallback, window, true, lang);
@@ -386,7 +386,7 @@ fn draw(raw_ui: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         c.cui_draw_text(ui, c.CUI_FONT_MONO, 12, .{ .x = rect.x + p.gutter - 10 - width, .y = y + 1 }, w.color(c.CUI_TOKEN_TEXT_MUTED), label.ptr, @intCast(label.len));
         c.cui_pop_clip(ui);
     }
-    if (dense) c.cui_draw_text(ui, c.CUI_FONT_BODY, 11, .{ .x = rect.x + p.gutter + gap, .y = rect.y + rect.h - 26 }, w.color(c.CUI_TOKEN_TEXT_SECONDARY), "Dense text preview limited; copy or save for all bytes.", -1);
+    if (dense) c.cui_draw_text(ui, c.CUI_FONT_BODY, 11, .{ .x = rect.x + p.gutter + gap, .y = rect.y + rect.h - 26 }, w.color(c.CUI_TOKEN_TEXT_SECONDARY), "Preview limited", -1);
     if (bars.max_x > 0) {
         c.cui_draw_rect(ui, bars.horizontal, .{}, w.color(c.CUI_TOKEN_SURFACE));
         c.cui_draw_rect(ui, bars.hthumb, .{ .tl = 3, .tr = 3, .br = 3, .bl = 3 }, w.color(c.CUI_TOKEN_BORDER_STRONG));

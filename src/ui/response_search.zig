@@ -138,13 +138,8 @@ fn icon(ui: *c.cui_ctx, key: [*:0]const u8, glyph: [*:0]const u8, hint: [*:0]con
 }
 fn controls(ui: *c.cui_ctx, s: *State, canvas: [*:0]const u8, compact: bool) void {
     if (w.action(ui, "response-find-case", "Aa", null, s.search_case, 28, 28, 0)) s.search_case = !s.search_case;
-    c.kest_tooltip(ui, "Match case (off: A-Z ignore case; other UTF-8 characters match exactly)");
+    c.kest_tooltip(ui, "Match case");
     w.text(ui, caption(s), .{ .width = if (compact) w.fill else w.px(112), .size = 11, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
-    if (s.search_failure) |failure| c.kest_tooltip(ui, switch (failure) {
-        .query_limit => "Find accepts a literal query up to 4096 bytes.",
-        .input_limit => "Search supports up to 16 MiB of available text.",
-        .unavailable => "Search could not be prepared. Change the query or reopen Find to try again.",
-    });
     c.cui_push_disabled(ui, s.search_index == null or s.search_index.?.total == 0);
     if (icon(ui, "response-find-prev", c.CUI_ICON_CHEVRON_UP, "Previous match (Shift+Enter or Shift+F3)")) navigate(s, -1);
     if (icon(ui, "response-find-next", c.CUI_ICON_CHEVRON_DOWN, "Next match (Enter or F3)")) navigate(s, 1);

@@ -17,14 +17,13 @@ fn rect(ui: *c.cui_ctx, id: [*:0]const u8) c.cui_rect {
 fn checkEmpty(ui: *c.cui_ctx, id: []const u8) !void {
     const browser = rect(ui, "collection-browser");
     const title = rect(ui, w.fmt("{s}-title", .{id}));
-    const detail = rect(ui, w.fmt("{s}-detail", .{id}));
     const viewport = rect(ui, w.z(id));
-    try expect(title.w > 0 and detail.h >= 18);
-    try expect(title.x >= browser.x + 13 and detail.x >= browser.x + 13);
-    try expect(title.x + title.w <= browser.x + browser.w - 13);
-    try expect(detail.x + detail.w <= browser.x + browser.w - 13);
-    try expect(detail.y >= title.y + title.h + 5);
-    try expect(detail.y + detail.h <= viewport.y + viewport.h);
+    // Empty states are a single title line, no helper text.
+    try expect(title.w > 0 and title.h >= 14);
+    try expect(rect(ui, w.fmt("{s}-detail", .{id})).h == 0);
+    try expect(title.x >= browser.x + 11);
+    try expect(title.x + title.w <= browser.x + browser.w - 11);
+    try expect(title.y + title.h <= viewport.y + viewport.h);
 }
 fn capture(ui: *c.cui_ctx, sw: *c.cui_sw_renderer, app: *App, path: ?[]const u8, suffix: []const u8) !void {
     const source = path orelse return;
@@ -123,7 +122,7 @@ pub fn run(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, path: ?[]const u8,
             const filters = rect(ui, "history-filters");
             const title = rect(ui, "history-empty-title");
             const browser = rect(ui, "collection-browser");
-            try expect(title.y >= filters.y + filters.h + 13);
+            try expect(title.y >= filters.y + filters.h + 11);
             inline for (.{ "history-method", "history-status" }) |key| {
                 const control = rect(ui, key);
                 try expect(control.w >= 70 and control.x >= browser.x + 9);

@@ -66,13 +66,12 @@ pub fn details(ui: *c.cui_ctx, app: *App, configured: []const u8, vars: []const 
     w.row(ui, .{ .width = w.fill, .gap = 6, .min_height = 28 });
     w.text(ui, prepare.basename(path.resolved), .{ .width = w.fill, .font = c.CUI_FONT_MEDIUM, .size = 13 });
     const refresh = w.action(ui, "refresh-file-info", "", c.CUI_ICON_ROTATE_CCW, false, 28, 28, 3);
-    c.kest_tooltip(ui, "Refresh checked size and availability; the file is read again when sending");
+    c.kest_tooltip(ui, "Refresh");
     w.end(ui);
     const result = info(app, path.resolved, refresh);
     if (result.status == .ready) {
         w.row(ui, .{ .id = "upload-size", .width = w.fill });
         w.text(ui, w.bytes(result.size), .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
-        c.kest_tooltip(ui, "Size at last check; the file is read again when sending");
         w.end(ui);
     }
     if (result.status != .ready) w.text(ui, metadata.message(result.status), .{ .width = w.fill, .size = 12, .color = w.color(if (result.status == .checking) c.CUI_TOKEN_TEXT_SECONDARY else c.CUI_TOKEN_DANGER) });
@@ -80,20 +79,20 @@ pub fn details(ui: *c.cui_ctx, app: *App, configured: []const u8, vars: []const 
 
 pub fn binary(ui: *c.cui_ctx, app: *App, t: *@import("../app/tab.zig").Tab) bool {
     var changed = false;
-    w.row(ui, .{ .id = "upload-controls", .width = w.fill, .height = w.px(36), .pad_x = 12, .gap = 6 });
-    changed = w.flatField(ui, "file-path", &t.file_path, .{ .width = w.fill, .placeholder = "File path or {{variable}}" }, false);
+    w.row(ui, .{ .id = "upload-controls", .width = w.fill, .height = w.px(36), .pad_left = 4, .pad_right = 12, .gap = 6 });
+    changed = w.flatField(ui, "file-path", &t.file_path, .{ .width = w.fill, .placeholder = "File path" }, false);
     if (w.action(ui, "choose-upload", if (t.file_path.len == 0) "Choose file" else "Change file", c.CUI_ICON_FOLDER_OPEN, false, 112, 32, 3)) changed = choose(app, &t.file_path) or changed;
     if (t.file_path.len > 0) {
         if (w.action(ui, "remove-upload", "", c.CUI_ICON_X, false, 28, 32, 3)) {
             t.file_path.clear();
             changed = true;
         }
-        c.kest_tooltip(ui, "Remove selected upload file");
+        c.kest_tooltip(ui, "Remove file");
     }
     w.end(ui);
     w.column(ui, .{ .id = "upload-metadata", .width = w.fill, .height = w.fill, .pad_x = 12, .pad_top = 4, .pad_bottom = 8 });
     c.cui_scroll_begin(ui, &.{ .id = "upload-details", .width = w.fill, .height = w.fill, .gap = 4 });
-    if (t.file_path.len == 0) w.text(ui, "No file selected. Choose a file or enter its path above.", .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) }) else details(ui, app, t.file_path.text(), app.activeVars());
+    if (t.file_path.len > 0) details(ui, app, t.file_path.text(), app.activeVars());
     c.cui_scroll_end(ui);
     w.end(ui);
     if (changed) c.cui_request_redraw(ui);

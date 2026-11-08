@@ -49,7 +49,7 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab) void {
             t.editing_method = false;
             c.kest_focus(ui, "###http-method");
         }
-        c.kest_tooltip(ui, "Finish custom method editing");
+        c.kest_tooltip(ui, "Standard methods");
         w.end(ui);
     } else if (c.kest_method_menu_begin(ui, w.z(t.method.text()), w.methodColor(t.method.text()))) {
         c.kest_document_list_begin(ui, "http-method-list", @min(320, c.cui_viewport_size(ui).y - 80));
@@ -57,7 +57,6 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab) void {
             if (std.mem.eql(u8, method, t.method.text())) break true;
         } else false;
         if (!standard) {
-            w.muted(ui, "Current custom method");
             c.kest_document_list_begin(ui, "custom-method-value", 120);
             w.text(ui, t.method.text(), .{ .width = w.fill, .font = c.CUI_FONT_MONO, .size = w.design.text.secondary });
             c.cui_scroll_end(ui);

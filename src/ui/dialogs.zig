@@ -79,7 +79,6 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
         .save_as => {
             _ = w.field(ui, "save-name", &app.save_name, .{ .label = "Request name" });
             targets(ui, app, false);
-            if (app.collections.items.len == 0) w.muted(ui, "Saving creates your first collection.");
         },
         .move_to => targets(ui, app, true),
         .environment => if (app.editing_env) |e| {
@@ -94,13 +93,12 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
             const wanted = 12 + c.KEST_TABLE_HEADER + 1 + rows * c.KEST_TABLE_STRIDE;
             w.column(ui, .{ .height = w.px(@max(64, @min(wanted, @min(320, c.cui_viewport_size(ui).y - 250)))) });
             c.cui_push_id(ui, w.z(&e.id));
-            if (@import("key_value.zig").view(ui, &e.table, false, "Environment variables", .{})) {
+            if (@import("key_value.zig").view(ui, &e.table, false, "Environment variables", .{ .inset = false })) {
                 app.vars_dirty = true;
                 persist.saveEnv(app, e);
             }
             c.cui_pop_id(ui);
             w.end(ui);
-            w.text(ui, "Use {{name}} in URLs, headers and bodies. Changes save as you type.", .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_MUTED), .width = w.fill });
         },
         .settings => {
             if (c.cui_switch_ex(ui, "Save edits automatically", &app.prefs.autosave, &.{})) persist.prefsChanged(app);
@@ -112,7 +110,7 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
                 app.prefs.follow_system = false;
                 persist.prefsChanged(app);
             }
-            if (w.field(ui, "retention", &app.retention_text, .{ .label = "History entries to keep (1-10000)" })) {
+            if (w.field(ui, "retention", &app.retention_text, .{ .label = "History entries to keep" })) {
                 app.prefs.retention = std.math.clamp(std.fmt.parseInt(u32, app.retention_text.text(), 10) catch 1000, 1, 10000);
                 app.history.setRetention(app.prefs.retention);
                 app.history_dirty = true;

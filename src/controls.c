@@ -154,11 +154,53 @@ static void mark_match(cui_ctx *ui, int label, const char *name, int start, int 
     n->paint = paint_match; n->paint_data = m;
 }
 void kest_collection_row_selected(cui_ctx *ui) { kest_a11y_selected(ui, collection_row_id); }
+
+/* CUI's tree cell is sized for a file browser: 12px cell inset, 16px per
+ * level, a 20px chevron box with a 14px glyph and a 16px icon. The sidebar
+ * tightens it in place after the cell is built (layout runs later). The
+ * guide and chevron paint data mirror CUI's private structs. */
+typedef struct { int levels; float x0, step; cui_color color; } kest_tt_guides;
+typedef struct { float angle; cui_color color; float size; const char *icon; } kest_rot_icon;
+enum { KEST_TREE_PAD = 8, KEST_TREE_STEP = 12, KEST_TREE_CHEV = 16, KEST_TREE_GLYPH = 10, KEST_TREE_ICON = 14 };
+static void tighten_tree_cell(cui_ctx *ui, int cell, bool icon) {
+    cui_node *c = &ui->nodes[cell];
+    c->pad[3] = KEST_TREE_PAD;
+    int kids[8], count = 0;
+    for (int i = c->first; i >= 0 && count < 8; i = ui->nodes[i].next) kids[count++] = i;
+    int k = 0;
+    /* The indent leaf (multiples of CUI's 16px step) comes first when nested. */
+    if (k < count && ui->nodes[kids[k]].child_count == 0 && ui->nodes[kids[k]].w.value != 20.0f && ui->nodes[kids[k]].h.value == 1.0f) {
+        cui_node *indent = &ui->nodes[kids[k++]];
+        int levels = (int)(indent->w.value / 16.0f + 0.5f);
+        indent->w = CUI_PX(levels * KEST_TREE_STEP);
+        if (c->paint_data) {
+            kest_tt_guides *g = c->paint_data;
+            g->x0 = KEST_TREE_PAD + KEST_TREE_CHEV * 0.5f;
+            g->step = KEST_TREE_STEP;
+        }
+    }
+    if (k < count) {
+        cui_node *chev = &ui->nodes[kids[k++]];
+        chev->w = CUI_PX(KEST_TREE_CHEV);
+        if (chev->child_count > 0) {
+            chev->h = CUI_PX(KEST_TREE_CHEV);
+            cui_node *glyph = &ui->nodes[chev->first];
+            glyph->w = glyph->h = CUI_PX(KEST_TREE_GLYPH);
+            if (glyph->paint_data) ((kest_rot_icon *)glyph->paint_data)->size = KEST_TREE_GLYPH;
+        }
+    }
+    if (k < count) ui->nodes[kids[k++]].w = CUI_PX(4);
+    if (icon && k + 1 < count) {
+        ui->nodes[kids[k++]].font_size = KEST_TREE_ICON;
+        ui->nodes[kids[k++]].w = CUI_PX(6);
+    }
+}
 void kest_collection_name(cui_ctx *ui, const char *name, const char *method, const char *icon, cui_color color, int match_start, int match_length) {
     int row = cui__current(ui);
     if (row >= 0) { ui->nodes[row].paint = NULL; ui->nodes[row].paint_data = NULL; }
     collection_row_id = row >= 0 ? ui->nodes[row].id : 0;
     cui_tree_table_name(ui, method ? method : name, method ? NULL : icon);
+    if (cui__current(ui) >= 0) tighten_tree_cell(ui, cui__current(ui), !method && icon);
     {
         char spoken[192];
         if (method) snprintf(spoken, sizeof spoken, "%s %s", method, name);
@@ -167,18 +209,18 @@ void kest_collection_name(cui_ctx *ui, const char *name, const char *method, con
     }
     int label = ui->last_node;
     if (method) {
-        /* The slot stays 44px so names align; long verbs such as PROPFIND
+        /* The slot stays 40px so names align; long verbs such as PROPFIND
          * shrink to fit instead of being cut to "PROPFI...". */
         float size = 10;
         size_t length = strlen(method);
         float width = cui_measure_text(ui, CUI_FONT_MONO, size, method, (int)length).width;
-        if (width > 42 && width > 0) size = CUI_MAX(7.0f, floorf(size * 42 / width * 2) / 2);
+        if (width > 38 && width > 0) size = CUI_MAX(7.0f, floorf(size * 38 / width * 2) / 2);
         ui->nodes[label].text_color = cui_color_of(ui, color);
         ui->nodes[label].font = CUI_FONT_MONO;
         ui->nodes[label].font_size = size;
-        ui->nodes[label].w = CUI_PX(44);
+        ui->nodes[label].w = CUI_PX(40);
         ui->nodes[label].flags |= CUI_NF_KEEP_W;
-        cui__leaf(ui, 0, CUI_PX(8), CUI_PX(1));
+        cui__leaf(ui, 0, CUI_PX(4), CUI_PX(1));
         cui_text_opts opts = {0}; opts.nowrap = true; opts.size = 12;
         cui_text_ex(ui, name, &opts);
         label = ui->last_node;
@@ -413,7 +455,7 @@ cui_doc_tabs_result kest_doc_tabs_ex(cui_ctx *ui, const char *key, const kest_do
                     item->text_len = (int)strlen(tabs[k].method);
                     item->text_color = cui_color_of(ui, tabs[k].method_color);
                     float width = cui__text_width(ui, item->font, item->font_size, item->text, item->text_len, false);
-                    item->w = CUI_PX(CUI_MAX(KEST_METHOD_WIDTH, CUI_MIN(KEST_METHOD_MAX, width)));
+                    item->w = CUI_PX(CUI_MIN(KEST_METHOD_MAX, ceilf(width)));
                     item->min_w = item->w.value; item->flags |= CUI_NF_CLIP | CUI_NF_KEEP_W;
                 } else if (item->text) {
                     if (tabs[k].label) { item->text = tabs[k].label; item->text_len = (int)strlen(tabs[k].label); }

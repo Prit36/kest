@@ -33,7 +33,6 @@ fn cell(ui: *c.cui_ctx, id: [*:0]const u8, source: []const u8, weight: f32) bool
     const display = preview(source, cell_limit);
     const buffer = w.z(display.text);
     const flags = c.kest_table_input(ui, id, @constCast(buffer.ptr), buffer.len + 1, &.{ .width = weighted(weight), .read_only = true, .placeholder = "(empty)" });
-    c.kest_tooltip(ui, "Read-only preview. Enter inspects the full header; Alt Down opens row actions.");
     return flags & c.CUI_SUBMITTED != 0;
 }
 fn heading(ui: *c.cui_ctx, id: [*:0]const u8, label: []const u8, weight: f32) void {
@@ -47,7 +46,7 @@ pub fn view(ui: *c.cui_ctx, t: *Tab, resp: *Response) void {
     w.column(ui, .{ .id = "received-headers", .width = w.fill, .height = w.fill, .pad_x = w.design.space.group, .pad_top = w.design.space.tight, .pad_bottom = w.design.space.normal });
     defer w.end(ui);
     if (resp.headers.items.len == 0) {
-        w.text(ui, "No response headers were received.", .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, "No headers", .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         return;
     }
     _ = c.kest_response_header_navigation(ui, @intCast(resp.headers.items.len));
@@ -58,8 +57,6 @@ pub fn view(ui: *c.cui_ctx, t: *Tab, resp: *Response) void {
     heading(ui, "response-header-value-column", "Value", 3);
     if (c.kest_table_menu_begin(ui, "table-actions", false, null, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
         if (w.menuItem(ui, if (text.clipboardSafe(resp.raw_headers)) "Copy response headers" else "Copy escaped response headers")) copyAll(ui, resp);
-        c.cui_menu_separator(ui);
-        w.text(ui, "Read-only received headers\nTab: next cell\nUp / Down: same column\nCtrl Home / End: first / last row\nEnter: inspect header", .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         c.cui_menu_end(ui);
     }
     w.end(ui);
@@ -107,7 +104,7 @@ fn inspector(ui: *c.cui_ctx, t: *Tab, resp: *const Response) void {
     const header = resp.headers.items[index];
     const name = preview(header.name[@min(t.response.header_name_offset, header.name.len)..], inspector_limit);
     const value = preview(header.value[@min(t.response.header_value_offset, header.value.len)..], inspector_limit);
-    w.text(ui, "Received response header", .{ .font = c.CUI_FONT_MEDIUM, .size = 13 });
+    w.text(ui, "Response header", .{ .font = c.CUI_FONT_MEDIUM, .size = 13 });
     c.kest_document_list_begin(ui, "response-header-inspection-content", @min(300, c.cui_viewport_size(ui).y - 168));
     fieldHeading(ui, "Name", "header-name", header.name, name, &t.response.header_name_offset);
     const name_buffer = w.z(name.text);
@@ -115,8 +112,6 @@ fn inspector(ui: *c.cui_ctx, t: *Tab, resp: *const Response) void {
     fieldHeading(ui, "Value", "header-value", header.value, value, &t.response.header_value_offset);
     const value_buffer = w.z(value.text);
     _ = c.cui_textarea_ex(ui, "inspected-value", @constCast(value_buffer.ptr), value_buffer.len + 1, &.{ .width = w.fill, .height = @min(180, @max(64, c.cui_viewport_size(ui).y - 270)), .read_only = true, .placeholder = "(empty)" });
-    if (header.name.len > inspector_limit or header.value.len > inspector_limit) w.text(ui, "Large fields use 16 KiB pages. Copy actions below include the full field.", .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
-    if (name.escaped or value.escaped) w.text(ui, "Control and non-UTF-8 bytes are escaped for display. Escaped copy actions are labeled explicitly.", .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     c.cui_scroll_end(ui);
     w.row(ui, .{ .width = w.fill, .gap = 4 });
     if (w.action(ui, "copy-header-name", if (text.clipboardSafe(header.name)) "Copy name" else "Copy escaped name", null, false, 0, 28, 3)) copy(ui, header.name);

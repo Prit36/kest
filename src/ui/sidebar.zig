@@ -142,7 +142,6 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
 fn collections(ui: *c.cui_ctx, app: *App) void {
     w.column(ui, .{ .pad_x = 10, .pad_y = 8 });
     var filter_changed = w.field(ui, "collection-filter", &app.filter, .{ .placeholder = "Search requests", .icon = c.CUI_ICON_SEARCH, .size = c.CUI_SIZE_SM });
-    c.kest_tooltip(ui, "Filter by request, folder or collection name (Esc clears)");
     // Escape clears an active search while the field keeps focus.
     if (app.filter.len > 0 and c.kest_focus_within(ui, "collection-filter") and c.cui_key_pressed(ui, c.CUI_KEY_ESCAPE)) {
         app.filter.clear();
@@ -174,7 +173,7 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
     }
     const rows = app.treeRows();
     if (rows.len == 0) {
-        emptyState(ui, "collections-empty", if (app.filter.len > 0) "No matching requests" else "No collections yet", if (app.filter.len > 0) "Try a different search." else "Save requests together in a collection.");
+        emptyState(ui, "collections-empty", if (app.filter.len > 0) "No matching requests" else "No collections yet");
         if (app.filter.len == 0 and w.button(ui, "New collection", .{ .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_SECONDARY, .icon = c.CUI_ICON_PLUS })) dialogs.askName(app, .new_collection, "");
         emptyEnd(ui);
         return;
@@ -403,7 +402,7 @@ fn history(ui: *c.cui_ctx, app: *App) void {
     }
     if (app.history_visible.items.len == 0) {
         const filtered = app.history_query.len > 0 or method != 0 or status != 0;
-        emptyState(ui, "history-empty", if (filtered) "No matching requests" else "No requests yet", if (filtered) "Change your search or reset the filters." else "Send a request to start your history.");
+        emptyState(ui, "history-empty", if (filtered) "No matching requests" else "No requests yet");
         if (filtered and w.button(ui, "Reset filters###reset-history-filters", .{ .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_OUTLINE })) {
             app.history_query.clear();
             app.history_method = 0;
@@ -415,13 +414,13 @@ fn history(ui: *c.cui_ctx, app: *App) void {
     }
     var first: c_int = 0;
     var last: c_int = 0;
-    c.cui_virtual_list_begin(ui, "history-rows", @intCast(app.history_visible.items.len), 58, w.fill, &first, &last);
+    c.cui_virtual_list_begin(ui, "history-rows", @intCast(app.history_visible.items.len), 46, w.fill, &first, &last);
     for (@as(usize, @intCast(first))..@as(usize, @intCast(last))) |i| {
         const index = app.history_visible.items[i];
         const e = app.history.entries.items[index];
         c.cui_push_id_int(ui, @intCast(index));
-        const clicked = c.kest_control_begin(ui, "history-entry", false, -1, 54, 0);
-        w.column(ui, .{ .width = w.fill, .gap = 4, .pad_x = 4 });
+        const clicked = c.kest_control_begin(ui, "history-entry", false, -1, 44, 0);
+        w.column(ui, .{ .width = w.fill, .gap = 2, .pad_x = 4 });
         w.row(ui, .{ .width = w.fill, .gap = 8 });
         w.text(ui, e.method, .{ .width = w.px(36), .size = 10, .font = c.CUI_FONT_MONO, .nowrap = true, .color = w.methodColor(e.method) });
         w.text(ui, displayUrl(e.url), .{ .size = 12, .nowrap = true, .width = w.fill });
@@ -449,7 +448,7 @@ fn history(ui: *c.cui_ctx, app: *App) void {
     c.cui_virtual_list_end(ui);
     c.cui_separator(ui);
     w.row(ui, .{ .width = w.fill, .pad_left = 10, .pad_right = 6, .pad_y = 6 });
-    w.muted(ui, w.fmt("{d} of {d} requests", .{ app.history_visible.items.len, app.history.entries.items.len }));
+    if (app.history_visible.items.len != app.history.entries.items.len) w.muted(ui, w.fmt("{d} of {d}", .{ app.history_visible.items.len, app.history.entries.items.len }));
     c.cui_spacer(ui);
     if (w.button(ui, "Clear", .{ .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_GHOST, .icon = c.CUI_ICON_TRASH_2, .tooltip = "Clear request history" })) commands.confirm(app, .clear_history, "Clear history?", "Request history will be deleted.", "Clear");
     w.end(ui);
@@ -465,17 +464,17 @@ fn displayUrl(value: []const u8) []const u8 {
 
 fn environments(ui: *c.cui_ctx, app: *App) void {
     if (app.envs.items.len == 0) {
-        emptyState(ui, "environments-empty", "No environments yet", "Keep base URLs and variables in an environment.");
+        emptyState(ui, "environments-empty", "No environments yet");
         if (w.button(ui, "New environment", .{ .icon = c.CUI_ICON_PLUS, .size = c.CUI_SIZE_SM })) dialogs.askName(app, .new_env, "");
         emptyEnd(ui);
         return;
     }
-    c.cui_scroll_begin(ui, &.{ .id = "environments", .height = w.fill, .pad = 10, .gap = 4 });
+    c.cui_scroll_begin(ui, &.{ .id = "environments", .height = w.fill, .pad = 8, .gap = 2 });
     for (app.envs.items) |e| {
         c.cui_push_id(ui, w.z(&e.id));
-        const clicked = c.kest_control_begin(ui, "environment-entry", e == app.active_env, -1, 54, 0);
+        const clicked = c.kest_control_begin(ui, "environment-entry", e == app.active_env, -1, 44, 0);
         c.cui_icon(ui, c.CUI_ICON_DATABASE, 15, w.color(if (e == app.active_env) c.CUI_TOKEN_ACCENT else c.CUI_TOKEN_TEXT_MUTED));
-        w.column(ui, .{ .width = w.fill, .gap = 4 });
+        w.column(ui, .{ .width = w.fill, .gap = 2 });
         w.text(ui, e.name, .{ .size = 12, .font = if (e == app.active_env) c.CUI_FONT_MEDIUM else c.CUI_FONT_BODY, .nowrap = true, .width = w.fill });
         w.text(ui, w.fmt("{d} variable{s}", .{ e.table.rows.items.len, if (e.table.rows.items.len == 1) "" else "s" }), .{ .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
         w.end(ui);
@@ -499,7 +498,6 @@ fn environments(ui: *c.cui_ctx, app: *App) void {
     c.cui_scroll_end(ui);
     c.cui_separator(ui);
     w.row(ui, .{ .width = w.fill, .pad_left = 10, .pad_right = 6, .pad_y = 6 });
-    w.muted(ui, w.fmt("{d} environment{s}", .{ app.envs.items.len, if (app.envs.items.len == 1) "" else "s" }));
     c.cui_spacer(ui);
     if (w.button(ui, "New", .{ .icon = c.CUI_ICON_PLUS, .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_GHOST, .tooltip = "New environment" })) dialogs.askName(app, .new_env, "");
     w.end(ui);
@@ -507,14 +505,11 @@ fn environments(ui: *c.cui_ctx, app: *App) void {
 
 // Caller may append a real action, then closes the content with emptyEnd.
 // The empty view owns the remaining space; text wraps inside a fixed inset.
-fn emptyState(ui: *c.cui_ctx, id: [*:0]const u8, title: []const u8, detail: []const u8) void {
+fn emptyState(ui: *c.cui_ctx, id: [*:0]const u8, title: []const u8) void {
     c.cui_scroll_begin(ui, &.{ .id = id, .width = w.fill, .height = w.fill });
-    w.column(ui, .{ .id = w.fmt("{s}-content", .{std.mem.span(id)}), .width = w.fill, .pad_x = 14, .pad_top = 14, .pad_bottom = 10, .gap = 6 });
+    w.column(ui, .{ .id = w.fmt("{s}-content", .{std.mem.span(id)}), .width = w.fill, .pad_x = 12, .pad_top = 12, .pad_bottom = 10, .gap = 10 });
     w.column(ui, .{ .id = w.fmt("{s}-title", .{std.mem.span(id)}), .width = w.fill });
-    w.text(ui, title, .{ .width = w.fill, .size = 13, .font = c.CUI_FONT_MEDIUM });
-    w.end(ui);
-    w.column(ui, .{ .id = w.fmt("{s}-detail", .{std.mem.span(id)}), .width = w.fill });
-    w.text(ui, detail, .{ .width = w.fill, .size = 12, .line_height = 1.5, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+    w.text(ui, title, .{ .width = w.fill, .size = 13, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     w.end(ui);
     // Close the scroll scope after its content is finished, including actions.
 }
