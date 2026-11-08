@@ -38,7 +38,7 @@ const Spot = struct { x: f32, y: f32 };
 fn spot(ui: *c.cui_ctx, t: *tab.Tab, line: usize, column: usize) Spot {
     const r = rect(ui, t, "body-editor");
     const char_w = editor.cellWidth(ui);
-    const gutter = editor.gutterWidth(ui, t.body.index.lineNumber(t.body.index.count() - 1));
+    const gutter = editor.gutterWidth(ui, t.body.index.lineNumber(t.body.index.count() - 1)) + @as(f32, if (t.body_kind == .json) 14 else 0);
     return .{ .x = r.x + gutter + 12 + @as(f32, @floatFromInt(column)) * char_w + 1, .y = r.y + 8 + (@as(f32, @floatFromInt(line)) + 0.5) * font.line() - t.body.scroll_y };
 }
 fn press(ui: *c.cui_ctx, app: *App, at: Spot, comptime frame: anytype) void {
@@ -205,6 +205,60 @@ pub fn run(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime chord: a
     try glide();
     try zoom(ui, app, t, frame, chord);
     try findReplace(ui, app, t, frame, chord);
+    try folding(ui, app, t, frame, chord);
+    std.debug.print("CUI text editing: word/line clicks, text drag, wheel glide, zoom, find/replace/regex and folding passed\n", .{});
+}
+
+/// JSON objects and arrays over several lines fold from the gutter, from
+/// their marker, with Ctrl+Shift+- and from the menu; the caret reaching a
+/// fold opens it.
+fn folding(ui: *c.cui_ctx, app: *App, t: *tab.Tab, comptime frame: anytype, comptime chord: anytype) !void {
+    t.body_kind = .json;
+    t.body.setText("{\n  \"a\": [\n    1,\n    2\n  ],\n  \"b\": 3\n}");
+    t.body.moveTo(0, false);
+    focus(ui, t, "body-editor");
+    for (0..3) |_| frame(ui, app);
+    try check(@src(), t.body.folds.regions.items.len == 2);
+    // The arrow beside line 2 folds "a"; rows 3 and 4 hide.
+    const r = rect(ui, t, "body-editor");
+    const arrow: Spot = .{ .x = r.x + 6, .y = spot(ui, t, 1, 0).y };
+    clicks(ui, app, arrow, 1, frame);
+    try check(@src(), t.body.folds.anyFolded() and t.body.folds.rows(t.body.index.count()) == 5);
+    // Line 5 ("],") now shows third; a click there lands on it.
+    for (0..30) |_| frame(ui, app);
+    clicks(ui, app, spot(ui, t, 2, 3), 1, frame);
+    try check(@src(), t.body.index.lineNumber(t.body.index.rowOf(t.body.caret)) == 5);
+    // Up skips the hidden rows.
+    chord(ui, app, c.CUI_KEY_UP, 0);
+    try check(@src(), t.body.index.lineNumber(t.body.index.rowOf(t.body.caret)) == 2);
+    // Moving into the fold opens it.
+    t.body.moveTo(16, false);
+    frame(ui, app);
+    try check(@src(), !t.body.folds.anyFolded());
+    // Ctrl+Shift+- folds where the caret is and keeps the caret in sight.
+    chord(ui, app, c.CUI_KEY_MINUS, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT);
+    try check(@src(), t.body.folds.anyFolded());
+    try check(@src(), t.body.index.lineNumber(t.body.index.rowOf(t.body.caret)) == 2);
+    chord(ui, app, c.CUI_KEY_MINUS, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT);
+    try check(@src(), !t.body.folds.anyFolded());
+    // Folds follow edits above them and survive undo.
+    t.body.folds.fold(app.gpa, t.body.folds.regionOnRow(1).?.open);
+    frame(ui, app);
+    t.body.moveTo(1, false);
+    t.body.replaceSelection(" ", true);
+    frame(ui, app);
+    try check(@src(), t.body.folds.anyFolded() and t.body.folds.rows(t.body.index.count()) == 5);
+    try check(@src(), t.body.undoEdit());
+    frame(ui, app);
+    try check(@src(), t.body.folds.anyFolded());
+    // The bracket at the caret and its partner are found.
+    t.body.folds.unfoldAll();
+    t.body.moveTo(0, false);
+    frame(ui, app);
+    try check(@src(), t.body.marked != null and t.body.marked.?[1] == t.body.text().len - 1);
+    t.body_kind = .text;
+    frame(ui, app);
+    try check(@src(), t.body.folds.regions.items.len == 0);
 }
 
 /// Ctrl+H opens Find with Replace; the options, Replace, Replace all and

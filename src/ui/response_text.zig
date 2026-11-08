@@ -137,6 +137,18 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, id: [*:0]const u8, s: *State, so
     if (s.layout_pending or (needs_layout and s.layout_failure)) w.text(ui, if (s.layout_failure) "Reflow unavailable; keeping the previous layout." else "Reflowing text...", .{ .width = w.fill, .size = c.KEST_TEXT_CAPTION, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     const focused = c.kest_editor_focus(ui, identity) != 0;
     if (focused) keys(ui, s, source, previous.h);
+    // The bracket matching the one at the caret, in JSON up to 1 MiB.
+    if (focused and lang == .json and source.len <= 1024 * 1024) {
+        if (s.marked_caret != s.caret or s.marked_ptr != @intFromPtr(source.ptr) or s.marked_version == 0) {
+            s.marked = @import("../utils/brackets.zig").pair(source, s.caret);
+            s.marked_caret = s.caret;
+            s.marked_ptr = @intFromPtr(source.ptr);
+            s.marked_version = 1;
+        }
+    } else {
+        s.marked = null;
+        s.marked_version = 0;
+    }
     if (c.kest_right_pressed(ui, identity) and previous.w > 0) editor.rightClick(ui, id, s, hit(ui, s, source, previous, gutter));
     var menu_ctx: MenuContext = .{ .app = app, .t = t };
     _ = editor.contextMenu(ui, id, s, source, true, .{ .ctx = &menu_ctx, .items = menuItems });
@@ -400,6 +412,11 @@ fn draw(raw_ui: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         c.cui_push_clip(ui, .{ .x = @floatCast(origin), .y = rect.y + 8, .w = @floatCast(bars.width + 1), .h = bars.height });
         if (p.focused and row == active) c.cui_draw_rect(ui, .{ .x = @floatCast(origin), .y = y, .w = @floatCast(bars.width), .h = font.line() }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
         dense = highlight(ui, s, p.source, row, origin, y, bars.width) or dense;
+        if (s.marked) |pair| for (pair) |pos| if (pos >= bounds[0] and pos < bounds[1]) {
+            const mark_x: f32 = @floatCast(origin + geometry.position(&s.index, p.source, row, pos, metrics(ui)) - s.precise_x);
+            const mark_w: f32 = @floatCast(geometry.config.char_width);
+            c.cui_draw_rect_border(ui, .{ .x = mark_x - 0.5, .y = y + 1, .w = mark_w + 1, .h = font.line() - 2 }, .{ .tl = 2, .tr = 2, .br = 2, .bl = 2 }, w.color(c.CUI_TOKEN_ACCENT_SUBTLE), w.tinted(ui, c.CUI_TOKEN_ACCENT, 0.7), 1);
+        };
         if (selection[1] > bounds[0] and selection[0] < bounds[1]) {
             const left = @max(0, geometry.position(&s.index, p.source, row, @max(bounds[0], selection[0]), metrics(ui)) - s.precise_x);
             const right = @min(bars.width, geometry.position(&s.index, p.source, row, @min(bounds[1], selection[1]), metrics(ui)) - s.precise_x);

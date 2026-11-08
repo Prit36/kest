@@ -75,6 +75,8 @@ pub const State = struct {
     press_y: f32 = 0,
     /// Where the dragged text would land.
     drop_at: usize = 0,
+    /// Folded JSON regions in an editor.
+    folds: @import("folding.zig").Folds = .{},
     /// Wheel scrolling on its way.
     glide: @import("glide.zig").Glide = .{},
     glide_x: @import("glide.zig").Glide = .{},
@@ -137,6 +139,7 @@ pub const State = struct {
         s.buffer.deinit();
         s.query.deinit();
         s.replacement.deinit();
+        s.folds.deinit(s.gpa);
         s.index.deinit(s.gpa);
         s.continued_strings.deinit(s.gpa);
         s.matches.deinit(s.gpa);
@@ -194,6 +197,7 @@ pub const State = struct {
         s.anchor = 0;
         s.marked = null;
         s.scroll_x = 0;
+        s.folds.clear();
         s.version += 1;
         s.undo_bytes = 0;
         s.clearStack(&s.undo);
@@ -250,7 +254,9 @@ pub const State = struct {
             }
         }
         if (!joined and !s.record(lo, removed, t)) return;
+        const removed_len = removed.len;
         if (s.buffer.replace(lo, hi, t) != t.len) return;
+        s.folds.shift(lo, removed_len, t.len);
         s.clearStack(&s.redo);
         s.caret = lo + t.len;
         s.anchor = s.caret;
@@ -296,6 +302,7 @@ pub const State = struct {
         s.redo.ensureUnusedCapacity(s.gpa, 1) catch return false;
         const e = s.undo.pop() orelse return false;
         _ = s.buffer.replace(e.at, e.at + e.inserted.len, e.removed);
+        s.folds.shift(e.at, e.inserted.len, e.removed.len);
         s.undo_bytes -= e.size();
         s.redo.appendAssumeCapacity(e);
         s.caret = e.caret_before;
@@ -312,6 +319,7 @@ pub const State = struct {
         s.undo.ensureUnusedCapacity(s.gpa, 1) catch return false;
         const e = s.redo.pop() orelse return false;
         _ = s.buffer.replace(e.at, e.at + e.removed.len, e.inserted);
+        s.folds.shift(e.at, e.removed.len, e.inserted.len);
         s.undo.appendAssumeCapacity(e);
         s.undo_bytes += e.size();
         s.caret = e.caret_after;

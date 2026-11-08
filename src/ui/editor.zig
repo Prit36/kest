@@ -7,7 +7,7 @@ const code = @import("code_state.zig");
 const hl = @import("../utils/highlight.zig");
 const State = code.State;
 const design = @import("design.zig");
-const Paint = struct { state: *State, source: []const u8, lang: hl.Lang, focused: bool, char_w: f32, gutter: f32 };
+const Paint = struct { state: *State, source: []const u8, lang: hl.Lang, focused: bool, char_w: f32, gutter: f32, fold_w: f32 };
 const font = @import("code_font.zig");
 // Use the same font advance for text, token origins, hit testing and caret.
 pub fn cellWidth(ui: *c.cui_ctx) f32 {
@@ -23,6 +23,32 @@ pub fn gutterWidth(ui: *c.cui_ctx, lines: usize) f32 {
     return @round(@max(2, digits) * digit_w + 20);
 }
 const code_gap = 12;
+/// Room at the gutter's left for fold arrows, in a JSON editor.
+const fold_column = 14;
+
+fn foldWidth(lang: hl.Lang, read_only: bool) f32 {
+    return if (lang == .json and !read_only) fold_column else 0;
+}
+
+/// Folds or unfolds the region at the caret (Ctrl+Shift+-). Folding over
+/// the caret moves it to the region's first line.
+pub fn toggleFoldAtCaret(s: *State) void {
+    const r = s.folds.regionAround(&s.index, s.caret) orelse return;
+    s.folds.toggle(s.gpa, r.open);
+    keepCaretShown(s);
+}
+
+/// After folding: a caret inside a fold moves to the fold's first line,
+/// so it isn't unfolded again straight away.
+pub fn keepCaretShown(s: *State) void {
+    const row = s.index.rowOf(@min(s.caret, s.text().len));
+    for (s.folds.regions.items) |r| {
+        if (s.folds.isFolded(r.open) and row > r.open_row and row < r.close_row) {
+            s.moveTo(r.open + 1, false);
+            return;
+        }
+    }
+}
 
 /// Items a view adds to its editor's context menu after the editing commands.
 pub const Menu = struct {
@@ -83,6 +109,17 @@ pub fn contextMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source: []const
     const caret = s.caret;
     const anchor = s.anchor;
     editItems(ui, s, source, read_only);
+    if (!read_only and s.folds.regions.items.len > 0) {
+        c.cui_menu_separator(ui);
+        const here = s.folds.regionAround(&s.index, s.caret);
+        const folded_here = if (here) |r| s.folds.isFolded(r.open) else false;
+        if (menuItem(ui, if (folded_here) "Unfold" else "Fold", "Ctrl Shift -", here != null)) toggleFoldAtCaret(s);
+        if (menuItem(ui, "Fold all", "", true)) {
+            s.folds.foldAll(s.gpa);
+            keepCaretShown(s);
+        }
+        if (menuItem(ui, "Unfold all", "", s.folds.anyFolded())) s.folds.unfoldAll();
+    }
     if (extra) |menu| {
         c.cui_menu_separator(ui);
         menu.items(ui, menu.ctx);
@@ -110,7 +147,8 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
     }
     const identity = c.cui_make_id(ui, id);
     const previous = c.cui_get_rect(ui, identity);
-    const gutter0 = gutterWidth(ui, if (s.index.count() > 0) s.index.lineNumber(s.index.count() - 1) else 1);
+    const fold_w = foldWidth(lang, read_only);
+    const gutter0 = fold_w + gutterWidth(ui, if (s.index.count() > 0) s.index.lineNumber(s.index.count() - 1) else 1);
     const wrap_at: usize = if (s.word_wrap and previous.w > 0) @intFromFloat(@max(4, @floor((previous.w - gutter0 - code_gap - 16) / char_w))) else @import("../utils/lines.zig").default_wrap;
     index(s, source, wrap_at);
     const focused = c.kest_editor_focus(ui, identity) != 0;
@@ -123,6 +161,7 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
         if (!read_only and c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_M)) s.tab_moves_focus = !s.tab_moves_focus;
         c.kest_editor_tabs(ui, identity, @intFromBool(!read_only and !s.tab_moves_focus));
         keys(ui, s, source, read_only, char_w);
+        if (fold_w > 0 and c.cui_shortcut(ui, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT, c.CUI_KEY_MINUS)) toggleFoldAtCaret(s);
         if (!read_only) source = s.text();
     }
     if (c.kest_right_pressed(ui, identity) and previous.w > 0) {
@@ -132,6 +171,11 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
     _ = contextMenu(ui, id, s, source, read_only, extra);
     if (!read_only) source = s.text();
     index(s, source, wrap_at);
+    if (fold_w > 0) {
+        s.folds.update(s.gpa, source, &s.index, s.index_generation);
+        // The caret went somewhere folded: open what hides it.
+        if (s.folds.anyFolded() and s.folds.reveal(s.index.rowOf(@min(s.caret, source.len)))) s.folds.update(s.gpa, source, &s.index, s.index_generation);
+    } else if (s.folds.regions.items.len > 0 or s.folds.anyFolded()) s.folds.clear();
     if (s.word_wrap) s.scroll_x = 0;
     if (lang == .json and s.syntax_generation != s.index_generation) {
         if (hl.jsonContinuations(s.gpa, source, s.index.starts.items, &s.continued_strings)) |_| {
@@ -152,18 +196,20 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
     const wheel = c.kest_editor_scroll(ui, identity);
     if (!font.ctrlWheel(c.cui_key_mods(ui) & c.CUI_MOD_PRIMARY != 0, wheel)) s.glide.push(s.scroll_y, -wheel * font.line() * 3);
     if (s.glide.target != null) {
-        const total: f32 = @as(f32, @floatFromInt(s.index.count())) * font.line();
+        const total: f32 = @as(f32, @floatFromInt(s.folds.rows(s.index.count()))) * font.line();
         s.glide.step(ui, &s.scroll_y, if (previous.h > 0) total - @max(1, previous.h - 16) else total);
     }
-    const gutter = gutterWidth(ui, if (s.index.count() > 0) s.index.lineNumber(s.index.count() - 1) else 1);
-    const paint = Paint{ .state = s, .source = source, .lang = lang, .focused = focused, .char_w = char_w, .gutter = gutter };
+    const gutter = fold_w + gutterWidth(ui, if (s.index.count() > 0) s.index.lineNumber(s.index.count() - 1) else 1);
+    const paint = Paint{ .state = s, .source = source, .lang = lang, .focused = focused, .char_w = char_w, .gutter = gutter, .fold_w = fold_w };
     const result = c.cui_canvas(ui, id, w.fill, w.fill, draw, &paint, @sizeOf(Paint));
     const rect = result.rect;
     c.kest_editor_register(ui, identity);
     c.kest_editor_tabs(ui, identity, @intFromBool(!read_only and !s.tab_moves_focus));
-    if (result.pressed and rect.w > 0) if (hit(ui, s, source, rect, gutter, char_w)) |pos| {
+    const fold_click = result.pressed and c.kest_left_pressed(ui) and rect.w > 0 and foldClick(ui, s, source, rect, gutter, fold_w, char_w);
+    if (result.pressed and rect.w > 0 and !fold_click and s.move_drag != .cancelled) if (hit(ui, s, source, rect, gutter, char_w)) |pos| {
         pointer(ui, s, source, pos, read_only);
     };
+    if (fold_click) s.move_drag = .cancelled;
     if (!c.cui_mouse_down(ui, c.CUI_MOUSE_LEFT)) {
         switch (s.move_drag) {
             .moving => s.moveSelection(s.drop_at, c.cui_key_mods(ui) & c.CUI_MOD_PRIMARY != 0),
@@ -215,7 +261,7 @@ fn hit(ui: *c.cui_ctx, s: *State, source: []const u8, rect: c.cui_rect, gutter: 
     if (s.index.count() == 0) return null;
     const m = c.cui_mouse_pos(ui);
     const row_n: usize = @intFromFloat(@max(0, @floor((m.y - rect.y - 8 + s.scroll_y) / font.line())));
-    const row_at = @min(row_n, s.index.count() - 1);
+    const row_at = s.folds.rowAt(@min(row_n, s.folds.rows(s.index.count()) - 1));
     const bounds = s.index.bounds(source, row_at);
     return bounds[0] + byteAt(ui, source[bounds[0]..bounds[1]], @max(0, m.x - rect.x - gutter - code_gap + s.scroll_x), char_w);
 }
@@ -265,10 +311,12 @@ fn keys(ui: *c.cui_ctx, s: *State, source_in: []const u8, read_only: bool, char_
     if (c.cui_key_pressed(ui, c.CUI_KEY_UP) or c.cui_key_pressed(ui, c.CUI_KEY_DOWN)) {
         index(s, source, s.index.wrap_at);
         if (s.index.count() > 0) {
+            if (s.folds.anyFolded()) s.folds.update(s.gpa, source, &s.index, s.index_generation);
             const row = s.index.rowOf(s.caret);
             const bounds = s.index.bounds(source, row);
             const aim = s.goal_x orelse advance(ui, source[bounds[0]..@min(s.caret, bounds[1])], char_w);
-            const target = if (c.cui_key_pressed(ui, c.CUI_KEY_UP)) row -| 1 else @min(row + 1, s.index.count() - 1);
+            const visual = s.folds.visualOf(row);
+            const target = s.folds.rowAt(if (c.cui_key_pressed(ui, c.CUI_KEY_UP)) visual -| 1 else @min(visual + 1, s.folds.rows(s.index.count()) - 1));
             if (target != row) {
                 const next = s.index.bounds(source, target);
                 s.moveTo(next[0] + byteAt(ui, source[next[0]..next[1]], aim, char_w), shift);
@@ -360,11 +408,12 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     const gutter = p.gutter;
     if (s.index.count() == 0) return;
     const visible: f32 = @max(1, rect.h - 16);
-    const total: f32 = @as(f32, @floatFromInt(s.index.count())) * font.line();
+    const shown = s.folds.rows(s.index.count());
+    const total: f32 = @as(f32, @floatFromInt(shown)) * font.line();
     s.scroll_y = std.math.clamp(s.scroll_y, 0, @max(0, total - visible));
     if (s.reveal) {
         s.glide.stop();
-        const caret_row: f32 = @as(f32, @floatFromInt(s.index.rowOf(@min(s.caret, p.source.len)))) * font.line();
+        const caret_row: f32 = @as(f32, @floatFromInt(s.folds.visualOf(s.index.rowOf(@min(s.caret, p.source.len))))) * font.line();
         if (caret_row < s.scroll_y) s.scroll_y = caret_row;
         if (caret_row + font.line() > s.scroll_y + visible) s.scroll_y = caret_row + font.line() - visible;
         const row_i = s.index.rowOf(@min(s.caret, p.source.len));
@@ -382,21 +431,22 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     if (p.focused) c.cui_draw_line(ui, .{ .x = rect.x, .y = rect.y + 0.5 }, .{ .x = rect.x + rect.w, .y = rect.y + 0.5 }, 1 / @max(1, c.cui_dpi_scale(ui)), w.color(c.CUI_TOKEN_FOCUS_RING));
     const first: usize = @intFromFloat(@floor(s.scroll_y / font.line()));
     const count: usize = @intFromFloat(@ceil(visible / font.line()) + 2);
-    const last = @min(s.index.count(), first + count);
+    const last = @min(shown, first + count);
     const sel = s.selection();
     const active_row = s.index.rowOf(@min(s.caret, p.source.len));
-    for (first..last) |i| {
+    for (first..last) |visual| {
+        const i = s.folds.rowAt(visual);
         const bounds = s.index.bounds(p.source, i);
         const entire_row = s.index.row(p.source, i);
         const col_lo = byteAt(ui, entire_row, @max(0, s.scroll_x - char_w), char_w);
         const col_hi = code.nextChar(entire_row, byteAt(ui, entire_row, s.scroll_x + @max(1, rect.w - gutter - code_gap) + char_w, char_w));
-        const y = rect.y + 8 + @as(f32, @floatFromInt(i)) * font.line() - s.scroll_y;
+        const y = rect.y + 8 + @as(f32, @floatFromInt(visual)) * font.line() - s.scroll_y;
         const x = rect.x + gutter + code_gap - s.scroll_x;
         if (p.focused and active_row == i) c.cui_draw_rect(ui, .{ .x = rect.x + gutter + 1, .y = y, .w = @max(0, rect.w - gutter - 1), .h = font.line() }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
         if (s.marked) |pair| for (pair) |pos| {
             if (pos >= bounds[0] and pos < bounds[1]) {
                 const mark_x = advance(ui, entire_row[0 .. pos - bounds[0]], char_w);
-                c.cui_draw_rect(ui, .{ .x = x + mark_x, .y = y, .w = char_w, .h = font.line() }, .{}, w.color(c.CUI_TOKEN_ACCENT_SUBTLE));
+                c.cui_draw_rect_border(ui, .{ .x = x + mark_x - 0.5, .y = y + 1, .w = char_w + 1, .h = font.line() - 2 }, .{ .tl = 2, .tr = 2, .br = 2, .bl = 2 }, w.color(c.CUI_TOKEN_ACCENT_SUBTLE), w.tinted(ui, c.CUI_TOKEN_ACCENT, 0.7), 1);
             }
         };
         if (s.search_open and s.matches.items.len > 0) {
@@ -439,6 +489,16 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
             at = token_end;
         }
         segment(ui, char_w, x, y, entire_row, at, col_hi, w.color(c.CUI_TOKEN_FOREGROUND));
+        if (p.fold_w > 0) if (s.folds.regionOnRow(i)) |r| {
+            const folded = s.folds.isFolded(r.open);
+            c.cui_draw_icon(ui, if (folded) c.CUI_ICON_CHEVRON_RIGHT else c.CUI_ICON_CHEVRON_DOWN, .{ .x = rect.x + 2, .y = y + (font.line() - 12) / 2, .w = 12, .h = 12 }, 11, w.color(if (folded) c.CUI_TOKEN_TEXT_SECONDARY else c.CUI_TOKEN_TEXT_MUTED));
+            if (folded) {
+                const chip = foldChip(ui, s, p.source, i, x, y, char_w);
+                c.cui_draw_rect(ui, chip, .{ .tl = 3, .tr = 3, .br = 3, .bl = 3 }, w.color(c.CUI_TOKEN_SURFACE_MUTED));
+                const marker = foldLabel(r);
+                c.cui_draw_text(ui, c.CUI_FONT_BODY, font.small(), .{ .x = chip.x + 5, .y = chip.y + (chip.h - font.small()) / 2 - 1 }, w.color(c.CUI_TOKEN_TEXT_SECONDARY), marker.ptr, @intCast(marker.len));
+            }
+        };
         if (s.move_drag == .moving and (s.drop_at < s.selection()[0] or s.drop_at > s.selection()[1]) and s.drop_at >= bounds[0] and s.drop_at <= bounds[1] and (s.drop_at < bounds[1] or i + 1 == s.index.count() or s.index.bounds(p.source, i + 1)[0] > s.drop_at)) {
             const drop_x = x + advance(ui, entire_row[0..@min(s.drop_at - bounds[0], entire_row.len)], char_w);
             c.cui_draw_line(ui, .{ .x = drop_x, .y = y }, .{ .x = drop_x, .y = y + font.caret() }, 2, w.color(c.CUI_TOKEN_TEXT_SECONDARY));
@@ -452,6 +512,39 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         const thumb = @max(20, visible * visible / total);
         c.cui_draw_rect(ui, .{ .x = rect.x + rect.w - 5, .y = rect.y + 8 + s.scroll_y / (total - visible) * (visible - thumb), .w = 3, .h = thumb }, .{ .tl = 2, .tr = 2, .br = 2, .bl = 2 }, w.color(c.CUI_TOKEN_BORDER_STRONG));
     }
+}
+
+fn foldLabel(r: @import("folding.zig").Region) []const u8 {
+    const hidden = r.close_row - r.open_row - 1;
+    return w.fmt("\u{2026} {d} {s}", .{ hidden, if (hidden == 1) "line" else "lines" });
+}
+
+/// The marker after a folded row's text; clicking it unfolds.
+fn foldChip(ui: *c.cui_ctx, s: *State, source: []const u8, row: usize, x: f32, y: f32, char_w: f32) c.cui_rect {
+    const end = x + advance(ui, s.index.row(source, row), char_w) + char_w;
+    const label = foldLabel(s.folds.regionOnRow(row).?);
+    const width = c.cui_measure_text(ui, c.CUI_FONT_BODY, font.small(), label.ptr, @intCast(label.len)).width + 10;
+    return .{ .x = end, .y = y + 2, .w = width, .h = font.line() - 4 };
+}
+
+/// A press on a fold arrow, or on a folded row's marker, toggles the fold.
+fn foldClick(ui: *c.cui_ctx, s: *State, source: []const u8, rect: c.cui_rect, gutter: f32, fold_w: f32, char_w: f32) bool {
+    if (fold_w == 0 or s.index.count() == 0) return false;
+    const m = c.cui_mouse_pos(ui);
+    const visual: usize = @intFromFloat(@max(0, @floor((m.y - rect.y - 8 + s.scroll_y) / font.line())));
+    if (visual >= s.folds.rows(s.index.count())) return false;
+    const row = s.folds.rowAt(visual);
+    const r = s.folds.regionOnRow(row) orelse return false;
+    var on = m.x < rect.x + fold_w + 2;
+    if (!on and s.folds.isFolded(r.open)) {
+        const y = rect.y + 8 + @as(f32, @floatFromInt(visual)) * font.line() - s.scroll_y;
+        const chip = foldChip(ui, s, source, row, rect.x + gutter + code_gap - s.scroll_x, y, char_w);
+        on = m.x >= chip.x and m.x < chip.x + chip.w and m.y >= chip.y and m.y < chip.y + chip.h;
+    }
+    if (!on) return false;
+    s.folds.toggle(s.gpa, r.open);
+    keepCaretShown(s);
+    return true;
 }
 
 fn segment(ui: *c.cui_ctx, char_w: f32, x: f32, y: f32, source: []const u8, lo: usize, hi: usize, tint: c.cui_color) void {
