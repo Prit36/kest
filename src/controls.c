@@ -221,7 +221,7 @@ void kest_collection_name(cui_ctx *ui, const char *name, const char *method, con
         ui->nodes[label].w = CUI_PX(40);
         ui->nodes[label].flags |= CUI_NF_KEEP_W;
         cui__leaf(ui, 0, CUI_PX(4), CUI_PX(1));
-        cui_text_opts opts = {0}; opts.nowrap = true; opts.size = 12;
+        cui_text_opts opts = {0}; opts.nowrap = true; opts.size = KEST_TEXT_SECONDARY;
         cui_text_ex(ui, name, &opts);
         label = ui->last_node;
     }

@@ -423,11 +423,11 @@ fn history(ui: *c.cui_ctx, app: *App) void {
         w.column(ui, .{ .width = w.fill, .gap = 2, .pad_x = 4 });
         w.row(ui, .{ .width = w.fill, .gap = 8 });
         w.text(ui, e.method, .{ .width = w.px(36), .size = 10, .font = c.CUI_FONT_MONO, .nowrap = true, .color = w.methodColor(e.method) });
-        w.text(ui, displayUrl(e.url), .{ .size = 12, .nowrap = true, .width = w.fill });
+        w.text(ui, displayUrl(e.url), .{ .size = c.KEST_TEXT_SECONDARY, .nowrap = true, .width = w.fill });
         w.end(ui);
         w.row(ui, .{ .width = w.fill, .gap = 6, .pad_left = 44 });
-        w.text(ui, if (e.status == 0) "Failed" else w.fmt("{d}", .{e.status}), .{ .size = 11, .font = c.CUI_FONT_MEDIUM, .nowrap = true, .color = w.statusColor(e.status) });
-        w.text(ui, w.fmt("{d} ms", .{e.time_ms}), .{ .size = 11, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
+        w.text(ui, if (e.status == 0) "Failed" else w.fmt("{d}", .{e.status}), .{ .size = c.KEST_TEXT_CAPTION, .font = c.CUI_FONT_MEDIUM, .nowrap = true, .color = w.statusColor(e.status) });
+        w.text(ui, w.fmt("{d} ms", .{e.time_ms}), .{ .size = c.KEST_TEXT_CAPTION, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
         w.end(ui);
         w.end(ui);
         c.kest_item_end(ui);
@@ -475,10 +475,10 @@ fn environments(ui: *c.cui_ctx, app: *App) void {
         const clicked = c.kest_control_begin(ui, "environment-entry", e == app.active_env, -1, 44, 0);
         c.cui_icon(ui, c.CUI_ICON_DATABASE, 15, w.color(if (e == app.active_env) c.CUI_TOKEN_ACCENT else c.CUI_TOKEN_TEXT_MUTED));
         w.column(ui, .{ .width = w.fill, .gap = 2 });
-        w.text(ui, e.name, .{ .size = 12, .font = if (e == app.active_env) c.CUI_FONT_MEDIUM else c.CUI_FONT_BODY, .nowrap = true, .width = w.fill });
-        w.text(ui, w.fmt("{d} variable{s}", .{ e.table.rows.items.len, if (e.table.rows.items.len == 1) "" else "s" }), .{ .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
+        w.text(ui, e.name, .{ .size = c.KEST_TEXT_SECONDARY, .font = if (e == app.active_env) c.CUI_FONT_MEDIUM else c.CUI_FONT_BODY, .nowrap = true, .width = w.fill });
+        w.text(ui, w.fmt("{d} variable{s}", .{ e.table.rows.items.len, if (e.table.rows.items.len == 1) "" else "s" }), .{ .size = c.KEST_TEXT_CAPTION, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
         w.end(ui);
-        if (e == app.active_env) w.text(ui, "Active", .{ .size = 11, .font = c.CUI_FONT_MEDIUM, .nowrap = true, .color = w.color(c.CUI_TOKEN_SUCCESS) });
+        if (e == app.active_env) w.text(ui, "Active", .{ .size = c.KEST_TEXT_CAPTION, .font = c.CUI_FONT_MEDIUM, .nowrap = true, .color = w.color(c.CUI_TOKEN_SUCCESS) });
         c.kest_item_end(ui);
         if (clicked) {
             app.editing_env = e;
@@ -509,7 +509,7 @@ fn emptyState(ui: *c.cui_ctx, id: [*:0]const u8, title: []const u8) void {
     c.cui_scroll_begin(ui, &.{ .id = id, .width = w.fill, .height = w.fill });
     w.column(ui, .{ .id = w.fmt("{s}-content", .{std.mem.span(id)}), .width = w.fill, .pad_x = 12, .pad_top = 12, .pad_bottom = 10, .gap = 10 });
     w.column(ui, .{ .id = w.fmt("{s}-title", .{std.mem.span(id)}), .width = w.fill });
-    w.text(ui, title, .{ .width = w.fill, .size = 13, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+    w.text(ui, title, .{ .width = w.fill, .size = c.KEST_TEXT_BODY, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     w.end(ui);
     // Close the scroll scope after its content is finished, including actions.
 }

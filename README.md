@@ -4,9 +4,13 @@ A native HTTP client. The interface uses CUI 1.1.0,
 pinned to commit `d0383c4d3c00b7769f6b11cefdf581e1800f2da3`; networking, validation,
 collections, environment resolution and persistence use Zig 0.17.0.
 There is no browser engine, telemetry, account or runtime package manager.
-Windows text uses DirectWrite grid fitting with grayscale antialiasing at the
-monitor's pixel density. The bundled fonts and CUI layout metrics are retained;
-icons and the fallback text path use CUI's original rasterizer.
+Windows text uses the system UI fonts (Segoe UI, Segoe UI Semibold and Cascadia
+Mono or Consolas), rasterized by DirectWrite at the monitor's pixel density with
+ClearType where Windows uses it, and blended with DirectWrite's contrast and
+gamma correction from the system's text settings. CUI's bundled fonts remain as
+fallbacks; icons use CUI's original rasterizer. `KEST_TEXT=grayscale` turns off
+subpixel rendering, `KEST_TEXT=legacy` also turns off the gamma correction, and
+`KEST_FONT=bundled` restores Inter and Geist.
 
 ## Build
 

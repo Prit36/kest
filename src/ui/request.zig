@@ -81,7 +81,7 @@ fn settings(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
 fn setting(ui: *c.cui_ctx, label: []const u8, id: [*:0]const u8, value: *@import("model.zig").TextBuffer, suffix: ?[*:0]const u8) bool {
     w.row(ui, .{ .width = w.fill, .gap = w.design.space.section, .@"align" = c.CUI_ALIGN_CENTER });
     defer w.end(ui);
-    w.text(ui, label, .{ .width = w.fill, .size = 13, .nowrap = true });
+    w.text(ui, label, .{ .width = w.fill, .size = c.KEST_TEXT_BODY, .nowrap = true });
     return w.field(ui, id, value, .{ .width = w.px(128), .suffix = suffix });
 }
 

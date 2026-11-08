@@ -59,7 +59,7 @@ pub fn summaryData(t: *const tab.Tab) ?Summary {
 }
 
 fn textWidth(ui: *c.cui_ctx, label: []const u8, medium: bool) f32 {
-    return c.cui_measure_text(ui, if (medium) c.CUI_FONT_MEDIUM else c.CUI_FONT_BODY, 12, label.ptr, @intCast(label.len)).width;
+    return c.cui_measure_text(ui, if (medium) c.CUI_FONT_MEDIUM else c.CUI_FONT_BODY, c.KEST_TEXT_SECONDARY, label.ptr, @intCast(label.len)).width;
 }
 fn body(t: *tab.Tab, pane: tab.ResponsePane) void {
     t.response.pane = pane;
@@ -140,19 +140,19 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
         w.row(ui, .{ .id = "response-status-frame", .height = w.px(24), .radius = 3, .bg = statusTint(ui, value.token) });
         const clicked = c.kest_control_begin(ui, "response-status", false, badge_width, 24, 3);
         if (t.running()) c.cui_spinner(ui, 12);
-        w.text(ui, label, .{ .size = 12, .font = c.CUI_FONT_MEDIUM, .color = w.color(value.token), .nowrap = true });
+        w.text(ui, label, .{ .size = c.KEST_TEXT_SECONDARY, .font = c.CUI_FONT_MEDIUM, .color = w.color(value.token), .nowrap = true });
         c.kest_item_end(ui);
         if (!t.running() and t.start_failure == .none and r != null and r.?.status > 0) c.kest_tooltip(ui, w.z(states.category(r.?.status)));
         if (clicked) c.cui_popover_open(ui, "response-details");
         w.end(ui);
         if (show_duration) {
             w.row(ui, .{ .id = "response-duration" });
-            w.text(ui, value.duration, .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
+            w.text(ui, value.duration, .{ .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
             w.end(ui);
         }
         if (show_size) {
             w.row(ui, .{ .id = "response-size" });
-            w.text(ui, value.size, .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
+            w.text(ui, value.size, .{ .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
             w.end(ui);
         }
         w.end(ui);
@@ -208,8 +208,8 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
 
 fn field(ui: *c.cui_ctx, name: []const u8, value: []const u8) void {
     w.column(ui, .{ .width = w.fill, .gap = 2, .pad_bottom = 6 });
-    w.text(ui, name, .{ .size = 12, .font = c.CUI_FONT_MEDIUM });
-    w.text(ui, value, .{ .width = w.fill, .size = 12, .font = c.CUI_FONT_MONO, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+    w.text(ui, name, .{ .size = c.KEST_TEXT_SECONDARY, .font = c.CUI_FONT_MEDIUM });
+    w.text(ui, value, .{ .width = w.fill, .size = c.KEST_TEXT_SECONDARY, .font = c.CUI_FONT_MONO, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     w.end(ui);
 }
 fn details(ui: *c.cui_ctx, t: *tab.Tab) void {
@@ -218,7 +218,7 @@ fn details(ui: *c.cui_ctx, t: *tab.Tab) void {
         return;
     }
     if (!c.kest_inspector_begin(ui, "response-details", "response-status", 520)) return;
-    w.text(ui, if (t.running()) "Current request details" else "Execution details", .{ .size = 13, .font = c.CUI_FONT_MEDIUM });
+    w.text(ui, if (t.running()) "Current request details" else "Execution details", .{ .size = c.KEST_TEXT_BODY, .font = c.CUI_FONT_MEDIUM });
     c.kest_document_list_begin(ui, "response-detail-content", @min(260, c.cui_viewport_size(ui).y - 152));
     if (t.job) |job| {
         field(ui, "State", "Sending");

@@ -28,12 +28,12 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     w.column(ui, .{ .id = "response-content", .width = w.fill, .height = w.fill, .clip = true });
     if (t.running() or t.start_failure != .none) {
         w.column(ui, .{ .id = "response-previous", .width = w.fill, .pad_x = 12, .pad_y = 6, .bg = w.color(c.CUI_TOKEN_SURFACE_MUTED) });
-        w.text(ui, if (t.running()) "Previous response" else "Previous response · new request not sent", .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, if (t.running()) "Previous response" else "Previous response · new request not sent", .{ .width = w.fill, .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         w.end(ui);
     } else if (states.issue(resp)) |issue| @import("response_notice.zig").view(ui, t, issue, resp.error_text, resp.status == 0 and resp.preview.items.len == 0);
     if (resp.isPartial()) {
         w.column(ui, .{ .id = "response-preview-notice", .width = w.fill, .pad_x = 12, .pad_y = 4 });
-        w.text(ui, w.fmt("Showing {d} of {d} received bytes", .{ resp.preview.items.len, resp.total.load(.monotonic) }), .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, w.fmt("Showing {d} of {d} received bytes", .{ resp.preview.items.len, resp.total.load(.monotonic) }), .{ .width = w.fill, .size = c.KEST_TEXT_CAPTION, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         w.end(ui);
     }
     // A failed request has no body: the alert is the whole answer.
@@ -93,7 +93,7 @@ fn content(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) voi
 
 fn contentNotice(ui: *c.cui_ctx, text: []const u8) void {
     w.column(ui, .{ .id = "response-content-notice", .width = w.fill, .pad_x = 12, .pad_y = 6 });
-    w.text(ui, text, .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+    w.text(ui, text, .{ .width = w.fill, .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     w.end(ui);
 }
 
@@ -115,7 +115,7 @@ fn original(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response, id
             .input_limit => "Text exceeds the 8 MiB indexing limit.",
             else => "Text index could not be prepared.",
         };
-        w.text(ui, w.fmt("{s} Viewing {d} of {d} bytes.", .{ reason, length, source.len }), .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, w.fmt("{s} Viewing {d} of {d} bytes.", .{ reason, length, source.len }), .{ .width = w.fill, .size = c.KEST_TEXT_CAPTION, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         w.end(ui);
         text_view.pendingView(ui, app, t, id, state, source, lang);
         return;
@@ -128,7 +128,7 @@ fn empty(ui: *c.cui_ctx, running: bool) void {
     w.column(ui, .{ .width = w.fill, .gap = 10, .@"align" = c.CUI_ALIGN_CENTER, .pad_x = 20 });
     if (running) {
         c.cui_spinner(ui, 14);
-        w.text(ui, "Sending request...", .{ .size = 13, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, "Sending request...", .{ .size = c.KEST_TEXT_BODY, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     }
     w.end(ui);
     c.cui_spacer(ui);
@@ -164,8 +164,8 @@ fn tree(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) void {
         }
         const key = tr.key(index);
         const val = tr.value(index);
-        if (key.len > 0) w.text(ui, w.fmt("{s}:", .{short(key)}), .{ .font = c.CUI_FONT_MONO, .size = 12, .nowrap = true, .color = @import("design.zig").syntax(ui, .key) });
-        w.text(ui, short(val), .{ .font = c.CUI_FONT_MONO, .size = 12, .nowrap = true, .width = w.fill, .color = if (n.kind == .string) @import("design.zig").syntax(ui, .string) else if (n.kind == .number) @import("design.zig").syntax(ui, .number) else w.color(c.CUI_TOKEN_FOREGROUND) });
+        if (key.len > 0) w.text(ui, w.fmt("{s}:", .{short(key)}), .{ .font = c.CUI_FONT_MONO, .size = c.KEST_TEXT_SECONDARY, .nowrap = true, .color = @import("design.zig").syntax(ui, .key) });
+        w.text(ui, short(val), .{ .font = c.CUI_FONT_MONO, .size = c.KEST_TEXT_SECONDARY, .nowrap = true, .width = w.fill, .color = if (n.kind == .string) @import("design.zig").syntax(ui, .string) else if (n.kind == .number) @import("design.zig").syntax(ui, .number) else w.color(c.CUI_TOKEN_FOREGROUND) });
         if (c.cui_context_menu_begin(ui, "json-menu")) {
             if (w.menuItem(ui, "Copy value")) w.copy(ui, tr.sourceOf(index));
             if (w.menuItem(ui, "Copy key")) w.copy(ui, key);
@@ -188,7 +188,7 @@ fn preview(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) voi
         // virtualized text path rather than parsing megabytes on every frame.
         if (resp.preview.items.len <= 256 * 1024) {
             c.cui_scroll_begin(ui, &.{ .id = "markdown-preview", .height = w.fill, .width = w.fill, .pad = 16 });
-            const result = c.cui_markdown_ex(ui, "response-markdown", resp.preview.items.ptr, &.{ .length = @intCast(resp.preview.items.len), .size = 13 });
+            const result = c.cui_markdown_ex(ui, "response-markdown", resp.preview.items.ptr, &.{ .length = @intCast(resp.preview.items.len), .size = c.KEST_TEXT_BODY });
             if (result.link) |link| {
                 const url = std.mem.span(link);
                 if (std.ascii.startsWithIgnoreCase(url, "https://") or std.ascii.startsWithIgnoreCase(url, "http://")) {

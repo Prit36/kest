@@ -129,6 +129,8 @@ struct cui_font_data {
 
 #define CUI_ATLAS_MIN 1024
 #define CUI_ATLAS_MAX 4096
+/* RGBA: per-subpixel ClearType coverage (see text_win32.h). */
+#define CUI__ATLAS_BPP 4
 
 static cui_font_data *cui__fd(cui_ctx *ui, cui_font f) {
     if (f < 0 || f >= ui->font_count) return NULL;
@@ -240,11 +242,41 @@ void cui_font_add_fallback(cui_ctx *ui, cui_font font, cui_font fallback) {
     fd->fallbacks[fd->fallback_count++] = fb;
 }
 
+/* Kest: use the Windows UI fonts (Segoe UI, Segoe UI Semibold, Cascadia
+ * Mono or Consolas) when present, as native Windows apps and browsers do.
+ * The bundled fonts stay as fallbacks for characters these lack.
+ * KEST_FONT=bundled keeps CUI's Inter/Geist. */
+static cui_font cui__windows_font(cui_ctx *ui, const char *file) {
+    const char *windir = getenv("WINDIR");
+    if (!windir) windir = "C:/Windows";
+    char path[512];
+    snprintf(path, sizeof path, "%s/Fonts/%s", windir, file);
+    return cui_font_load_file(ui, path);
+}
+static void cui__system_fonts(cui_ctx *ui) {
+    const char *choice = getenv("KEST_FONT");
+    if (choice && !strcmp(choice, "bundled")) return;
+    cui_font body = cui__windows_font(ui, "segoeui.ttf");
+    if (body < 0) return;
+    cui_font strong = cui__windows_font(ui, "seguisb.ttf");
+    if (strong < 0) strong = body;
+    cui_font mono = cui__windows_font(ui, "CascadiaMono.ttf");
+    if (mono < 0) mono = cui__windows_font(ui, "consola.ttf");
+    const cui_font roles[4] = { body, strong, strong, mono };
+    for (int role = 0; role < 4; role++) {
+        if (roles[role] < 0) continue;
+        int bundled = ui->roles[role];
+        cui_font_set_role(ui, role, roles[role]);
+        cui_font_data *fd = cui__fd(ui, cui__resolve_font(ui, roles[role]));
+        if (bundled >= 0 && fd && fd->fallback_count == 0) cui_font_add_fallback(ui, roles[role], CUI__USER_FONT_BASE + bundled);
+    }
+}
+
 void cui__fonts_init(cui_ctx *ui, bool defaults) {
     for (int i = 0; i < 4096; i++) ui->glyph_buckets[i] = -1;
     ui->atlas_w = ui->atlas_h = CUI_ATLAS_MIN;
-    ui->atlas = cui__alloc(ui, (size_t)ui->atlas_w * (size_t)ui->atlas_h);
-    memset(ui->atlas, 0, (size_t)ui->atlas_w * (size_t)ui->atlas_h);
+    ui->atlas = cui__alloc(ui, (size_t)ui->atlas_w * (size_t)ui->atlas_h * CUI__ATLAS_BPP);
+    memset(ui->atlas, 0, (size_t)ui->atlas_w * (size_t)ui->atlas_h * CUI__ATLAS_BPP);
     ui->pack_x = 1; ui->pack_y = 1; ui->pack_row_h = 0;
     for (int i = 0; i < 5; i++) ui->roles[i] = -1;
 #ifndef CUI_NO_DEFAULT_FONTS
@@ -269,6 +301,7 @@ void cui__fonts_init(cui_ctx *ui, bool defaults) {
         /* Geist and Geist Mono fall back to Inter for characters they lack */
         cui_font_add_fallback(ui, CUI_FONT_DISPLAY, CUI_FONT_MEDIUM);
         cui_font_add_fallback(ui, CUI_FONT_MONO, CUI_FONT_BODY);
+        cui__system_fonts(ui);
     }
 #else
     (void)defaults;
@@ -696,9 +729,10 @@ static bool cui__gamma_ready;
 
 static void cui__atlas_grow(cui_ctx *ui) {
     int nw = ui->atlas_w * 2, nh = ui->atlas_h * 2;
-    uint8_t *na = cui__alloc(ui, (size_t)nw * (size_t)nh);
-    memset(na, 0, (size_t)nw * (size_t)nh);
-    for (int y = 0; y < ui->atlas_h; y++) memcpy(na + (size_t)y * (size_t)nw, ui->atlas + (size_t)y * (size_t)ui->atlas_w, (size_t)ui->atlas_w);
+    size_t bpp = CUI__ATLAS_BPP;
+    uint8_t *na = cui__alloc(ui, (size_t)nw * (size_t)nh * bpp);
+    memset(na, 0, (size_t)nw * (size_t)nh * bpp);
+    for (int y = 0; y < ui->atlas_h; y++) memcpy(na + (size_t)y * (size_t)nw * bpp, ui->atlas + (size_t)y * (size_t)ui->atlas_w * bpp, (size_t)ui->atlas_w * bpp);
     cui__free(ui, ui->atlas);
     ui->atlas = na;
     /* glyph uvs are computed from atlas size at draw time, so cached glyphs stay valid */
@@ -749,17 +783,27 @@ static cui_glyph *cui__glyph_get(cui_ctx *ui, cui_font font, int gi, float px_si
     int ax = 0, ay = 0;
     if (w > 0 && hgt > 0) {
         if (!cui__atlas_pack(ui, w, hgt, &ax, &ay)) { free(native_pixels); ui->atlas_reset_pending = true; return NULL; }
-        uint8_t *dst = ui->atlas + (size_t)ay * (size_t)ui->atlas_w + (size_t)ax;
+        size_t pitch = (size_t)ui->atlas_w * CUI__ATLAS_BPP;
+        uint8_t *dst = ui->atlas + (size_t)ay * pitch + (size_t)ax * CUI__ATLAS_BPP;
         if (native) {
             for (int y = 0; y < hgt; y++)
-                memcpy(dst + (size_t)y * (size_t)ui->atlas_w, native_pixels + (size_t)y * (size_t)w, (size_t)w);
+                memcpy(dst + (size_t)y * pitch, native_pixels + (size_t)y * (size_t)w * 4, (size_t)w * 4);
         } else {
-            stbtt_MakeGlyphBitmapSubpixel(&fd->info, dst, w, hgt, ui->atlas_w, scale, scale, shift, 0, gi);
-            if (!fd->is_icon) {
+            /* stb coverage is grayscale: the same value in every channel */
+            uint8_t *gray = malloc((size_t)w * (size_t)hgt);
+            if (gray) {
+                memset(gray, 0, (size_t)w * (size_t)hgt);
+                stbtt_MakeGlyphBitmapSubpixel(&fd->info, gray, w, hgt, w, scale, scale, shift, 0, gi);
+                bool legacy = !kest_text_params_get()->corrected;
                 for (int y = 0; y < hgt; y++) {
-                    uint8_t *row = dst + (size_t)y * (size_t)ui->atlas_w;
-                    for (int x = 0; x < w; x++) row[x] = cui__gamma_lut[row[x]];
+                    uint8_t *row = dst + (size_t)y * pitch;
+                    for (int x = 0; x < w; x++) {
+                        uint8_t v = gray[(size_t)y * (size_t)w + (size_t)x];
+                        if (!fd->is_icon && legacy) v = cui__gamma_lut[v];
+                        row[x*4] = row[x*4+1] = row[x*4+2] = row[x*4+3] = v;
+                    }
                 }
+                free(gray);
             }
         }
         if (!ui->atlas_dirty) { ui->dirty_x0 = ax; ui->dirty_y0 = ay; ui->dirty_x1 = ax + w; ui->dirty_y1 = ay + hgt; }
@@ -785,7 +829,7 @@ void cui__fonts_begin_frame(cui_ctx *ui) {
     ui->atlas_reset_pending = false;
     ui->glyph_count = 0;
     for (int i = 0; i < 4096; i++) ui->glyph_buckets[i] = -1;
-    memset(ui->atlas, 0, (size_t)ui->atlas_w * (size_t)ui->atlas_h);
+    memset(ui->atlas, 0, (size_t)ui->atlas_w * (size_t)ui->atlas_h * CUI__ATLAS_BPP);
     ui->pack_x = 1; ui->pack_y = 1; ui->pack_row_h = 0;
     ui->atlas_dirty = true;
     ui->dirty_x0 = 0; ui->dirty_y0 = 0; ui->dirty_x1 = ui->atlas_w; ui->dirty_y1 = ui->atlas_h;
@@ -800,7 +844,7 @@ void cui__fonts_upload(cui_ctx *ui) {
         ui->atlas_tex = 0;
     }
     if (!ui->atlas_tex) {
-        ui->atlas_tex = r->texture_create(r->user, ui->atlas_w, ui->atlas_h, CUI_TEXTURE_R8, ui->atlas);
+        ui->atlas_tex = r->texture_create(r->user, ui->atlas_w, ui->atlas_h, CUI_TEXTURE_RGBA8, ui->atlas);
         ui->atlas_tex_w = ui->atlas_w; ui->atlas_tex_h = ui->atlas_h;
         ui->atlas_dirty = false;
         return;
@@ -809,7 +853,7 @@ void cui__fonts_upload(cui_ctx *ui) {
         int x0 = ui->dirty_x0, y0 = ui->dirty_y0;
         int w = ui->dirty_x1 - x0, h = ui->dirty_y1 - y0;
         if (w > 0 && h > 0)
-            r->texture_update(r->user, ui->atlas_tex, x0, y0, w, h, ui->atlas + (size_t)y0 * (size_t)ui->atlas_w + (size_t)x0, ui->atlas_w);
+            r->texture_update(r->user, ui->atlas_tex, x0, y0, w, h, ui->atlas + ((size_t)y0 * (size_t)ui->atlas_w + (size_t)x0) * CUI__ATLAS_BPP, ui->atlas_w * CUI__ATLAS_BPP);
     }
     ui->atlas_dirty = false;
 }

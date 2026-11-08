@@ -27,10 +27,12 @@ pub fn build(b: *std.Build) void {
         "src/cui_editor.c",       "src/cui_diff.c",             "src/cui_code.c",
         "src/cui_tools.c",        "src/cui_hex.c",              "src/cui_chrome.c",
         "src/cui_charts.c",       "src/cui_image.c",            "src/cui_font_data.c",
-        "src/cui_inflate.c",      "src/render/cui_render_sw.c", "src/render/cui_render_gl.c",
+        "src/cui_inflate.c",
         "src/platform/cui_app.c", "src/platform/cui_dialogs.c", "src/platform/cui_app_win32.c",
     }, .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_text.c"), .flags = c_flags });
+    cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_render_gl.c"), .flags = c_flags });
+    cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_render_sw.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/text_win32.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/host.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/a11y.c"), .flags = c_flags });

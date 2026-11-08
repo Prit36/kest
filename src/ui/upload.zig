@@ -60,21 +60,21 @@ fn pick(app: *App) !?[]u8 {
 pub fn details(ui: *c.cui_ctx, app: *App, configured: []const u8, vars: []const variables.Var) void {
     const path = resolve(w.arena.allocator(), configured, vars);
     if (path.problem) |problem| {
-        w.text(ui, problem, .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_WARNING) });
+        w.text(ui, problem, .{ .width = w.fill, .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_WARNING) });
         return;
     }
     w.row(ui, .{ .width = w.fill, .gap = 6, .min_height = 28 });
-    w.text(ui, prepare.basename(path.resolved), .{ .width = w.fill, .font = c.CUI_FONT_MEDIUM, .size = 13 });
+    w.text(ui, prepare.basename(path.resolved), .{ .width = w.fill, .font = c.CUI_FONT_MEDIUM, .size = c.KEST_TEXT_BODY });
     const refresh = w.action(ui, "refresh-file-info", "", c.CUI_ICON_ROTATE_CCW, false, 28, 28, 3);
     c.kest_tooltip(ui, "Refresh");
     w.end(ui);
     const result = info(app, path.resolved, refresh);
     if (result.status == .ready) {
         w.row(ui, .{ .id = "upload-size", .width = w.fill });
-        w.text(ui, w.bytes(result.size), .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, w.bytes(result.size), .{ .width = w.fill, .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         w.end(ui);
     }
-    if (result.status != .ready) w.text(ui, metadata.message(result.status), .{ .width = w.fill, .size = 12, .color = w.color(if (result.status == .checking) c.CUI_TOKEN_TEXT_SECONDARY else c.CUI_TOKEN_DANGER) });
+    if (result.status != .ready) w.text(ui, metadata.message(result.status), .{ .width = w.fill, .size = c.KEST_TEXT_SECONDARY, .color = w.color(if (result.status == .checking) c.CUI_TOKEN_TEXT_SECONDARY else c.CUI_TOKEN_DANGER) });
 }
 
 pub fn binary(ui: *c.cui_ctx, app: *App, t: *@import("../app/tab.zig").Tab) bool {

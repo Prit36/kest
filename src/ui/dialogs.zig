@@ -71,9 +71,9 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
                 }
             }
             if (p.environment) |e| w.text(ui, w.fmt("{s}: {d} variables", .{ e.name, e.vars.len }), .{});
-            if (p.name_taken) w.text(ui, "This name already exists. A separate imported copy will be created.", .{ .size = 12, .color = w.color(c.CUI_TOKEN_WARNING) });
+            if (p.name_taken) w.text(ui, "This name already exists. A separate imported copy will be created.", .{ .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_WARNING) });
             c.cui_scroll_begin(ui, &.{ .id = "import-warnings", .height = w.px(@min(150, @as(f32, @floatFromInt(p.warnings.len * 36)))), .gap = 4 });
-            for (p.warnings) |warning| w.text(ui, warning, .{ .size = 12, .color = w.color(c.CUI_TOKEN_WARNING) });
+            for (p.warnings) |warning| w.text(ui, warning, .{ .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_WARNING) });
             c.cui_scroll_end(ui);
         },
         .save_as => {
@@ -85,7 +85,7 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
             w.row(ui, .{ .width = w.fill, .gap = 8 });
             c.cui_icon(ui, c.CUI_ICON_DATABASE, 15, w.color(if (app.active_env == e) c.CUI_TOKEN_ACCENT else c.CUI_TOKEN_TEXT_MUTED));
             w.text(ui, e.name, .{ .font = c.CUI_FONT_MEDIUM, .width = w.fill, .nowrap = true });
-            if (app.active_env == e) w.text(ui, "Active", .{ .size = 12, .font = c.CUI_FONT_MEDIUM, .color = w.color(c.CUI_TOKEN_SUCCESS), .nowrap = true }) else if (w.button(ui, "Use this environment", .{ .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_SECONDARY })) commands.setActiveEnv(app, e);
+            if (app.active_env == e) w.text(ui, "Active", .{ .size = c.KEST_TEXT_SECONDARY, .font = c.CUI_FONT_MEDIUM, .color = w.color(c.CUI_TOKEN_SUCCESS), .nowrap = true }) else if (w.button(ui, "Use this environment", .{ .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_SECONDARY })) commands.setActiveEnv(app, e);
             w.end(ui);
             // Fit the table to its header, rows and insertion row,
             // bounded by the window, rather than reserving a fixed empty block.

@@ -37,7 +37,7 @@ fn cell(ui: *c.cui_ctx, id: [*:0]const u8, source: []const u8, weight: f32) bool
 }
 fn heading(ui: *c.cui_ctx, id: [*:0]const u8, label: []const u8, weight: f32) void {
     w.column(ui, .{ .id = id, .width = weighted(weight), .pad_x = 10 });
-    w.text(ui, label, .{ .width = w.fill, .size = 11, .font = c.CUI_FONT_MEDIUM, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
+    w.text(ui, label, .{ .width = w.fill, .size = c.KEST_TEXT_CAPTION, .font = c.CUI_FONT_MEDIUM, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
     w.end(ui);
 }
 
@@ -46,7 +46,7 @@ pub fn view(ui: *c.cui_ctx, t: *Tab, resp: *Response) void {
     w.column(ui, .{ .id = "received-headers", .width = w.fill, .height = w.fill, .pad_x = w.design.space.group, .pad_top = w.design.space.tight, .pad_bottom = w.design.space.normal });
     defer w.end(ui);
     if (resp.headers.items.len == 0) {
-        w.text(ui, "No headers", .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, "No headers", .{ .width = w.fill, .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         return;
     }
     _ = c.kest_response_header_navigation(ui, @intCast(resp.headers.items.len));
@@ -104,7 +104,7 @@ fn inspector(ui: *c.cui_ctx, t: *Tab, resp: *const Response) void {
     const header = resp.headers.items[index];
     const name = preview(header.name[@min(t.response.header_name_offset, header.name.len)..], inspector_limit);
     const value = preview(header.value[@min(t.response.header_value_offset, header.value.len)..], inspector_limit);
-    w.text(ui, "Response header", .{ .font = c.CUI_FONT_MEDIUM, .size = 13 });
+    w.text(ui, "Response header", .{ .font = c.CUI_FONT_MEDIUM, .size = c.KEST_TEXT_BODY });
     c.kest_document_list_begin(ui, "response-header-inspection-content", @min(300, c.cui_viewport_size(ui).y - 168));
     fieldHeading(ui, "Name", "header-name", header.name, name, &t.response.header_name_offset);
     const name_buffer = w.z(name.text);
@@ -124,11 +124,11 @@ fn inspector(ui: *c.cui_ctx, t: *Tab, resp: *const Response) void {
 
 fn fieldHeading(ui: *c.cui_ctx, label: []const u8, key: []const u8, source: []const u8, shown: text.Display, offset: *usize) void {
     if (source.len <= inspector_limit or shown.source_bytes == 0) {
-        w.text(ui, label, .{ .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, label, .{ .size = c.KEST_TEXT_CAPTION, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
         return;
     }
     w.row(ui, .{ .width = w.fill, .height = w.px(28), .gap = 4, .@"align" = c.CUI_ALIGN_CENTER });
-    w.text(ui, w.fmt("{s} ({d}-{d} of {d} bytes)", .{ label, offset.* + 1, offset.* + shown.source_bytes, source.len }), .{ .width = w.fill, .size = 11, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
+    w.text(ui, w.fmt("{s} ({d}-{d} of {d} bytes)", .{ label, offset.* + 1, offset.* + shown.source_bytes, source.len }), .{ .width = w.fill, .size = c.KEST_TEXT_CAPTION, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
     if (w.button(ui, w.fmt("###{s}-previous", .{key}), .{ .icon = c.CUI_ICON_CHEVRON_LEFT, .disabled = offset.* == 0, .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_GHOST, .tooltip = "Previous field bytes" })) {
         offset.* -|= inspector_limit;
         var moved: usize = 0;

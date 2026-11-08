@@ -40,7 +40,7 @@ pub fn text(ui: *c.cui_ctx, value: []const u8, opts: c.cui_text_opts) void {
     c.cui_text_ex(ui, z(value), &opts);
 }
 pub fn muted(ui: *c.cui_ctx, value: []const u8) void {
-    text(ui, value, .{ .size = 12, .color = color(c.CUI_TOKEN_TEXT_MUTED), .nowrap = true });
+    text(ui, value, .{ .size = c.KEST_TEXT_SECONDARY, .color = color(c.CUI_TOKEN_TEXT_MUTED), .nowrap = true });
 }
 pub fn field(ui: *c.cui_ctx, id: [*:0]const u8, buffer: *model.TextBuffer, opts_in: c.cui_input_opts) bool {
     if (!buffer.reserve(@max(4096, buffer.len + 4096))) return false;
@@ -114,7 +114,7 @@ pub fn menuItem(ui: *c.cui_ctx, label: []const u8) bool {
 pub fn empty(ui: *c.cui_ctx, title: [*:0]const u8) void {
     c.cui_spacer(ui);
     column(ui, .{ .width = fill, .pad_x = 20, .@"align" = c.CUI_ALIGN_CENTER });
-    text(ui, std.mem.span(title), .{ .width = fill, .size = 13, .color = color(c.CUI_TOKEN_TEXT_MUTED), .@"align" = c.CUI_TEXT_CENTER });
+    text(ui, std.mem.span(title), .{ .width = fill, .size = c.KEST_TEXT_BODY, .color = color(c.CUI_TOKEN_TEXT_MUTED), .@"align" = c.CUI_TEXT_CENTER });
     end(ui);
     c.cui_spacer(ui);
 }

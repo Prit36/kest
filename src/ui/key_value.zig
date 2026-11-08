@@ -57,7 +57,7 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
     if (files) {
         slot(ui, c.KEST_TABLE_PICKER);
         w.end(ui);
-        w.text(ui, "Type", .{ .width = w.px(c.KEST_TABLE_TYPE), .size = 11, .@"align" = c.CUI_TEXT_CENTER, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+        w.text(ui, "Type", .{ .width = w.px(c.KEST_TABLE_TYPE), .size = c.KEST_TEXT_CAPTION, .@"align" = c.CUI_TEXT_CENTER, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     }
     var add = false;
     var auto_headers = false;
@@ -122,7 +122,7 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
         } else {
             const problem = rowProblem(row, files, opts);
             if (c.kest_table_menu_begin(ui, "row-actions", true, if (problem.message) |message| w.z(message) else null, w.color(if (problem.danger) c.CUI_TOKEN_DANGER else if (problem.message != null) c.CUI_TOKEN_WARNING else c.CUI_TOKEN_TEXT_SECONDARY))) {
-                if (problem.message) |message| w.text(ui, message, .{ .width = w.fill, .size = 12, .color = w.color(if (problem.danger) c.CUI_TOKEN_DANGER else c.CUI_TOKEN_WARNING) });
+                if (problem.message) |message| w.text(ui, message, .{ .width = w.fill, .size = c.KEST_TEXT_SECONDARY, .color = w.color(if (problem.danger) c.CUI_TOKEN_DANGER else c.CUI_TOKEN_WARNING) });
                 if (w.menuItem(ui, "Inspect row")) {
                     values.inspected_uid = row.uid;
                     inspect_row = true;
@@ -204,16 +204,16 @@ fn inspect(ui: *c.cui_ctx, values: *tab.Table, files: bool, opts: Options) void 
         return;
     };
     if (!c.kest_table_details_begin(ui, "row-inspector")) return;
-    w.text(ui, if (opts.kind == .headers) "Configured request header" else "Row details", .{ .font = c.CUI_FONT_MEDIUM, .size = 13 });
+    w.text(ui, if (opts.kind == .headers) "Configured request header" else "Row details", .{ .font = c.CUI_FONT_MEDIUM, .size = c.KEST_TEXT_BODY });
     if (!row.enabled) w.muted(ui, "Disabled");
     if (opts.kind == .form) w.muted(ui, if (files and row.is_file) "File field" else "Text field");
     c.kest_document_list_begin(ui, "row-inspector-content", @min(220, c.cui_viewport_size(ui).y - 240));
-    w.text(ui, row.key.text(), .{ .font = c.CUI_FONT_MONO, .size = 12, .width = w.fill });
-    w.text(ui, row.value.text(), .{ .font = c.CUI_FONT_MONO, .size = 12, .width = w.fill });
+    w.text(ui, row.key.text(), .{ .font = c.CUI_FONT_MONO, .size = c.KEST_TEXT_SECONDARY, .width = w.fill });
+    w.text(ui, row.value.text(), .{ .font = c.CUI_FONT_MONO, .size = c.KEST_TEXT_SECONDARY, .width = w.fill });
     if (files and row.is_file and opts.app != null) upload.details(ui, opts.app.?, row.value.text(), opts.vars);
     c.cui_scroll_end(ui);
     const problem = rowProblem(row, files, opts);
-    if (problem.message) |message| w.text(ui, message, .{ .width = w.fill, .size = 12, .color = w.color(if (problem.danger) c.CUI_TOKEN_DANGER else c.CUI_TOKEN_WARNING) });
+    if (problem.message) |message| w.text(ui, message, .{ .width = w.fill, .size = c.KEST_TEXT_SECONDARY, .color = w.color(if (problem.danger) c.CUI_TOKEN_DANGER else c.CUI_TOKEN_WARNING) });
     if (w.menuItem(ui, "Copy name")) w.copy(ui, row.key.text());
     if (w.menuItem(ui, "Copy value")) w.copy(ui, row.value.text());
 }
@@ -221,7 +221,7 @@ fn inspect(ui: *c.cui_ctx, values: *tab.Table, files: bool, opts: Options) void 
 fn bulk(ui: *c.cui_ctx, values: *tab.Table, title: []const u8) bool {
     var changed = false;
     w.row(ui, .{ .height = w.px(c.KEST_TABLE_HEADER), .width = w.fill });
-    w.text(ui, if (values.bulk_problem.message.len > 0) w.fmt("{s}{s}", .{ values.bulk_problem.message, if (values.bulk_problem.line > 0) w.fmt(" (line {d})", .{values.bulk_problem.line}) else "" }) else title, .{ .size = 11, .color = w.color(if (values.bulk_problem.message.len > 0) c.CUI_TOKEN_DANGER else c.CUI_TOKEN_TEXT_MUTED), .width = w.fill, .nowrap = true });
+    w.text(ui, if (values.bulk_problem.message.len > 0) w.fmt("{s}{s}", .{ values.bulk_problem.message, if (values.bulk_problem.line > 0) w.fmt(" (line {d})", .{values.bulk_problem.line}) else "" }) else title, .{ .size = c.KEST_TEXT_CAPTION, .color = w.color(if (values.bulk_problem.message.len > 0) c.CUI_TOKEN_DANGER else c.CUI_TOKEN_TEXT_MUTED), .width = w.fill, .nowrap = true });
     if (w.action(ui, "apply-bulk", "Apply", null, false, 0, 26, 3)) {
         if (values.fromBulk(values.bulk.?.text())) |_| {
             values.bulk.?.deinit();
@@ -270,6 +270,6 @@ fn slot(ui: *c.cui_ctx, width: f32) void {
 }
 fn heading(ui: *c.cui_ctx, label: []const u8, weight: f32) void {
     w.column(ui, .{ .width = weighted(weight), .pad_left = 10 });
-    w.text(ui, label, .{ .size = 11, .font = c.CUI_FONT_MEDIUM, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+    w.text(ui, label, .{ .size = c.KEST_TEXT_CAPTION, .font = c.CUI_FONT_MEDIUM, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     w.end(ui);
 }

@@ -61,7 +61,7 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
             commands.bodyProblem(app, t);
             if (t.body_problem_text.len > 0) {
                 w.row(ui, .{ .id = "body-validation", .width = w.fill, .pad_x = 12, .pad_y = 4, .gap = 4 });
-                w.text(ui, t.body_problem_text, .{ .width = w.fill, .size = 12, .color = w.color(if (t.body_problem_pending) c.CUI_TOKEN_WARNING else c.CUI_TOKEN_DANGER) });
+                w.text(ui, t.body_problem_text, .{ .width = w.fill, .size = c.KEST_TEXT_SECONDARY, .color = w.color(if (t.body_problem_pending) c.CUI_TOKEN_WARNING else c.CUI_TOKEN_DANGER) });
                 if (t.body_problem_at) |at| if (w.action(ui, "body-problem-location", "Go to", null, false, 64, 24, 3)) {
                     t.body.moveTo(at, false);
                     c.kest_focus(ui, "body-editor");

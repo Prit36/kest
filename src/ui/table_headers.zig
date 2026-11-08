@@ -17,13 +17,13 @@ pub fn configured(t: *const Tab, name: []const u8, vars: []const variables.Var) 
 
 fn field(ui: *c.cui_ctx, name: []const u8, value: []const u8) void {
     w.column(ui, .{ .width = w.fill, .gap = 2, .pad_bottom = 8 });
-    w.text(ui, name, .{ .size = 12, .font = c.CUI_FONT_MEDIUM });
-    w.text(ui, value, .{ .width = w.fill, .size = 12, .font = c.CUI_FONT_MONO, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+    w.text(ui, name, .{ .size = c.KEST_TEXT_SECONDARY, .font = c.CUI_FONT_MEDIUM });
+    w.text(ui, value, .{ .width = w.fill, .size = c.KEST_TEXT_SECONDARY, .font = c.CUI_FONT_MONO, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     w.end(ui);
 }
 
 pub fn view(ui: *c.cui_ctx, t: *const Tab, vars: []const variables.Var) void {
-    w.text(ui, "Automatic request headers", .{ .size = 13, .font = c.CUI_FONT_MEDIUM });
+    w.text(ui, "Automatic request headers", .{ .size = c.KEST_TEXT_BODY, .font = c.CUI_FONT_MEDIUM });
     c.kest_document_list_begin(ui, "automatic-header-content", @min(240, c.cui_viewport_size(ui).y - 160));
     if (!configured(t, "Host", vars)) {
         const resolved = variables.resolve(w.arena.allocator(), t.url.text(), vars) catch "";
