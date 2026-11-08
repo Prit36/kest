@@ -204,6 +204,72 @@ pub fn run(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime chord: a
     try check(@src(), t.body.scroll_y == 0);
     try glide();
     try zoom(ui, app, t, frame, chord);
+    try findReplace(ui, app, t, frame, chord);
+}
+
+/// Ctrl+H opens Find with Replace; the options, Replace, Replace all and
+/// group references act on the body, each one undoable edit.
+fn findReplace(ui: *c.cui_ctx, app: *App, t: *tab.Tab, comptime frame: anytype, comptime chord: anytype) !void {
+    t.body.setText("id=1 id=22 idx=3 ID=4");
+    focus(ui, t, "body-editor");
+    frame(ui, app);
+    chord(ui, app, c.CUI_KEY_H, c.CUI_MOD_PRIMARY);
+    try check(@src(), t.body.search_open and t.body.replace_open);
+    try check(@src(), rect(ui, t, "replace").w > 0 and rect(ui, t, "find-regex").w > 0);
+    t.body.query.set("id");
+    frame(ui, app);
+    try check(@src(), t.body.matches.items.len == 4);
+    t.body.search_word = true;
+    frame(ui, app);
+    try check(@src(), t.body.matches.items.len == 3);
+    t.body.search_case = true;
+    frame(ui, app);
+    try check(@src(), t.body.matches.items.len == 2);
+    // Replace one: the selection is a match, so it goes, and the next is picked.
+    t.body.replacement.set("key");
+    t.body.gotoMatch(0);
+    frame(ui, app);
+    focus(ui, t, "replace");
+    frame(ui, app);
+    chord(ui, app, c.CUI_KEY_ENTER, 0);
+    try equal(@src(), "key=1 id=22 idx=3 ID=4", t.body.text());
+    try equal(@src(), "id", t.body.selected(t.body.text()));
+    try check(@src(), t.body.anchor == 6);
+    // Replace all with regex groups, one undo step.
+    t.body.setText("id=1 id=22 idx=3 ID=4");
+    t.body.search_case = false;
+    t.body.search_word = false;
+    t.body.search_regex = true;
+    t.body.query.set("(\\w+)=(\\d+)");
+    t.body.replacement.set("$2:$1");
+    frame(ui, app);
+    try check(@src(), t.body.matches.items.len == 4);
+    chord(ui, app, c.CUI_KEY_ENTER, c.CUI_MOD_PRIMARY | c.CUI_MOD_ALT);
+    try equal(@src(), "1:id 22:id 3:idx 4:ID", t.body.text());
+    try check(@src(), t.body.undoEdit());
+    try equal(@src(), "id=1 id=22 idx=3 ID=4", t.body.text());
+    // A malformed pattern says where, and finds nothing.
+    t.body.query.set("(\\w+");
+    frame(ui, app);
+    try check(@src(), t.body.matches.items.len == 0 and t.body.search_problem.len > 0);
+    // Escape closes Find and returns to the text.
+    focus(ui, t, "find");
+    frame(ui, app);
+    chord(ui, app, c.CUI_KEY_ESCAPE, 0);
+    try check(@src(), !t.body.search_open);
+    c.cui_push_id_int(ui, @intCast(t.uid));
+    const editor_id = c.cui_make_id(ui, "body-editor");
+    c.cui_pop_id(ui);
+    try check(@src(), c.kest_editor_focus(ui, editor_id) != 0);
+    t.body.search_regex = false;
+    t.body.replace_open = false;
+    // Ctrl+F with a word selected looks for that word.
+    t.body.anchor = 5;
+    t.body.caret = 7;
+    frame(ui, app);
+    chord(ui, app, c.CUI_KEY_F, c.CUI_MOD_PRIMARY);
+    try equal(@src(), "id", t.body.query.text());
+    t.body.search_open = false;
 }
 
 /// Ctrl+= and Ctrl+- step the code font, Ctrl+wheel over a view too, and

@@ -104,7 +104,10 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
     const char_w = cellWidth(ui);
     var source = source_in;
     const v0 = s.version;
-    if (s.search_open) search(ui, s, source);
+    if (s.search_open) {
+        search(ui, id, s, source, read_only);
+        if (!read_only) source = s.text();
+    }
     const identity = c.cui_make_id(ui, id);
     const previous = c.cui_get_rect(ui, identity);
     const gutter0 = gutterWidth(ui, if (s.index.count() > 0) s.index.lineNumber(s.index.count() - 1) else 1);
@@ -282,15 +285,71 @@ fn keys(ui: *c.cui_ctx, s: *State, source_in: []const u8, read_only: bool, char_
     }
 }
 
-pub fn search(ui: *c.cui_ctx, s: *State, source: []const u8) void {
-    w.row(ui, .{ .gap = 6, .pad_x = 8, .pad_y = 6, .width = w.fill });
+fn toggle(ui: *c.cui_ctx, key: [*:0]const u8, label: []const u8, on: *bool, hint: [*:0]const u8) void {
+    if (w.action(ui, key, label, null, on.*, 28, 28, 0)) on.* = !on.*;
+    c.kest_tooltip(ui, hint);
+}
+
+/// Find, and in an editor Replace: match case, whole words and regular
+/// expressions. Enter finds the next match and Shift+Enter the one before;
+/// in the Replace field Enter replaces one and Ctrl+Alt+Enter all.
+pub fn search(ui: *c.cui_ctx, canvas: [*:0]const u8, s: *State, source: []const u8, read_only: bool) void {
+    const find_focus = c.kest_editor_focus(ui, c.cui_make_id(ui, "find")) != 0;
+    const replace_focus = c.kest_editor_focus(ui, c.cui_make_id(ui, "replace")) != 0;
+    const mods = c.cui_key_mods(ui);
+    w.column(ui, .{ .id = "editor-search", .gap = 4, .pad_x = 8, .pad_y = 6, .width = w.fill });
     defer w.end(ui);
-    if (w.field(ui, "find", &s.query, .{ .placeholder = "Find in document", .width = w.fill, .size = c.CUI_SIZE_SM })) s.research(source);
+    w.row(ui, .{ .gap = 4, .width = w.fill, .@"align" = c.CUI_ALIGN_CENTER });
+    if (!read_only and w.icon(ui, if (s.replace_open) c.CUI_ICON_CHEVRON_DOWN else c.CUI_ICON_CHEVRON_RIGHT, "Toggle Replace (Ctrl+H)")) s.replace_open = !s.replace_open;
+    _ = w.field(ui, "find", &s.query, .{ .placeholder = if (s.search_regex) "Find (regular expression)" else "Find in document", .width = w.fill, .size = c.CUI_SIZE_SM });
+    toggle(ui, "find-case", "Aa", &s.search_case, "Match case");
+    toggle(ui, "find-word", "W", &s.search_word, "Whole word");
+    toggle(ui, "find-regex", ".*", &s.search_regex, "Regular expression");
     s.refreshSearch(source);
-    w.muted(ui, w.fmt("{d}{s}", .{ s.matches.items.len, if (s.matches_truncated) "+" else "" }));
-    if (w.icon(ui, c.CUI_ICON_CHEVRON_UP, "Previous match")) s.gotoMatch(-1);
-    if (w.icon(ui, c.CUI_ICON_CHEVRON_DOWN, "Next match")) s.gotoMatch(1);
-    if (w.icon(ui, c.CUI_ICON_X, "Close search")) s.search_open = false;
+    const n = s.matches.items.len;
+    const caption = if (s.search_problem.len > 0) "Invalid" else if (s.query.text().len == 0) "" else if (n == 0) "No matches" else w.fmt("{d} of {d}{s}", .{ @min(s.match_at + 1, n), n, if (s.matches_truncated) "+" else "" });
+    w.text(ui, caption, .{ .width = w.px(84), .size = c.KEST_TEXT_CAPTION, .nowrap = true, .color = w.color(if (s.search_problem.len > 0) c.CUI_TOKEN_DANGER else c.CUI_TOKEN_TEXT_SECONDARY) });
+    c.cui_push_disabled(ui, n == 0);
+    if (w.icon(ui, c.CUI_ICON_CHEVRON_UP, "Previous match (Shift+Enter)")) s.gotoMatch(-1);
+    if (w.icon(ui, c.CUI_ICON_CHEVRON_DOWN, "Next match (Enter)")) s.gotoMatch(1);
+    c.cui_pop_disabled(ui);
+    var close = w.icon(ui, c.CUI_ICON_X, "Close (Escape)");
+    w.end(ui);
+    if (s.search_problem.len > 0) w.text(ui, w.fmt("{s} at character {d}", .{ s.search_problem, s.search_problem_at + 1 }), .{ .width = w.fill, .size = c.KEST_TEXT_CAPTION, .color = w.color(c.CUI_TOKEN_DANGER) });
+    if (s.replace_open and !read_only) {
+        w.row(ui, .{ .gap = 4, .width = w.fill, .@"align" = c.CUI_ALIGN_CENTER });
+        w.row(ui, .{ .width = w.px(28), .height = w.px(1) });
+        w.end(ui);
+        _ = w.field(ui, "replace", &s.replacement, .{ .placeholder = if (s.search_regex) "Replace ($1 for a group)" else "Replace", .width = w.fill, .size = c.CUI_SIZE_SM });
+        c.cui_push_disabled(ui, n == 0);
+        if (w.button(ui, "Replace", .{ .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_SECONDARY })) _ = s.replaceOne();
+        if (w.button(ui, "Replace all", .{ .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_SECONDARY })) _ = s.replaceAllMatches();
+        c.cui_pop_disabled(ui);
+        w.end(ui);
+    }
+    const enter = c.cui_key_pressed(ui, c.CUI_KEY_ENTER);
+    if (find_focus and enter and mods & c.CUI_MOD_PRIMARY == 0) s.gotoMatch(if (mods & c.CUI_MOD_SHIFT != 0) -1 else 1);
+    if (replace_focus and enter and !read_only) {
+        if (mods & c.CUI_MOD_PRIMARY != 0 and mods & c.CUI_MOD_ALT != 0) _ = s.replaceAllMatches() else if (mods == 0) _ = s.replaceOne();
+    }
+    if ((find_focus or replace_focus) and c.cui_key_pressed(ui, c.CUI_KEY_ESCAPE)) {
+        c.kest_consume_key(ui, c.CUI_KEY_ESCAPE);
+        close = true;
+    }
+    if (close) {
+        s.search_open = false;
+        c.kest_focus(ui, canvas);
+    }
+}
+
+/// Opens Find (and Replace) on an editor. A short one-line selection
+/// becomes the query.
+pub fn openSearch(s: *State, replace: bool) void {
+    s.search_open = true;
+    if (replace) s.replace_open = true;
+    const picked = s.selected(s.text());
+    if (picked.len > 0 and picked.len <= 256 and std.mem.indexOfScalar(u8, picked, '\n') == null) s.query.set(picked);
+    s.query.focus();
 }
 
 fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) void {
@@ -340,6 +399,15 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
                 c.cui_draw_rect(ui, .{ .x = x + mark_x, .y = y, .w = char_w, .h = font.line() }, .{}, w.color(c.CUI_TOKEN_ACCENT_SUBTLE));
             }
         };
+        if (s.search_open and s.matches.items.len > 0) {
+            var m = @import("../utils/search.zig").firstAfter(s.matches.items, bounds[0]);
+            while (m < s.matches.items.len and s.matches.items[m].start < bounds[1]) : (m += 1) {
+                const item = s.matches.items[m];
+                const hit_x = advance(ui, entire_row[0 .. @max(item.start, bounds[0]) - bounds[0]], char_w);
+                const hit_end = advance(ui, entire_row[0 .. @min(item.end, bounds[1]) - bounds[0]], char_w);
+                c.cui_draw_rect(ui, .{ .x = x + hit_x, .y = y, .w = @max(2, hit_end - hit_x), .h = font.line() }, .{}, w.tinted(ui, c.CUI_TOKEN_WARNING, if (m == s.match_at) 0.4 else 0.18));
+            }
+        }
         if (sel[1] > bounds[0] and sel[0] < bounds[1]) {
             const lo = @max(sel[0], bounds[0]) - bounds[0];
             const hi = @min(sel[1], bounds[1]) - bounds[0];

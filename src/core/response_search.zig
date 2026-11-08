@@ -9,7 +9,20 @@ pub const page_size = 10_000;
 pub const checkpoint_bytes = 256;
 pub const max_input = 16 * 1024 * 1024;
 pub const Error = error{ OutOfMemory, QueryLimit, InputLimit, Canceled };
-pub const Options = struct { case_sensitive: bool = false };
+pub const Options = struct {
+    case_sensitive: bool = false,
+    whole_word: bool = false,
+    regex: bool = false,
+
+    /// Whole words and regular expressions keep a list of every match
+    /// instead of the literal automaton's checkpoints.
+    fn listed(o: Options) bool {
+        return o.whole_word or o.regex;
+    }
+};
+/// A listed search keeps at most this many matches.
+pub const max_listed = 1_000_000;
+const search = @import("../utils/search.zig");
 pub const Seek = union(enum) { near: usize, ordinal: u32 };
 
 pub const Index = struct {
@@ -19,11 +32,16 @@ pub const Index = struct {
     options: Options,
     total: u32 = 0,
     source_len: usize,
+    /// Every match, in a whole-word or regex search.
+    all: std.ArrayList(Match) = .empty,
+    /// The list stopped at max_listed.
+    capped: bool = false,
 
     pub fn deinit(index: *Index, a: Allocator) void {
         a.free(index.query);
         a.free(index.prefix);
         index.states.deinit(a);
+        index.all.deinit(a);
     }
     fn fold(index: *const Index, byte: u8) u8 {
         return if (index.options.case_sensitive) byte else std.ascii.toLower(byte);
@@ -43,6 +61,15 @@ pub const Index = struct {
     pub fn visible(index: *const Index, source: []const u8, start_in: usize, end_in: usize, out: []Match, count: *usize) bool {
         count.* = 0;
         if (source.len != index.source_len or index.query.len == 0 or index.total == 0 or start_in >= end_in or start_in >= source.len) return false;
+        if (index.options.listed()) {
+            var at = search.firstAfter(index.all.items, start_in);
+            while (at < index.all.items.len and index.all.items[at].start < end_in) : (at += 1) {
+                if (count.* == out.len) return true;
+                out[count.*] = index.all.items[at];
+                count.* += 1;
+            }
+            return false;
+        }
         const start = start_in;
         const end = @min(end_in, source.len);
         const cp = start / checkpoint_bytes;
@@ -96,6 +123,7 @@ pub fn build(a: Allocator, source: []const u8, query: []const u8, options: Optio
 
 fn finish(a: Allocator, source: []const u8, result: *Result, seek: Seek, cancel: ?*const std.atomic.Value(bool)) Error!Result {
     const index = &result.index;
+    if (index.options.listed()) return finishListed(a, source, result, seek, cancel);
     if (!index.options.case_sensitive) for (index.query) |*byte| {
         byte.* = std.ascii.toLower(byte.*);
     };
@@ -153,6 +181,65 @@ fn finish(a: Allocator, source: []const u8, result: *Result, seek: Seek, cancel:
     }
     result.selected = selected.?;
     return result.*;
+}
+
+/// A whole-word or regex search: every match listed once, then the page
+/// around the one to select.
+fn finishListed(a: Allocator, source: []const u8, result: *Result, seek: Seek, cancel: ?*const std.atomic.Value(bool)) Error!Result {
+    const index = &result.index;
+    if (index.query.len == 0) return result.*;
+    var problem: @import("../utils/regex.zig").Problem = .{};
+    var finder = search.Finder.init(a, index.query, .{ .case_sensitive = index.options.case_sensitive, .whole_word = index.options.whole_word, .regex = index.options.regex }, &problem) catch |err| return switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        else => error.QueryLimit,
+    };
+    defer finder.deinit();
+    finder.cancel = cancel;
+    var at: usize = 0;
+    while (finder.next(source, at) catch |err| return switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        error.Canceled => error.Canceled,
+        else => error.QueryLimit,
+    }) |m| {
+        if (index.all.items.len == max_listed) {
+            index.capped = true;
+            break;
+        }
+        try index.all.append(a, m);
+        at = m.end;
+    }
+    index.total = @intCast(index.all.items.len);
+    if (index.total == 0) return result.*;
+    const selected: u32 = switch (seek) {
+        .ordinal => |ordinal| @min(ordinal, index.total - 1),
+        .near => |near| blk: {
+            const i = search.firstAfter(index.all.items, near);
+            break :blk if (i < index.total) @intCast(i) else 0;
+        },
+    };
+    result.page_start = selected / page_size * page_size;
+    const page_end = @min(index.total, result.page_start + page_size);
+    try result.matches.appendSlice(a, index.all.items[result.page_start..page_end]);
+    result.selected = selected;
+    return result.*;
+}
+
+test "whole words and regular expressions list their matches" {
+    const t = std.testing;
+    const source = "cat concat cat_x Cat\nid: 12, id: 345";
+    var words = try build(t.allocator, source, "cat", .{ .whole_word = true }, .{ .near = 5 }, null);
+    defer words.deinit(t.allocator);
+    try t.expectEqual(@as(u32, 2), words.index.total);
+    try t.expectEqual(@as(u32, 1), words.selected);
+    try t.expectEqual(@as(u32, 17), words.matches.items[1].start);
+    var re = try build(t.allocator, source, "id: (\\d+)", .{ .regex = true }, .{ .near = 0 }, null);
+    defer re.deinit(t.allocator);
+    try t.expectEqual(@as(u32, 2), re.index.total);
+    var hits: [4]Match = undefined;
+    var count: usize = 0;
+    try t.expect(!re.index.visible(source, 30, source.len, &hits, &count));
+    try t.expect(count == 1 and hits[0].end == source.len);
+    try t.expectError(error.QueryLimit, build(t.allocator, source, "(", .{ .regex = true }, .{ .near = 0 }, null));
 }
 
 test "literal case, UTF-8, newline, overlap phase and near-caret wrap" {

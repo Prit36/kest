@@ -103,6 +103,18 @@ pub const State = struct {
     search_key: [@import("../core/response_search.zig").max_query]u8 = undefined,
     search_key_len: usize = 0,
     search_case: bool = false,
+    /// Whole words only, and the query as a regular expression.
+    search_word: bool = false,
+    search_regex: bool = false,
+    /// A malformed regular expression: what's wrong, and where.
+    search_problem: []const u8 = "",
+    search_problem_at: usize = 0,
+    searched_options: search.Options = .{},
+    /// The query the matches are for, by hash: it can change without an edit.
+    searched_query: u64 = 0,
+    /// The Replace row under Find, and what replaces each match.
+    replace_open: bool = false,
+    replacement: ui.TextBuffer = .{},
     search_key_case: bool = false,
     search_visible: bool = false,
     search_pending: bool = false,
@@ -124,6 +136,7 @@ pub const State = struct {
         }
         s.buffer.deinit();
         s.query.deinit();
+        s.replacement.deinit();
         s.index.deinit(s.gpa);
         s.continued_strings.deinit(s.gpa);
         s.matches.deinit(s.gpa);
@@ -505,18 +518,105 @@ pub const State = struct {
         }
     }
 
-    /// Finds `query` again if it or the text changed.
+    pub fn searchOptions(s: *const State) search.Options {
+        return .{ .case_sensitive = s.search_case, .whole_word = s.search_word, .regex = s.search_regex };
+    }
+
+    /// Finds `query` again if it, its options or the text changed.
     pub fn refreshSearch(s: *State, from: []const u8) void {
-        if (s.searched_version == s.version and s.searched_ptr == @intFromPtr(from.ptr) and s.searched_len == from.len) return;
+        if (s.searched_version == s.version and s.searched_ptr == @intFromPtr(from.ptr) and s.searched_len == from.len and std.meta.eql(s.searched_options, s.searchOptions()) and s.searched_query == std.hash.Wyhash.hash(0, s.query.text())) return;
         s.research(from);
     }
 
     pub fn research(s: *State, from: []const u8) void {
-        s.matches_truncated = search.findAll(s.gpa, from, s.query.text(), &s.matches) catch false;
+        var problem: @import("../utils/regex.zig").Problem = .{};
+        s.search_problem = "";
+        s.searched_options = s.searchOptions();
+        s.searched_query = std.hash.Wyhash.hash(0, s.query.text());
+        s.matches_truncated = search.findWith(s.gpa, from, s.query.text(), s.searched_options, &s.matches, &problem) catch |err| blk: {
+            s.matches.clearRetainingCapacity();
+            if (err == error.Syntax) {
+                s.search_problem = problem.message;
+                s.search_problem_at = problem.at;
+            }
+            break :blk false;
+        };
         s.searched_version = s.version;
         s.searched_ptr = @intFromPtr(from.ptr);
         s.searched_len = from.len;
         if (s.match_at >= s.matches.items.len) s.match_at = 0;
+    }
+
+    /// Replaces the selection if it is a match, then selects the next match.
+    /// Returns whether anything was replaced.
+    pub fn replaceOne(s: *State) bool {
+        var problem: @import("../utils/regex.zig").Problem = .{};
+        var finder = search.Finder.init(s.gpa, s.query.text(), s.searchOptions(), &problem) catch return false;
+        defer finder.deinit();
+        const from = s.text();
+        const sel = s.selection();
+        var replaced = false;
+        if (sel[1] > sel[0] and (finder.exact(from, .{ .start = @intCast(sel[0]), .end = @intCast(sel[1]) }) catch false)) {
+            var out: std.ArrayList(u8) = .empty;
+            defer out.deinit(s.gpa);
+            finder.replacement(&out, from, s.replacement.text()) catch return false;
+            const version = s.version;
+            s.replaceSelection(out.items, false);
+            replaced = version != s.version;
+        }
+        // The next match after the caret, wrapping around.
+        const text_now = s.text();
+        const next = (finder.next(text_now, s.caret) catch null) orelse (finder.next(text_now, 0) catch null);
+        if (next) |m| {
+            s.anchor = m.start;
+            s.caret = m.end;
+            s.reveal = true;
+            s.typing = false;
+        }
+        s.research(text_now);
+        if (next) |m| for (s.matches.items, 0..) |item, i| if (item.start == m.start) {
+            s.match_at = i;
+            break;
+        };
+        return replaced;
+    }
+
+    /// Replaces every match as one edit that undo takes back. Returns how
+    /// many were replaced.
+    pub fn replaceAllMatches(s: *State) usize {
+        var problem: @import("../utils/regex.zig").Problem = .{};
+        var finder = search.Finder.init(s.gpa, s.query.text(), s.searchOptions(), &problem) catch return 0;
+        defer finder.deinit();
+        const from = s.text();
+        var out: std.ArrayList(u8) = .empty;
+        defer out.deinit(s.gpa);
+        var count: usize = 0;
+        var lo: usize = 0;
+        var copied: usize = 0;
+        var at: usize = 0;
+        while (finder.next(from, at) catch null) |m| {
+            if (count == 0) {
+                lo = m.start;
+                copied = m.start;
+            }
+            out.appendSlice(s.gpa, from[copied..m.start]) catch return 0;
+            finder.replacement(&out, from, s.replacement.text()) catch return 0;
+            copied = m.end;
+            at = m.end;
+            count += 1;
+        }
+        if (count == 0) return 0;
+        const version = s.version;
+        s.change(lo, copied, out.items, false);
+        if (version == s.version) return 0;
+        s.anchor = lo;
+        s.caret = lo;
+        if (s.undo.items.len > 0) {
+            s.undo.items[s.undo.items.len - 1].caret_after = lo;
+            s.undo.items[s.undo.items.len - 1].anchor_after = lo;
+        }
+        s.research(s.text());
+        return count;
     }
 
     pub fn gotoMatch(s: *State, delta: i32) void {

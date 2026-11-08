@@ -35,6 +35,8 @@ pub const transport = @import("network/transport.zig");
 pub const header_check = @import("network/header_check.zig");
 pub const prepare = @import("network/prepare.zig");
 pub const upload_info = @import("app/upload_info.zig");
+pub const regex = @import("utils/regex.zig");
+pub const code_font = @import("ui/code_font.zig");
 pub const response_prepare = @import("app/response_prepare.zig");
 pub const http_client = @import("network/http_client.zig");
 

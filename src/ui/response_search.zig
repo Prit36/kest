@@ -64,16 +64,29 @@ fn update(app: *App, t: *Tab, s: *State, source: []const u8, owner: ?*prep.Bytes
         s.searched_ptr = 0;
         return;
     }
-    if (!std.mem.eql(u8, s.search_key[0..s.search_key_len], query) or s.search_key_case != s.search_case or s.searched_ptr != @intFromPtr(source.ptr) or s.searched_len != source.len) {
+    if (!std.mem.eql(u8, s.search_key[0..s.search_key_len], query) or !std.meta.eql(s.searched_options, s.searchOptions()) or s.searched_ptr != @intFromPtr(source.ptr) or s.searched_len != source.len) {
         s.clearResponseSearch();
         @memcpy(s.search_key[0..query.len], query);
         s.search_key_len = query.len;
         s.search_key_case = s.search_case;
+        s.searched_options = s.searchOptions();
+        // A malformed pattern is reported here; no worker starts for it.
+        s.search_problem = "";
+        if (s.search_regex and query.len > 0) {
+            var problem: @import("../utils/regex.zig").Problem = .{};
+            if (@import("../utils/regex.zig").Regex.compile(app.gpa, query, .{}, &problem)) |compiled| {
+                var re = compiled;
+                re.deinit(app.gpa);
+            } else |err| if (err == error.Syntax) {
+                s.search_problem = problem.message;
+                s.search_problem_at = problem.at;
+            }
+        }
         s.searched_version = s.version;
         s.searched_ptr = @intFromPtr(source.ptr);
         s.searched_len = source.len;
     }
-    if (query.len == 0) return;
+    if (query.len == 0 or s.search_problem.len > 0) return;
     if (s.search_job) |job| if (job.take()) |value| {
         var result = value;
         defer result.deinit(app.gpa);
@@ -98,7 +111,7 @@ fn update(app: *App, t: *Tab, s: *State, source: []const u8, owner: ?*prep.Bytes
     const needs = s.search_index == null or s.search_target != null;
     if (needs and s.search_job == null and s.search_failure == null) {
         const seek: core.Seek = if (s.search_target) |target| .{ .ordinal = target } else .{ .near = s.caret };
-        s.search_job = app.response_preparation.find(t.shown.?, source, owner, query, .{ .case_sensitive = s.search_case }, seek, .{ .ctx = app, .call = wake }) catch |err| blk: {
+        s.search_job = app.response_preparation.find(t.shown.?, source, owner, query, .{ .case_sensitive = s.search_case, .whole_word = s.search_word, .regex = s.search_regex }, seek, .{ .ctx = app, .call = wake }) catch |err| blk: {
             if (err != error.Busy) s.search_failure = .unavailable;
             break :blk null;
         };
@@ -133,10 +146,11 @@ fn caption(s: *const State) []const u8 {
         .input_limit => "Text too large",
         .unavailable => "Search unavailable",
     };
+    if (s.search_problem.len > 0) return "Invalid pattern";
     if (s.search_pending) return "Searching...";
     if (s.query.text().len == 0) return "";
     const index = if (s.search_index) |*value| value else return "Searching...";
-    return if (index.total == 0) "No matches" else w.fmt("{d} / {d}", .{ s.search_selected + 1, index.total });
+    return if (index.total == 0) "No matches" else w.fmt("{d} / {d}{s}", .{ s.search_selected + 1, index.total, if (index.capped) "+" else "" });
 }
 fn icon(ui: *c.cui_ctx, key: [*:0]const u8, glyph: [*:0]const u8, hint: [*:0]const u8) bool {
     w.row(ui, .{ .id = key, .width = w.px(28), .height = w.px(28) });
@@ -146,6 +160,10 @@ fn icon(ui: *c.cui_ctx, key: [*:0]const u8, glyph: [*:0]const u8, hint: [*:0]con
 fn controls(ui: *c.cui_ctx, s: *State, canvas: [*:0]const u8, compact: bool) void {
     if (w.action(ui, "response-find-case", "Aa", null, s.search_case, 28, 28, 0)) s.search_case = !s.search_case;
     c.kest_tooltip(ui, "Match case");
+    if (w.action(ui, "response-find-word", "W", null, s.search_word, 28, 28, 0)) s.search_word = !s.search_word;
+    c.kest_tooltip(ui, "Whole word");
+    if (w.action(ui, "response-find-regex", ".*", null, s.search_regex, 28, 28, 0)) s.search_regex = !s.search_regex;
+    c.kest_tooltip(ui, "Regular expression");
     w.text(ui, caption(s), .{ .width = if (compact) w.fill else w.px(112), .size = c.KEST_TEXT_CAPTION, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     c.cui_push_disabled(ui, s.search_index == null or s.search_index.?.total == 0);
     if (icon(ui, "response-find-prev", c.CUI_ICON_CHEVRON_UP, "Previous match (Shift+Enter or Shift+F3)")) navigate(s, -1);
@@ -178,6 +196,7 @@ pub fn bar(ui: *c.cui_ctx, app: *App, t: *Tab, canvas: [*:0]const u8, s: *State,
     }
     controls(ui, s, canvas, compact);
     w.end(ui);
+    if (s.search_problem.len > 0) w.text(ui, w.fmt("{s} at character {d}", .{ s.search_problem, s.search_problem_at + 1 }), .{ .width = w.fill, .size = c.KEST_TEXT_CAPTION, .color = w.color(c.CUI_TOKEN_DANGER) });
     w.end(ui);
     const mods = c.cui_key_mods(ui);
     const search_focus = query_focus or canvas_focus or c.kest_focus_within(ui, "response-search");

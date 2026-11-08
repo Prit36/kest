@@ -220,9 +220,13 @@ fn shortcuts(ui: *c.cui_ctx, app: *App) void {
             const body_focused = c.kest_editor_focus(ui, c.cui_make_id(ui, "body-editor")) != 0;
             c.cui_pop_id(ui);
             if (body_focused or (t.pane == .body and t.shown == null)) {
-                t.body.search_open = true;
-                t.body.query.focus();
+                @import("editor.zig").openSearch(&t.body, false);
             } else @import("response_search.zig").open(t);
+        }
+        // Replace is for the body: Ctrl+H opens it there.
+        if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_H)) {
+            if (t.pane != .body) t.pane = .body;
+            @import("editor.zig").openSearch(&t.body, true);
         }
     }
 }
