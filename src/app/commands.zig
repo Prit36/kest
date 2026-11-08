@@ -308,7 +308,7 @@ fn startFailed(app: *App, t: *Tab, failure: @import("../core/response_status.zig
     t.start_failure_text = &.{};
     tab_mod.setOwned(app.gpa, &t.start_failure_text, message) catch {};
     t.response.error_details_open = false;
-    if (t.response_collapsed) app.toast(.danger, "Not sent", message);
+    if (t.response_collapsed) app.toastAction(.danger, "Not sent", message, .{ .retry = t.uid });
     app.wake();
 }
 
@@ -377,6 +377,21 @@ fn finished(app: *App, job: *http_client.Job) void {
         logLine(app, if (r.stop == .complete) .info else .warn, "{d} {s} in {d} ms, {d} bytes, {d} redirects, connection {s}", .{ r.status, r.reason, r.time_ms, r.total.load(.monotonic), r.redirects, if (r.reused_connection) "reused" else "new" });
     }
     if (r.error_text.len > 0) logLine(app, if (r.stop == .canceled) .info else if (r.stop == .timed_out) .warn else .err, "{s}", .{r.error_text});
+    backgroundToast(app, t, r);
+}
+
+/// A request that finishes while another tab is in front says so, with a
+/// way back to it (or to send it again when it failed).
+fn backgroundToast(app: *App, t: *Tab, r: anytype) void {
+    if (app.current() == t or r.stop == .canceled) return;
+    var title: [160]u8 = undefined;
+    var detail: [200]u8 = undefined;
+    if (r.status == 0) {
+        app.toastAction(.danger, std.fmt.bufPrint(&title, "\"{s}\" failed", .{t.name}) catch "A request failed", if (r.error_text.len > 0) r.error_text else "No response", .{ .retry = t.uid });
+    } else {
+        const tone: @import("../ui/model.zig").Status = if (r.status >= 500) .danger else if (r.status >= 400) .warning else .success;
+        app.toastAction(tone, std.fmt.bufPrint(&title, "\"{s}\" finished", .{t.name}) catch "A request finished", std.fmt.bufPrint(&detail, "{d} {s} in {d} ms", .{ r.status, r.reason, r.time_ms }) catch "", .{ .open = t.uid });
+    }
 }
 
 pub fn clearResponse(t: *Tab) void {

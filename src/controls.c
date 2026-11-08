@@ -1401,3 +1401,18 @@ void kest_tooltip_for(cui_ctx *ui, cui_id anchor, const char *text) {
     cui_tooltip(ui, text);
     ui->last_id = last;
 }
+bool kest_hoverable(cui_ctx *ui, const char *key) {
+    cui_id id = cui_make_id(ui, key);
+    for (int i = ui->node_count - 1; i >= 0; i--) {
+        if (ui->nodes[i].id != id) continue;
+        cui__interact(ui, id, CUI_IF_KEEP_FOCUS);
+        cui__mark_interactive(ui, i, 0);
+        ui->last_id = id;
+        return true;
+    }
+    return false;
+}
+bool kest_hover_card_begin(cui_ctx *ui, const char *key, cui_id anchor, float width) {
+    ui->last_id = anchor;
+    return cui_hover_card_begin(ui, key, &(cui_hover_card_opts){ .placement = CUI_PLACE_BOTTOM_END, .width = width, .delay = 0.5f });
+}

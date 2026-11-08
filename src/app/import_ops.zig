@@ -242,7 +242,7 @@ pub fn saveToFile(app: *App, default_name: []const u8, text: []const u8) bool {
     const path = (platform.dialog.save(app.gpa, .{ .title = "Save as", .name = default_name }) catch return false) orelse return false;
     defer app.gpa.free(path);
     @import("export_jobs.zig").bytes(app.store, path, text) catch |e| return wrote(app, e);
-    app.toast(.info, "Export queued", std.fs.path.basename(path));
+    app.toastAction(.info, "Export queued", std.fs.path.basename(path), .{ .show = path });
     return true;
 }
 

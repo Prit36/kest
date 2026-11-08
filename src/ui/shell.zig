@@ -29,6 +29,8 @@ var focus_before_overlay: c.cui_id = 0;
 var overlay_focus: c.cui_id = 0;
 var overlay_was_open = false;
 var sidebar_toggle: c.cui_id = 0;
+pub var edit_button: c.cui_id = 0;
+var edit_open = false;
 var focus_check: enum { none, overlay_closed, sidebar_closed } = .none;
 
 fn keepFocus(ui: *c.cui_ctx, app: *App) void {
@@ -79,6 +81,7 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
     if (steps != 0) commands.zoomCode(app, steps);
     font.size = @floatFromInt(app.prefs.editor_font_size);
     keepFocus(ui, app);
+    c.kest_edit_target_track(ui, edit_button, edit_open);
     @import("suggest.zig").capture(ui);
     // Requested last frame; dropped if no tree is drawn to take it.
     const tree_focus_requested = app.focus_tree;
@@ -123,6 +126,7 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
     dialogs.view(ui, app);
     palette(ui, app);
     app.toaster.view(ui);
+    toastActions(ui, app);
     deletionToast(ui, app);
     c.kest_quiet_caret(ui);
 }
@@ -133,6 +137,7 @@ fn topbar(ui: *c.cui_ctx, app: *App, width: f32) void {
     const toggled = w.icon(ui, c.CUI_ICON_PANEL_LEFT, "Toggle workspace (Ctrl B)");
     sidebar_toggle = c.kest_last_id(ui);
     if (toggled) toggleSidebar(ui, app);
+    editMenu(ui);
     var running: usize = 0;
     for (app.tabs.items) |t| if (t.running()) {
         running += 1;
@@ -173,6 +178,54 @@ fn topbar(ui: *c.cui_ctx, app: *App, width: f32) void {
         if (w.menuItem(ui, "Show data folder") and !@import("platform.zig").headless) _ = c.cui_app_open_url(w.z(app.store.path));
         if (w.menuItem(ui, "Settings")) settings(app);
         c.cui_menu_end(ui);
+    }
+}
+
+/// Undo, Redo, Cut, Copy, Paste, Delete and Select all for the text field or
+/// editor focused last, so the commands are there without their shortcuts.
+fn editMenu(ui: *c.cui_ctx) void {
+    const label = "Edit###edit-menu";
+    edit_button = c.cui_make_id(ui, label);
+    edit_open = w.menu(ui, label, 64, w.color(c.CUI_TOKEN_TEXT_SECONDARY));
+    if (!edit_open) return;
+    const editor = @import("editor.zig");
+    const target = c.kest_edit_target;
+    if (target != 0 and editor.edit_target != null and editor.edit_target.?.id == target) {
+        editor.targetItems(ui, editor.edit_target.?);
+    } else if (target != 0) {
+        c.kest_edit_menu_items(ui, target);
+    } else {
+        // Nothing to act on: the commands show, greyed, with their keys.
+        const items = [_][2][*:0]const u8{ .{ "Undo", "Ctrl Z" }, .{ "Redo", "Ctrl Y" }, .{ "", "" }, .{ "Cut", "Ctrl X" }, .{ "Copy", "Ctrl C" }, .{ "Paste", "Ctrl V" }, .{ "", "" }, .{ "Select all", "Ctrl A" } };
+        for (items) |item| {
+            if (item[0][0] == 0) c.cui_menu_separator(ui) else _ = c.cui_menu_item_ex(ui, item[0], &.{ .shortcut = item[1], .disabled = true });
+        }
+        c.cui_menu_separator(ui);
+        c.cui_menu_label(ui, "CLICK A FIELD FIRST");
+    }
+    c.cui_menu_end(ui);
+}
+
+/// Carries out a clicked toast button.
+fn toastActions(ui: *c.cui_ctx, app: *App) void {
+    const action = app.toaster.clicked(ui) orelse return;
+    defer app.toaster.release(action);
+    runToastAction(app, action);
+}
+
+pub fn runToastAction(app: *App, action: @import("model.zig").ToastAction) void {
+    switch (action) {
+        .none => {},
+        .retry, .open => |uid| for (app.tabs.items, 0..) |t, i| {
+            if (t.uid != uid) continue;
+            app.active = i;
+            if (action == .retry and !t.running()) commands.send(app, t);
+            break;
+        },
+        .show => |path| if (!@import("platform.zig").headless) {
+            _ = c.cui_app_open_url(w.z(std.fs.path.dirname(path) orelse path));
+        },
+        .reopen => |count| for (0..@min(count, app.closed_tabs.items.len)) |_| commands.reopenClosed(app),
     }
 }
 

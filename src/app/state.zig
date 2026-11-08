@@ -282,6 +282,11 @@ pub const App = struct {
     pub fn toast(a: *App, status: kit.Status, title: []const u8, message: []const u8) void {
         a.toaster.push(.{ .status = status, .title = title, .message = message, .duration = if (status == .danger or status == .warning) 8 else 3 });
     }
+    /// A toast with a button (Retry, Open, Show in folder, Reopen); the
+    /// shell carries out the action when it's clicked.
+    pub fn toastAction(a: *App, status: kit.Status, title: []const u8, message: []const u8, action: kit.ToastAction) void {
+        a.toaster.push(.{ .status = status, .title = title, .message = message, .duration = 8, .action = action });
+    }
 
     /// The variables of the active environment, rebuilt when they change.
     pub fn activeVars(a: *App) []const variables.Var {

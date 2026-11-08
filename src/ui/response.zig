@@ -242,7 +242,7 @@ pub fn save(app: *App, resp: *response.Response) void {
         app.toast(.danger, "Could not save", @errorName(e));
         return;
     };
-    app.toast(.info, "Save queued", std.fs.path.basename(path));
+    app.toastAction(.info, "Save queued", std.fs.path.basename(path), .{ .show = path });
 }
 
 pub fn isMarkdown(resp: *const response.Response) bool {

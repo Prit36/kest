@@ -175,6 +175,12 @@ static void cui__undo_push(cui_ctx *ui, cui_edit_state *e, const char *buf) { cu
 #define KEST__EDIT_PENDING 0x4B45444Du
 typedef struct { int command; bool read_only, password; int length; } kest__edit_pending;
 bool kest_edit_menu_owned;   /* set by a caller whose own menu answers right-clicks */
+cui_id kest_edit_target;
+
+void kest_edit_target_track(cui_ctx *ui, cui_id keep, bool menu_open) {
+    if (menu_open || ui->focus == keep || ui->focus == kest_edit_target) return;
+    kest_edit_target = 0;
+}
 
 void kest_edit_request(cui_ctx *ui, cui_id id, int command) {
     kest__edit_pending *pending = cui_state(ui, id ^ KEST__EDIT_PENDING, sizeof *pending);
@@ -771,6 +777,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
         pending->read_only = o->read_only;
         pending->password = o->password;
         pending->length = len;
+        if (ui->focus == id) kest_edit_target = id;
         cui_id pid = id ^ 0xC7C0E017u;
         if (right && !owned) {
             cui__close_all_popups(ui);

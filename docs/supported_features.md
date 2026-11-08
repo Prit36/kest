@@ -169,3 +169,26 @@ response header table shares the resizable split.
   after it, with Undo; a single line still pastes into the cell.
 - Response headers keep the order they were received in; that table resizes but
   does not sort.
+
+### Feel and feedback
+
+- The top bar has an Edit menu with Undo, Redo, Cut, Copy, Paste, Delete and
+  Select all, each with its shortcut. It acts on the text field or editor
+  focused last; with nothing focused, it shows the commands greyed out.
+- Resting the pointer on a response's status, time or size opens a card:
+  - Status: the code and reason, its class, what it means, and Location or
+    Retry-After when the response has them.
+  - Time: the exact milliseconds from sending to the last body byte, whether
+    the connection was new or reused, and how many redirects were followed.
+  - Size: the decoded body and header sizes, Content-Encoding and
+    Content-Length when present, and a note when the transfer stopped early.
+- Toasts carry a button when there is an obvious next step:
+  - A request that couldn't be sent offers Retry.
+  - A request finishing in a background tab offers Open (or Retry if it
+    failed).
+  - A queued export or response save offers Show in folder.
+  - Close others / Close to the right offer Reopen.
+  - Sorting, pasting and deleting rows, and deleting from the sidebar, keep
+    their Undo.
+- Response timing has no DNS, connect or TLS breakdown; the time card shows
+  the total only.

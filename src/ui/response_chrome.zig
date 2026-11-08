@@ -58,6 +58,67 @@ pub fn summaryData(t: *const tab.Tab) ?Summary {
     return .{ .short = label, .full = full, .duration = if (r.timing_known) duration(r.time_ms) else "\u{2014}", .size = if (hasSize(r)) bytes(r.total.load(.monotonic)) else "\u{2014}", .token = if (r.status >= 500 and r.status < 600) c.CUI_TOKEN_DANGER else if (partial) c.CUI_TOKEN_WARNING else if (r.status > 0) httpToken(r.status) else if (r.stop == .canceled or r.stop == .complete) c.CUI_TOKEN_FOREGROUND else c.CUI_TOKEN_DANGER };
 }
 
+// Hover cards on the status, time and size: what each means, exactly.
+fn cardTitle(ui: *c.cui_ctx, value: []const u8, tone: c_int) void {
+    w.text(ui, value, .{ .size = c.KEST_TEXT_BODY, .font = c.CUI_FONT_MEDIUM, .color = w.color(tone), .nowrap = true });
+}
+fn cardNote(ui: *c.cui_ctx, value: []const u8) void {
+    w.text(ui, value, .{ .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+}
+fn cardFact(ui: *c.cui_ctx, label: []const u8, value: []const u8) void {
+    w.row(ui, .{ .width = w.fill, .gap = 12 });
+    w.text(ui, label, .{ .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
+    c.cui_spacer(ui);
+    w.text(ui, value, .{ .size = c.KEST_TEXT_SECONDARY, .font = c.CUI_FONT_MEDIUM, .nowrap = true });
+    w.end(ui);
+}
+/// Which cards were open in the last frame (status 1, duration 2, size 4);
+/// for tests.
+pub var cards_open: u8 = 0;
+fn cardBegin(ui: *c.cui_ctx, key: [*:0]const u8, anchor: c.cui_id) bool {
+    if (!c.kest_hover_card_begin(ui, key, anchor, 280)) return false;
+    cards_open |= if (key[0] == 's' and key[1] == 't') 1 else if (key[0] == 'd') 2 else 4;
+    w.column(ui, .{ .width = w.fill, .gap = 6 });
+    return true;
+}
+fn cardEnd(ui: *c.cui_ctx) void {
+    w.end(ui);
+    c.cui_hover_card_end(ui);
+}
+fn statusCard(ui: *c.cui_ctx, r: *const Response) void {
+    if (!cardBegin(ui, "status-card", c.cui_make_id(ui, "response-status"))) return;
+    defer cardEnd(ui);
+    cardTitle(ui, if (r.reason.len > 0 and r.reason.len <= 80) w.fmt("{d} {s}", .{ r.status, r.reason }) else w.fmt("{d}", .{r.status}), httpToken(r.status));
+    w.muted(ui, states.category(r.status));
+    cardNote(ui, states.explain(r.status));
+    if (r.status >= 300 and r.status < 400) if (r.header("location")) |to| cardFact(ui, "Location", if (to.len > 40) w.fmt("{s}\u{2026}", .{to[0..40]}) else to);
+    if (r.status == 429 or r.status == 503) if (r.header("retry-after")) |after| cardFact(ui, "Retry-After", after);
+    if (r.isPartial()) cardNote(ui, "The body stopped early, so only part of it is here.");
+    w.muted(ui, "Click for request details");
+}
+fn durationCard(ui: *c.cui_ctx, r: *const Response) void {
+    if (!c.kest_hoverable(ui, "response-duration")) return;
+    if (!cardBegin(ui, "duration-card", c.cui_make_id(ui, "response-duration"))) return;
+    defer cardEnd(ui);
+    cardTitle(ui, w.fmt("{d} ms", .{r.time_ms}), c.CUI_TOKEN_FOREGROUND);
+    cardNote(ui, "From sending the request until the last byte of the body arrived, including any redirects.");
+    cardFact(ui, "Connection", if (r.reused_connection) "Reused (no new handshake)" else "New");
+    if (r.redirects > 0) cardFact(ui, "Redirects followed", w.fmt("{d}", .{r.redirects}));
+}
+fn sizeCard(ui: *c.cui_ctx, r: *const Response) void {
+    if (!c.kest_hoverable(ui, "response-size")) return;
+    if (!cardBegin(ui, "size-card", c.cui_make_id(ui, "response-size"))) return;
+    defer cardEnd(ui);
+    const total = r.total.load(.monotonic);
+    cardTitle(ui, w.fmt("{d} bytes", .{total}), c.CUI_TOKEN_FOREGROUND);
+    cardNote(ui, "The body after any compression was undone; headers are counted apart.");
+    cardFact(ui, "Body", bytes(total));
+    cardFact(ui, "Headers", bytes(r.raw_headers.len));
+    if (r.header("content-encoding")) |encoding| cardFact(ui, "Sent compressed as", encoding);
+    if (r.header("content-length")) |length| cardFact(ui, "Content-Length", length);
+    if (r.isPartial()) cardNote(ui, "The transfer stopped early; this is what arrived.");
+}
+
 fn textWidth(ui: *c.cui_ctx, label: []const u8, medium: bool) f32 {
     return c.cui_measure_text(ui, if (medium) c.CUI_FONT_MEDIUM else c.CUI_FONT_BODY, c.KEST_TEXT_SECONDARY, label.ptr, @intCast(label.len)).width;
 }
@@ -98,6 +159,7 @@ fn formatItems(ui: *c.cui_ctx, t: *tab.Tab, r: *const Response, scrolling: bool)
 
 pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     if (t.response.pane == .raw or t.response.pane == .pretty) t.response.body_pane = t.response.pane;
+    cards_open = 0;
     const r: ?*Response = if (t.shown) |job| &job.resp else null;
     const bounds = c.cui_get_rect(ui, c.cui_make_id(ui, "response-panel"));
     const width = if (bounds.w > 0) bounds.w else 360;
@@ -142,18 +204,21 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
         if (t.running()) c.cui_spinner(ui, 12);
         w.text(ui, label, .{ .size = c.KEST_TEXT_SECONDARY, .font = c.CUI_FONT_MEDIUM, .color = w.color(value.token), .nowrap = true });
         c.kest_item_end(ui);
-        if (!t.running() and t.start_failure == .none and r != null and r.?.status > 0) c.kest_tooltip(ui, w.z(states.category(r.?.status)));
+        const settled = !t.running() and t.start_failure == .none and r != null;
+        if (settled and r.?.status > 0) statusCard(ui, r.?);
         if (clicked) c.cui_popover_open(ui, "response-details");
         w.end(ui);
         if (show_duration) {
             w.row(ui, .{ .id = "response-duration" });
             w.text(ui, value.duration, .{ .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
             w.end(ui);
+            if (settled and r.?.timing_known) durationCard(ui, r.?);
         }
         if (show_size) {
             w.row(ui, .{ .id = "response-size" });
             w.text(ui, value.size, .{ .size = c.KEST_TEXT_SECONDARY, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
             w.end(ui);
+            if (settled and hasSize(r.?)) sizeCard(ui, r.?);
         }
         w.end(ui);
     }

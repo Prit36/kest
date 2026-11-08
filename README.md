@@ -102,7 +102,10 @@ references are coloured, and hovering one shows its value. The header table
 suggests common names and values, and the URL field suggests URLs sent before.
 Tables have resizable columns and sortable headings. Their rows can be picked
 with a grip for bulk enable, disable, copy or delete, dragged to reorder, and
-copied or pasted as tab-separated lines. Switching formats preserves
+copied or pasted as tab-separated lines. An Edit menu in the top bar
+offers Undo, Cut, Copy, Paste and Select all for the focused field. Hovering a
+response's status, time or size explains it, and toasts offer Retry, Open,
+Show in folder or Reopen where that is the next step. Switching formats preserves
 all text, form fields and the binary path. URL-encoded forms treat values as
 text while retaining multipart file flags for later. Binary mode shows the
 selected file name/size, with Change file, Remove and Refresh. Metadata checks

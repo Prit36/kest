@@ -149,3 +149,10 @@ void kest_consume_click(cui_ctx *ui);
 /* The focused field types Tab next frame (a list under it takes Tab). */
 void kest_keep_tab(cui_ctx *ui, cui_id id);
 void kest_tooltip_for(cui_ctx *ui, cui_id anchor, const char *text);
+/* Makes the box `key`, already built in this scope, answer the pointer
+ * (without taking focus or clicks) and become the anchor of what follows,
+ * such as a hover card. False when there is no such box. */
+bool kest_hoverable(cui_ctx *ui, const char *key);
+/* The hover card `key` for the anchor `anchor` (from kest_hoverable or a
+ * control). Close it with cui_hover_card_end when this returns true. */
+bool kest_hover_card_begin(cui_ctx *ui, const char *key, cui_id anchor, float width);

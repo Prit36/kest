@@ -299,14 +299,16 @@ fn tabMenu(ui: *c.cui_ctx, app: *App) void {
             // Close from the end so earlier indexes stay valid; tabs with
             // edits stay open rather than asking once per tab.
             var kept: usize = 0;
+            var closed: u32 = 0;
             var k = app.tabs.items.len;
             while (k > 0) {
                 k -= 1;
                 const other = app.tabs.items[k];
                 if (other.pinned or other == t or (close == .right and k <= i)) continue;
-                if (!commands.closeIfSaved(app, other)) kept += 1;
+                if (commands.closeIfSaved(app, other)) closed += 1 else kept += 1;
             }
-            if (kept > 0) app.toast(.info, "Unsaved tabs kept open", w.fmt("{d} tab{s} with unsaved changes stayed open. Close {s} to save or discard the changes.", .{ kept, if (kept == 1) "" else "s", if (kept == 1) "it" else "them" }));
+            if (kept > 0) app.toast(.info, "Unsaved tabs kept open", w.fmt("{d} tab{s} with unsaved changes stayed open. Close {s} to save or discard the changes.", .{ kept, if (kept == 1) "" else "s", if (kept == 1) "it" else "them" }))
+            else if (closed > 0) app.toastAction(.info, w.fmt("Closed {d} tab{s}", .{ closed, if (closed == 1) "" else "s" }), "", .{ .reopen = closed });
         },
     }
 }

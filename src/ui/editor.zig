@@ -91,6 +91,72 @@ pub fn editItems(ui: *c.cui_ctx, s: *State, source: []const u8, read_only: bool)
     }
 }
 
+/// What the app's Edit menu knows about the editor focused last; the
+/// editor refreshes it every frame it has focus.
+pub const Target = struct { id: c.cui_id, read_only: bool, selected: bool, can_undo: bool, can_redo: bool, length: usize, multi: bool };
+pub var edit_target: ?Target = null;
+/// A command chosen from the Edit menu, run by that editor on its next frame.
+var pending: ?struct { id: c.cui_id, command: c_int } = null;
+
+/// The Edit menu's items for `t`; a choice runs on the editor's next frame.
+pub fn targetItems(ui: *c.cui_ctx, t: Target) void {
+    const items = [_]struct { label: [*:0]const u8, shortcut: [*:0]const u8, command: c_int, enabled: bool, writes: bool }{
+        .{ .label = "Undo", .shortcut = "Ctrl Z", .command = c.KEST_EDIT_UNDO, .enabled = t.can_undo, .writes = true },
+        .{ .label = "Redo", .shortcut = "Ctrl Y", .command = c.KEST_EDIT_REDO, .enabled = t.can_redo and !t.multi, .writes = true },
+        .{ .label = "", .shortcut = "", .command = 0, .enabled = false, .writes = true },
+        .{ .label = "Cut", .shortcut = "Ctrl X", .command = c.KEST_EDIT_CUT, .enabled = t.selected or t.multi, .writes = true },
+        .{ .label = "Copy", .shortcut = "Ctrl C", .command = c.KEST_EDIT_COPY, .enabled = t.selected or t.multi, .writes = false },
+        .{ .label = "Paste", .shortcut = "Ctrl V", .command = c.KEST_EDIT_PASTE, .enabled = true, .writes = true },
+        .{ .label = "Delete", .shortcut = "Del", .command = c.KEST_EDIT_DELETE, .enabled = t.selected and !t.multi, .writes = true },
+        .{ .label = "", .shortcut = "", .command = 0, .enabled = false, .writes = false },
+        .{ .label = "Select all", .shortcut = "Ctrl A", .command = c.KEST_EDIT_SELECT_ALL, .enabled = t.length > 0 and !t.multi, .writes = false },
+    };
+    for (items) |item| {
+        if (t.read_only and item.writes) continue;
+        if (item.command == 0) {
+            c.cui_menu_separator(ui);
+            continue;
+        }
+        if (menuItem(ui, item.label, item.shortcut, item.enabled)) pending = .{ .id = t.id, .command = item.command };
+    }
+}
+
+/// Runs an Edit menu command as its shortcut would.
+fn run(ui: *c.cui_ctx, s: *State, source: []const u8, read_only: bool, command: c_int) void {
+    const range = s.selection();
+    const selected = range[1] > range[0];
+    switch (command) {
+        c.KEST_EDIT_UNDO => if (!read_only) {
+            _ = s.undoEdit();
+        },
+        c.KEST_EDIT_REDO => if (!read_only and !s.multi()) {
+            _ = s.redoEdit();
+        },
+        c.KEST_EDIT_CUT, c.KEST_EDIT_COPY => {
+            if (s.multi()) {
+                if (s.copyAll(w.arena.allocator(), source)) |joined| w.copy(ui, joined) else |_| {}
+                if (command == c.KEST_EDIT_CUT and !read_only) s.editAll(.{ .insert = "" });
+            } else if (selected) {
+                w.copy(ui, s.selected(source));
+                if (command == c.KEST_EDIT_CUT and !read_only) s.replaceSelection("", false);
+            }
+        },
+        c.KEST_EDIT_PASTE => if (!read_only) {
+            const clip = c.kest_clipboard(ui);
+            if (clip != null) {
+                if (s.multi()) pasteAll(s, std.mem.span(clip)) else s.replaceSelection(std.mem.span(clip), false);
+            }
+        },
+        c.KEST_EDIT_DELETE => if (!read_only and selected) s.replaceSelection("", false),
+        c.KEST_EDIT_SELECT_ALL => {
+            _ = s.command(.select_all, source, read_only);
+            s.precise_goal = null;
+        },
+        else => {},
+    }
+    s.reveal = true;
+}
+
 /// The editing commands with several carets: each acts at every one.
 fn multiItems(ui: *c.cui_ctx, s: *State, source: []const u8, read_only: bool) void {
     if (!read_only) {
@@ -174,7 +240,18 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
     const gutter0 = fold_w + gutterWidth(ui, if (s.index.count() > 0) s.index.lineNumber(s.index.count() - 1) else 1);
     const wrap_at: usize = if (s.word_wrap and previous.w > 0) @intFromFloat(@max(4, @floor((previous.w - gutter0 - code_gap - 16) / char_w))) else @import("../utils/lines.zig").default_wrap;
     index(s, source, wrap_at);
+    if (pending) |p| if (p.id == identity) {
+        pending = null;
+        run(ui, s, source, read_only, p.command);
+        if (!read_only) source = s.text();
+        c.kest_focus(ui, id);
+    };
     const focused = c.kest_editor_focus(ui, identity) != 0;
+    if (focused) {
+        const range = s.selection();
+        c.kest_edit_target = identity;
+        edit_target = .{ .id = identity, .read_only = read_only, .selected = range[1] > range[0], .can_undo = s.undo.items.len > 0, .can_redo = s.redo.items.len > 0, .length = source.len, .multi = s.multi() };
+    }
     // Escape drops a text drag; the release that follows does nothing.
     if (s.move_drag != .none and c.cui_key_pressed(ui, c.CUI_KEY_ESCAPE)) {
         s.move_drag = .cancelled;

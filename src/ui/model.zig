@@ -72,10 +72,34 @@ pub const Command = enum {
     insert_tab,
 };
 pub const Status = enum { success, warning, danger, info };
-pub const Toast = struct { status: Status, title: []const u8, message: []const u8, duration: u32 };
+/// What a toast's button does; the shell carries it out.
+pub const ToastAction = union(enum) {
+    none,
+    /// Send the tab with this uid again.
+    retry: u64,
+    /// Switch to the tab with this uid.
+    open: u64,
+    /// Show the folder holding this file (the path is owned by the toaster).
+    show: []const u8,
+    /// Reopen this many closed tabs.
+    reopen: u64,
+
+    pub fn label(action: ToastAction) ?[*:0]const u8 {
+        return switch (action) {
+            .none => null,
+            .retry => "Retry",
+            .open => "Open",
+            .show => "Show in folder",
+            .reopen => "Reopen",
+        };
+    }
+};
+pub const Toast = struct { status: Status, title: []const u8, message: []const u8, duration: u32, action: ToastAction = .none };
 pub const Toaster = struct {
     gpa: std.mem.Allocator,
     items: std.ArrayList(Toast) = .empty,
+    /// Shown toasts whose button may still be clicked, oldest first.
+    live: std.ArrayList(struct { handle: c_int, action: ToastAction }) = .empty,
     pub fn push(s: *Toaster, msg: Toast) void {
         if (s.items.items.len >= 8) return;
         var m = msg;
@@ -84,14 +108,25 @@ pub const Toaster = struct {
             s.gpa.free(m.title);
             return;
         };
+        if (msg.action == .show) {
+            m.action = .{ .show = s.gpa.dupe(u8, msg.action.show) catch "" };
+            if (m.action.show.len == 0) m.action = .none;
+        }
         s.items.append(s.gpa, m) catch {
             s.gpa.free(m.title);
             s.gpa.free(m.message);
+            s.release(m.action);
         };
+    }
+    /// Frees what an action taken from `clicked` owns.
+    pub fn release(s: *Toaster, action: ToastAction) void {
+        if (action == .show) s.gpa.free(action.show);
     }
     pub fn deinit(s: *Toaster) void {
         s.clear();
         s.items.deinit(s.gpa);
+        for (s.live.items) |l| s.release(l.action);
+        s.live.deinit(s.gpa);
     }
     fn clear(s: *Toaster) void {
         for (s.items.items) |m| {
@@ -102,17 +137,37 @@ pub const Toaster = struct {
     }
     pub fn view(s: *Toaster, ui: *c.cui_ctx) void {
         for (s.items.items) |m| {
-            const title = s.gpa.dupeSentinel(u8, m.title, 0) catch continue;
+            const title = s.gpa.dupeSentinel(u8, m.title, 0) catch {
+                s.release(m.action);
+                continue;
+            };
             defer s.gpa.free(title);
-            const message = s.gpa.dupeSentinel(u8, m.message, 0) catch continue;
+            const message = s.gpa.dupeSentinel(u8, m.message, 0) catch {
+                s.release(m.action);
+                continue;
+            };
             defer s.gpa.free(message);
-            _ = c.cui_toast_ex(ui, title, &.{ .description = message, .duration = @floatFromInt(m.duration), .tone = switch (m.status) {
+            const label = m.action.label();
+            const handle = c.cui_toast_ex(ui, title, &.{ .description = message, .duration = @floatFromInt(if (label != null) @max(m.duration, 8) else m.duration), .action = label, .show_timer = label != null, .tone = switch (m.status) {
                 .success => c.CUI_TONE_SUCCESS,
                 .warning => c.CUI_TONE_WARNING,
                 .danger => c.CUI_TONE_DANGER,
                 .info => c.CUI_TONE_INFO,
             } });
+            if (label == null) continue;
+            if (s.live.items.len >= 8) s.release(s.live.orderedRemove(0).action);
+            s.live.append(s.gpa, .{ .handle = handle, .action = m.action }) catch s.release(m.action);
         }
         s.clear();
+    }
+    /// The action of a toast button clicked since the last call, if any; the
+    /// toast closes. Pass it to `release` once done.
+    pub fn clicked(s: *Toaster, ui: *c.cui_ctx) ?ToastAction {
+        for (s.live.items, 0..) |l, i| {
+            if (!c.cui_toast_action_clicked(ui, l.handle)) continue;
+            c.cui_toast_dismiss(ui, l.handle);
+            return s.live.orderedRemove(i).action;
+        }
+        return null;
     }
 };
