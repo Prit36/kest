@@ -153,16 +153,22 @@ pub fn run(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]const
     _ = try t.headers.add(.{ .key = "c-three", .value = "1" });
     for (0..4) |_| frame(ui, app);
 
-    // A heading click sorts, ignoring case; again, the other way; Undo puts
-    // the old order back.
+    // A heading click sorts, ignoring case, with no toast; again, the other
+    // way; a third time, back to the original order.
     click(ui, app, rect(ui, t, null, "kv-key-heading"), 0, frame);
     try equal(@src(), "A-one,b-two,c-three", try keys(t, a));
-    try check(@src(), t.headers.sort == .key_up and t.headers.undo_toast != 0);
+    try check(@src(), t.headers.sort == .key_up and t.headers.undo_toast == 0);
     click(ui, app, rect(ui, t, null, "kv-key-heading"), 0, frame);
     try equal(@src(), "c-three,b-two,A-one", try keys(t, a));
     click(ui, app, rect(ui, t, null, "kv-value-heading"), 0, frame);
     try equal(@src(), "c-three,b-two,A-one", try keys(t, a));
-    try t.headers.restore();
+    click(ui, app, rect(ui, t, null, "kv-value-heading"), 0, frame);
+    try equal(@src(), "A-one,b-two,c-three", try keys(t, a));
+    click(ui, app, rect(ui, t, null, "kv-value-heading"), 0, frame);
+    try equal(@src(), "b-two,A-one,c-three", try keys(t, a));
+    try check(@src(), t.headers.sort == .none);
+    // The rest of this test starts from names Z to A.
+    t.headers.sortBy(.key_down);
     frame(ui, app);
     try equal(@src(), "c-three,b-two,A-one", try keys(t, a));
 

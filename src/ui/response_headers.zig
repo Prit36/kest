@@ -56,7 +56,7 @@ pub fn view(ui: *c.cui_ctx, t: *Tab, resp: *Response) void {
     _ = c.kest_response_header_navigation(ui, @intCast(resp.headers.items.len));
     const pixel = 1 / @max(1, c.cui_dpi_scale(ui));
     w.column(ui, .{ .id = "response-header-grid", .width = w.fill, .height = w.fill, .max_height = c.KEST_TABLE_HEADER + pixel + @as(f32, @floatFromInt(resp.headers.items.len)) * c.KEST_TABLE_STRIDE, .clip = true });
-    _ = @import("key_value.zig").columnSplit(ui, "response-header-name-column", "response-header-value-column", &split, &resizing, true);
+    _ = @import("key_value.zig").columnSplit(ui, "response-header-grid", "response-header-name-column", "response-header-value-column", &split, &resizing, true);
     const name_weight = split * 10;
     const value_weight = (1 - split) * 10;
     w.row(ui, .{ .id = "response-header-heading", .width = w.fill, .height = w.px(c.KEST_TABLE_HEADER), .bg = w.color(c.CUI_TOKEN_SURFACE_MUTED), .@"align" = c.CUI_ALIGN_CENTER });

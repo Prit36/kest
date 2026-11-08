@@ -312,16 +312,18 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
             c.kest_collection_replace_name(ui);
         };
         const rect = c.kest_collection_row_rect(ui);
+        // The actions button (28px) plus the gap kept for the scrollbar.
+        const actions_edge: f32 = 28 + 14 + 4;
         const over = rect.h > 0 and mouse.x >= rect.x and mouse.x < rect.x + rect.w and mouse.y >= rect.y and mouse.y < rect.y + rect.h;
-        if (over and pressed and app.rename_action == null and mouse.x < rect.x + rect.w - 34) clicked = n;
+        if (over and pressed and app.rename_action == null and mouse.x < rect.x + rect.w - actions_edge) clicked = n;
         // A press on the actions button opens its menu instead of dragging.
-        if (over and pressed and can_drag and n.kind != .collection and mouse.x < rect.x + rect.w - 34)
+        if (over and pressed and can_drag and n.kind != .collection and mouse.x < rect.x + rect.w - actions_edge)
             press = .{ .node = n, .x = mouse.x, .y = mouse.y };
         if (over and dragging) if (press) |p| {
             drop = dropFor(p.node, n, (mouse.y - rect.y) / rect.h);
             if (drop) |d| c.kest_collection_drop(ui, d.where);
         };
-        c.kest_tooltip(ui, if (n.kind == .request) w.fmt("{s} {s}", .{ n.method, n.name }) else w.z(n.name));
+        c.kest_collection_row_tooltip(ui, if (n.kind == .request) w.fmt("{s} {s}", .{ n.method, n.name }) else w.z(n.name));
         const hot = c.kest_collection_row_hot(ui) or app.selected == n or menu_owner == n;
         c.cui_push_id(ui, w.z(&n.id));
         if (c.cui_context_menu_begin(ui, "node-menu")) {

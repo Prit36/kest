@@ -666,7 +666,9 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
         if (o->icon || search_icon) bn->pad[3] = CUI__FIELD_PAD_ICON;
         bn->bg = disabled ? CUI_C(ui, SURFACE_MUTED) : CUI_C(ui, SURFACE);
         bn->border = 1;
-        cui_color border = cui__control_edge(ui, e->hover);
+        /* Kest: a field answers hover with its outline (a button answers with
+         * its fill), so it reads as a place to type. */
+        cui_color border = cui_mix(CUI_C(ui, BORDER_STRONG), CUI_C(ui, TEXT_MUTED), cui__clampf(e->hover, 0, 1));
         cui_color focus_c = cui__edge_on(ui);
         border = cui_mix(border, focus_c, e->focus);
         if (has_error) border = CUI_C(ui, DANGER);

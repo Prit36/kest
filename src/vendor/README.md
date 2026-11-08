@@ -18,7 +18,8 @@ original stb rasterization is used.
 
 ## `cui_textedit.c`
 
-Local changes: an edit menu in every text field. A right-click focuses the
+Local changes: a boxed field's outline strengthens fully on hover, so fields
+read as editable rather than clickable; an edit menu in every text field. A right-click focuses the
 field and places the caret (keeping a selection it lands in), then opens Undo,
 Redo, Cut, Copy, Paste, Delete and Select all (Copy and Select all for
 read-only fields; nothing that copies a password). A chosen command is kept
@@ -27,6 +28,25 @@ A caller can set `kest_edit_menu_owned` so that its own menu answers the
 right-click instead; table cells do, and `kest_edit_menu_items` adds the
 cell's edit commands to the top of the row menu. The interface is
 `src/kest_edit.h`.
+
+## `cui_overlay.c`
+
+Local changes: a context menu (opened at the pointer) closes on a press
+anywhere outside it, including on the view it was opened on; a menu trigger
+still toggles its own menu. Menus also close when the window loses focus. A
+tooltip on a wide or tall anchor (a tree row, a field) appears at the pointer
+instead of centered over the anchor, and so does one whose anchor the pointer
+is not on. A one-line toast centers its icon, title and buttons vertically,
+and toast buttons stay out of the Tab order so keyboard focus is never
+trapped in a toast.
+
+## `cui_draw.c`
+
+Local changes: outlines up to three device pixels wide are snapped to whole
+device pixels, so all four sides of a border or focus ring are equally sharp at
+fractional display scales. A focus ring that would be cut off by a clipping
+box (an icon inside the URL bar, a cell) is drawn just inside its control
+instead, with a background line that keeps it visible on filled buttons.
 
 ## `cui_render_gl.c` and `cui_render_sw.c`
 

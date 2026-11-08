@@ -6,7 +6,9 @@
 #include "kest_edit.h"
 
 /* The suggestion list under a field: it never takes the field's keys. */
+void cui__draw_focus_ring(cui_ctx *ui, cui_rect r, cui_corners rad, float alpha);
 cui_id kest_suggest_popup;
+void kest_tooltip_for(cui_ctx *ui, cui_id anchor, const char *text);
 #define suggest_popup kest_suggest_popup
 void kest_focus(cui_ctx *ui, const char *id) { ui->focus = cui_make_id(ui, id); }
 void kest_input_select_all(cui_ctx *ui, const char *key, int length) {
@@ -159,6 +161,14 @@ static void mark_match(cui_ctx *ui, int label, const char *name, int start, int 
     n->paint = paint_match; n->paint_data = m;
 }
 void kest_collection_row_selected(cui_ctx *ui) { kest_a11y_selected(ui, collection_row_id); }
+/* A tooltip on the tree row being built. The grid row is the anchor, so the
+ * tip belongs to the row under the pointer and not to whichever control was
+ * built last. */
+void kest_collection_row_tooltip(cui_ctx *ui, const char *text) {
+    if (!collection_row_id) return;
+    kest_tooltip_for(ui, collection_row_id, text);
+    kest_a11y_help_id(ui, collection_row_id, text);
+}
 
 /* CUI's tree cell is sized for a file browser: 12px cell inset, 16px per
  * level, a 20px chevron box with a 14px glyph and a 16px icon. The sidebar
@@ -166,7 +176,7 @@ void kest_collection_row_selected(cui_ctx *ui) { kest_a11y_selected(ui, collecti
  * guide and chevron paint data mirror CUI's private structs. */
 typedef struct { int levels; float x0, step; cui_color color; } kest_tt_guides;
 typedef struct { float angle; cui_color color; float size; const char *icon; } kest_rot_icon;
-enum { KEST_TREE_PAD = 8, KEST_TREE_STEP = 12, KEST_TREE_CHEV = 16, KEST_TREE_GLYPH = 10, KEST_TREE_ICON = 14 };
+enum { KEST_TREE_BAR_GAP = 14, KEST_TREE_PAD = 8, KEST_TREE_STEP = 12, KEST_TREE_CHEV = 16, KEST_TREE_GLYPH = 10, KEST_TREE_ICON = 14 };
 static void tighten_tree_cell(cui_ctx *ui, int cell, bool icon) {
     cui_node *c = &ui->nodes[cell];
     c->pad[3] = KEST_TREE_PAD;
@@ -204,6 +214,17 @@ void kest_collection_name(cui_ctx *ui, const char *name, const char *method, con
     int row = cui__current(ui);
     if (row >= 0) { ui->nodes[row].paint = NULL; ui->nodes[row].paint_data = NULL; }
     collection_row_id = row >= 0 ? ui->nodes[row].id : 0;
+    /* The grid hovers a row only while the row itself is under the pointer,
+     * so moving onto the row's own actions button would unhover it, hide the
+     * button, hover the row again and flicker. The row stays hovered while
+     * the pointer is anywhere inside it. */
+    if (row >= 0 && ui->hot_layer == ui->current_layer && cui__rect_contains(cui__prev_rect(ui, collection_row_id), ui->mx, ui->my)) {
+        cui_node *rn = &ui->nodes[row];
+        float *hover = cui_state(ui, collection_row_id, sizeof(float));
+        cui_color selected = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, ACTIVE) : cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, ACCENT), ui->mode == CUI_THEME_DARK ? 0.16f : 0.09f);
+        if (memcmp(&rn->bg, &selected, sizeof selected) != 0) rn->bg = CUI_C(ui, HOVER);
+        *hover = 1;
+    }
     cui_tree_table_name(ui, method ? method : name, method ? NULL : icon);
     if (cui__current(ui) >= 0) tighten_tree_cell(ui, cui__current(ui), !method && icon);
     {
@@ -233,9 +254,14 @@ void kest_collection_name(cui_ctx *ui, const char *name, const char *method, con
     ui->nodes[label].w = CUI_FILL;
     ui->nodes[label].min_w = 1;
     int cell = cui__current(ui);
-    if (cell >= 0) ui->nodes[cell].pad[1] = 4;
+    /* The row's actions button stays clear of the scrollbar's 12px hit zone
+     * at the tree's right edge, so a click never lands on both. */
+    if (cell >= 0) ui->nodes[cell].pad[1] = KEST_TREE_BAR_GAP;
     mark_match(ui, label, name, match_start, match_length);
     collection_match_label = label;
+    /* The control just built is the row: a context menu or tooltip that
+     * follows attaches to it, not to the last text inside it. */
+    if (collection_row_id) ui->last_id = collection_row_id;
 }
 
 /* Whether the tree row being built is under the pointer. Reads the grid's
@@ -318,7 +344,11 @@ static void paint_control(cui_ctx *ui, cui_node *n, void *raw) {
     } else if (p->kind == 0 && p->selected) {
         cui_draw_rect(ui, (cui_rect){r.x, r.y + 7, 2, r.h - 14}, CUI_CORNERS(1), CUI_C(ui, ACCENT));
     }
-    if (p->focus) {
+    if (p->focus && p->kind == 3) {
+        /* A filled button (Send) shows its focus as a ring around it; an
+         * outline in the ring's colour on the button itself is invisible. */
+        cui__draw_focus_ring(ui, r, n->radius, 1.0f);
+    } else if (p->focus) {
         float pixel = 1 / (ui->scale > 0 ? ui->scale : 1);
         cui_draw_rect_border(ui, r, CUI_CORNERS(p->kind == 0 ? KEST_RADIUS_CONTROL : 0), (cui_color){0}, CUI_C(ui, FOCUS_RING), pixel);
     }
@@ -566,13 +596,31 @@ static void paint_boundary(cui_ctx *ui, cui_node *n, void *raw) {
     float end_x = floorf((r.x + r.w) * scale) / scale;
     float end_y = floorf((r.y + r.h) * scale) / scale;
     if (p->handle) {
-        if (ui->hot != n->id && ui->active != n->id) return;
-        /* A short grip at the center cannot paint over header intersections. */
-        if (p->horizontal) { x = roundf((r.x + r.w * 0.5f - 16) * scale) / scale; end_x = x + 32; }
-        else { y = roundf((r.y + r.h * 0.5f - 16) * scale) / scale; end_y = y + 32; }
+        /* Kest: the whole divider lights up while it is hovered and stays lit,
+         * a little thicker, while it is dragged. */
+        bool active = ui->active == n->id;
+        if (ui->hot != n->id && !active) return;
+        float w = (active ? 2 : 1) / scale;
+        cui_color c = cui_alpha(p->color, active ? 1.0f : 0.75f);
+        cui_rect bar = p->horizontal ? (cui_rect){x, y - (active ? 1 / scale : 0), end_x - x, w} : (cui_rect){x - (active ? 1 / scale : 0), y, w, end_y - y};
+        cui_draw_rect(ui, bar, CUI_CORNERS(0), c);
+        return;
     }
     cui_rect line = p->horizontal ? (cui_rect){x, y, end_x - x, 1 / scale} : (cui_rect){x, y, 1 / scale, end_y - y};
     cui_draw_rect(ui, line, CUI_CORNERS(0), p->color);
+}
+
+/* Where a table's column boundary is: shown while it is hovered or dragged. */
+void kest_resize_guide(cui_ctx *ui, float x, float y, float h, bool active) {
+    if (h <= 0) return;
+    float scale = ui->scale > 0 ? ui->scale : 1;
+    float w = (active ? 2 : 1) / scale;
+    int root = cui__float_begin(ui, 0x6E51D3u, 900, 0, CUI__PLACE_POINT, 0);
+    cui_node *n = &ui->nodes[root];
+    n->fx = roundf((x - w * 0.5f) * scale) / scale; n->fy = y;
+    n->w = CUI_PX(w); n->h = CUI_PX(h); n->max_h = h;
+    n->bg = cui_alpha(CUI_C(ui, ACCENT), active ? 1.0f : 0.75f);
+    cui__float_end(ui);
 }
 
 static kest_boundary_paint *boundary(cui_ctx *ui, int node, bool horizontal, bool handle) {
@@ -619,6 +667,11 @@ cui_path_bar_result kest_path_bar_ex(cui_ctx *ui, const char *key, const char *c
     return result;
 }
 
+typedef struct { int flags; int outlined; } kest_row_paint;
+/* The table row being built, so its cell can ask for its outline to be
+ * redrawn over the row's divider. Cleared at the end of every frame. */
+static kest_row_paint *table_row_paint;
+static uint64_t table_row_frame;
 static void apply_marks(cui_ctx *ui, cui_id id, int first);
 int kest_flat_input(cui_ctx *ui, const char *key, char *buf, size_t cap, const cui_input_opts *opts, bool cell) {
     cui_id id = cui_make_id(ui, key);
@@ -631,12 +684,21 @@ int kest_flat_input(cui_ctx *ui, const char *key, char *buf, size_t cap, const c
     cui_node *n = &ui->nodes[first];
     n->min_w = 1;
     n->pad[1] = n->pad[3] = cell ? 10 : 8;
+    bool disabled = opts && opts->disabled;
+    /* A field answers hover with an outline, where a button or row answers
+     * with a fill, so the place to type is plain before the click. */
+    bool hover = !disabled && ui->hot == id && ui->focus != id && !ui->mdown[CUI_MOUSE_LEFT];
     if (cell && ui->focus == id) {
         n->bg = CUI_C(ui, SURFACE_RAISED);
         n->border = 1; n->border_color = CUI_C(ui, ACCENT);
+    } else if (cell && hover) {
+        n->border = 1; n->border_color = CUI_C(ui, BORDER_STRONG);
     }
-    if (!cell && ui->focus == id && n->parent >= 0 && ui->nodes[n->parent].border > 0)
-        ui->nodes[n->parent].border_color = CUI_C(ui, ACCENT);
+    if (cell && n->border > 0 && table_row_paint && table_row_frame == ui->frame) table_row_paint->outlined = first;
+    if (!cell && n->parent >= 0 && ui->nodes[n->parent].border > 0) {
+        if (ui->focus == id) ui->nodes[n->parent].border_color = CUI_C(ui, ACCENT);
+        else if (hover) ui->nodes[n->parent].border_color = cui_mix(CUI_C(ui, BORDER_STRONG), CUI_C(ui, TEXT_MUTED), 0.6f);
+    }
     return flags;
 }
 
@@ -668,6 +730,7 @@ void kest_table_popup_cleanup(cui_ctx *ui) {
 }
 
 void kest_end_frame(cui_ctx *ui) {
+    table_row_paint = NULL;
     kest_table_popup_cleanup(ui);
     cui_state_entry *entry = cui__state_entry(ui, KEST_TABLE_POPUPS);
     if (entry->size != sizeof(table_popup_owners)) { cui_end_frame(ui); return; }
@@ -840,13 +903,20 @@ int kest_response_header_navigation(cui_ctx *ui, int count) {
 }
 
 static void paint_table_row(cui_ctx *ui, cui_node *n, void *raw) {
-    int flags = raw ? *(int *)raw : 0;
+    kest_row_paint *rp = raw;
+    int flags = rp ? rp->flags : 0;
     float scale = ui->scale > 0 ? ui->scale : 1;
     float y = floorf((n->rect.y + n->rect.h) * scale) / scale - 1 / scale;
     cui_draw_rect(ui, (cui_rect){n->rect.x, y, n->rect.w, 1 / scale}, CUI_CORNERS(0), CUI_C(ui, BORDER_SUBTLE));
     /* Where dragged rows will land: a line above or below this row. */
     if (flags & KEST_ROW_DROP_ABOVE) cui_draw_rect(ui, (cui_rect){n->rect.x, n->rect.y - 1, n->rect.w, 2}, CUI_CORNERS(1), CUI_C(ui, ACCENT));
     if (flags & KEST_ROW_DROP_BELOW) cui_draw_rect(ui, (cui_rect){n->rect.x, n->rect.y + n->rect.h - 1, n->rect.w, 2}, CUI_CORNERS(1), CUI_C(ui, ACCENT));
+    /* A focused or hovered cell's outline shares the row's last pixel with
+     * the divider; draw it again so all four of its sides show. */
+    if (rp && rp->outlined >= 0 && rp->outlined < ui->node_count) {
+        cui_node *cell = &ui->nodes[rp->outlined];
+        if (cell->border > 0) cui_draw_rect_border(ui, cell->rect, cell->radius, (cui_color){0}, cell->border_color, cell->border);
+    }
 }
 
 void kest_table_row_begin(cui_ctx *ui, int flags) {
@@ -856,8 +926,9 @@ void kest_table_row_begin(cui_ctx *ui, int flags) {
     bool focused = ui->focus == cui_make_id(ui, "key") || ui->focus == cui_make_id(ui, "value");
     cui_color bg = (flags & KEST_ROW_SELECTED) ? cui_alpha(CUI_C(ui, ACCENT), hovered ? 0.2f : 0.14f) : hovered ? CUI_C(ui, HOVER) : focused ? CUI_C(ui, SURFACE_MUTED) : (cui_color){0};
     cui_row_begin(ui, &(cui_box){ .id = "kv-row", .height = CUI_PX(KEST_TABLE_STRIDE), .width = CUI_FILL, .align = CUI_ALIGN_CENTER, .bg = bg });
-    int *data = CUI_PAINT_DATA(ui, int);
-    *data = flags;
+    kest_row_paint *data = CUI_PAINT_DATA(ui, kest_row_paint);
+    data->flags = flags; data->outlined = -1;
+    table_row_paint = data; table_row_frame = ui->frame;
     ui->nodes[ui->last_node].paint = paint_table_row;
     ui->nodes[ui->last_node].paint_data = data;
     ui->nodes[ui->last_node].flags |= CUI_NF_PAINT_AFTER;
@@ -1119,6 +1190,12 @@ bool kest_right_pressed(cui_ctx *ui, cui_id id) {
     if (!id || !ui->mpressed[CUI_MOUSE_RIGHT]) return false;
     if (ui->hot == id) return true;
     return ui->hot_layer == ui->current_layer && cui__rect_contains(cui__prev_rect(ui, id), ui->mx, ui->my);
+}
+
+/* Whether the popup `pid` (a menu's popup id) is open. */
+bool kest_popup_open(cui_ctx *ui, cui_id pid) {
+    cui_popup *p = cui__popup_get(ui, pid, false);
+    return p && p->open;
 }
 
 /* How many clicks the latest press continues: 2 for a double-click. */

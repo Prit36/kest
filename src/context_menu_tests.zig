@@ -129,6 +129,12 @@ pub fn run(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime click: a
     try equal(@src(), "{\"a\":1}", t.body.text());
     rightClick(ui, app, rect(ui, t, "body-editor"), frame);
     try choose(@src(), ui, app, body_menu, "Format JSON", frame, click);
+    // A click elsewhere in the editor the menu was opened on closes it.
+    rightClick(ui, app, rect(ui, t, "body-editor"), frame);
+    try check(@src(), c.kest_popup_open(ui, body_menu.id));
+    const editor = rect(ui, t, "body-editor");
+    click(ui, app, editor.x + 8, editor.y + 8);
+    try check(@src(), !c.kest_popup_open(ui, body_menu.id));
     try check(@src(), std.mem.indexOfScalar(u8, t.body.text(), '\n') != null);
 
     // Request tabs: Close others closes saved tabs and keeps edited ones.

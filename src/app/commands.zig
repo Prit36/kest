@@ -210,8 +210,8 @@ pub fn openUnsaved(app: *App, r: req.Request) ?*Tab {
 
 pub fn save(app: *App, t: *Tab) void {
     if (t.link == null) return beginSaveAs(app, t);
+    // The tab's unsaved dot clearing is the confirmation; failures toast.
     persist.flushTab(app, t, true);
-    if (t.link != null) app.toast(.success, "Saved", t.name);
 }
 
 pub fn beginSaveAs(app: *App, t: *Tab) void {

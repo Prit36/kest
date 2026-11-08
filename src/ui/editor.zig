@@ -695,7 +695,8 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     c.cui_draw_rect(ui, rect, .{}, w.color(c.CUI_TOKEN_SURFACE));
     c.cui_draw_rect(ui, .{ .x = rect.x, .y = rect.y, .w = gutter, .h = rect.h }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
     c.cui_draw_line(ui, .{ .x = rect.x + gutter, .y = rect.y }, .{ .x = rect.x + gutter, .y = rect.y + rect.h }, 1 / @max(1, c.cui_dpi_scale(ui)), w.color(c.CUI_TOKEN_BORDER_SUBTLE));
-    if (p.focused) c.cui_draw_line(ui, .{ .x = rect.x, .y = rect.y + 0.5 }, .{ .x = rect.x + rect.w, .y = rect.y + 0.5 }, 1 / @max(1, c.cui_dpi_scale(ui)), w.color(c.CUI_TOKEN_FOCUS_RING));
+    // Drawn after the content, inside the clip, so all four sides show.
+    defer if (p.focused) w.focusFrame(ui, rect);
     const first: usize = @intFromFloat(@floor(s.scroll_y / font.line()));
     const count: usize = @intFromFloat(@ceil(visible / font.line()) + 2);
     const last = @min(shown, first + count);

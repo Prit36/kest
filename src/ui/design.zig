@@ -1,5 +1,6 @@
-//! T3 Code's default neutral dark/light palette, mapped to native CUI roles.
-//! Source: pingdotgg/t3code, packages/shared/src/themePalettes.ts.
+//! Kest's dark/light palette, mapped to native CUI roles. The light palette
+//! follows T3 Code's neutral one (pingdotgg/t3code, themePalettes.ts); the
+//! dark one is lifted charcoal so layers and states stay distinguishable.
 //! Motion is short and settles: CUI's durations run at `motion_scale`, so
 //! hover fades take ~70 ms and menus/dialogs ~150 ms. Headless frames stay still.
 const c = @import("c.zig").c;
@@ -71,11 +72,13 @@ pub fn apply(ui: *c.cui_ctx, dark: bool) void {
         c.CUI_TOKEN_WARNING,       c.CUI_TOKEN_DANGER,            c.CUI_TOKEN_INFO,
         c.CUI_TOKEN_HOVER,         c.CUI_TOKEN_ACTIVE,            c.CUI_TOKEN_FOCUS_RING,
     };
+    // Dark: a lifted charcoal with a faint cool tint rather than near-black,
+    // so surfaces, borders and hover states separate clearly.
     const night = [_]u32{
-        0x0a0a0a, 0x111111, 0x111111, 0x141414, 0xf5f5f5, 0xa3a3a3,
-        0x818181, 0x191919, 0x141414, 0x363636, 0x346bf1, 0x3061d9,
-        0x121b34, 0xffffff, 0x34d399, 0xffb900, 0xff6467, 0x51a2ff,
-        0x141414, 0x1a1b1b, 0x346bf1,
+        0x17181b, 0x1c1d21, 0x232429, 0x202125, 0xedeef0, 0xb0b2b9,
+        0x878a93, 0x2c2e33, 0x26272c, 0x40434a, 0x4479f2, 0x3a6ce6,
+        0x1d2a49, 0xffffff, 0x3ecf8e, 0xf5b73b, 0xf26b6b, 0x5ea7ff,
+        0x27282d, 0x2f3036, 0x5b8af5,
     };
     const day = [_]u32{
         0xfcfcfc, 0xffffff, 0xfcfcfc, 0xfafafa, 0x27272a, 0x71717b,
@@ -86,8 +89,8 @@ pub fn apply(ui: *c.cui_ctx, dark: bool) void {
     for (tokens, day, night) |token, light_value, dark_value| t.*.colors[@intCast(token)] = pick(light_value, dark_value);
     t.*.colors[c.CUI_TOKEN_CONTROL_ON] = t.*.colors[c.CUI_TOKEN_ACCENT];
     t.*.colors[c.CUI_TOKEN_CONTROL_GLYPH] = t.*.colors[c.CUI_TOKEN_ACCENT_FOREGROUND];
-    t.*.colors[c.CUI_TOKEN_CONTROL_TRACK] = pick(0xd4d4d8, 0x222222);
-    t.*.colors[c.CUI_TOKEN_CONTROL_TRACK_HOVER] = pick(0xbdbdbd, 0x363636);
+    t.*.colors[c.CUI_TOKEN_CONTROL_TRACK] = pick(0xd4d4d8, 0x34363c);
+    t.*.colors[c.CUI_TOKEN_CONTROL_TRACK_HOVER] = pick(0xbdbdbd, 0x45474e);
     t.*.colors[c.CUI_TOKEN_CONTROL_THUMB] = rgb(0xffffff);
     t.*.colors[c.CUI_TOKEN_CONTROL_THUMB_ON] = rgb(0xffffff);
     t.*.colors[c.CUI_TOKEN_SCRIM] = .{ .r = 0, .g = 0, .b = 0, .a = @intFromFloat(@round(pickf(84, 170))) };
@@ -113,7 +116,7 @@ pub fn apply(ui: *c.cui_ctx, dark: bool) void {
 }
 
 pub fn sidebar() c.cui_color {
-    return pick(0xfafafa, 0x000000);
+    return pick(0xfafafa, 0x141518);
 }
 
 pub const Syntax = enum { key, string, number, keyword, comment };
@@ -124,6 +127,6 @@ pub fn syntax(ui: *c.cui_ctx, role: Syntax) c.cui_color {
         .string => pick(0x166534, 0x86efac),
         .number => pick(0x9a3412, 0xfdba74),
         .keyword => pick(0x6d28d9, 0xc4b5fd),
-        .comment => pick(0x71717b, 0x818181),
+        .comment => pick(0x71717b, 0x878a93),
     };
 }

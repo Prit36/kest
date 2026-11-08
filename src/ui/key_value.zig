@@ -39,7 +39,7 @@ fn undoToast(ui: *c.cui_ctx, values: *tab.Table, title: [*:0]const u8) void {
 /// Dragging the boundary between two headings (`key_id`, `value_id`, in
 /// the current id scope) sets the first one's share; a double-click resets
 /// it. Returns whether the pointer is on the boundary.
-pub fn columnSplit(ui: *c.cui_ctx, key_id: [*:0]const u8, value_id: [*:0]const u8, share: *f32, resizing: *bool, enabled: bool) bool {
+pub fn columnSplit(ui: *c.cui_ctx, area_id: [*:0]const u8, key_id: [*:0]const u8, value_id: [*:0]const u8, share: *f32, resizing: *bool, enabled: bool) bool {
     const mouse = c.cui_mouse_pos(ui);
     const key = c.cui_get_rect(ui, c.cui_make_id(ui, key_id));
     const value = c.cui_get_rect(ui, c.cui_make_id(ui, value_id));
@@ -56,6 +56,13 @@ pub fn columnSplit(ui: *c.cui_ctx, key_id: [*:0]const u8, value_id: [*:0]const u
             share.* = std.math.clamp((mouse.x - key.x) / (key.w + value.w), 0.15, 0.85);
             c.cui_request_redraw(ui);
         }
+    }
+    // The boundary lights up over the heading and the rows below it.
+    if ((on or resizing.*) and key.w > 0) {
+        const area = c.cui_get_rect(ui, c.cui_make_id(ui, area_id));
+        const bottom = if (area.h > 0) area.y + area.h else key.y + key.h;
+        const x = if (resizing.*) key.x + share.* * (key.w + value.w) else boundary;
+        c.kest_resize_guide(ui, x, key.y, bottom - key.y, resizing.*);
     }
     return on;
 }
@@ -202,7 +209,7 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
     const mouse = c.cui_mouse_pos(ui);
     const pressed = c.kest_left_pressed(ui);
     const held = c.cui_mouse_down(ui, c.CUI_MOUSE_LEFT);
-    const on_boundary = columnSplit(ui, "kv-key-heading", "kv-value-heading", &values.key_share, &values.resizing, values.selected.items.len == 0);
+    const on_boundary = columnSplit(ui, "kv-grid", "kv-key-heading", "kv-value-heading", &values.key_share, &values.resizing, values.selected.items.len == 0);
     const key_weight = values.key_share * 10;
     const value_weight = (1 - values.key_share) * 10;
     // A grip let go: drop the rows being dragged, or settle the pick.
@@ -234,23 +241,26 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
         slot(ui, c.KEST_TABLE_ENABLED);
         c.cui_icon(ui, c.CUI_ICON_CHECK, 12, w.color(c.CUI_TOKEN_TEXT_SECONDARY));
         w.end(ui);
+        // A heading cycles: A to Z, Z to A, then back to the original order.
+        // The arrow shows the order, so no toast is needed.
         var sort: ?tab.Table.Sort = null;
         if (sortHeading(ui, "kv-key-heading", switch (opts.kind) {
             .params => "Parameter",
             .headers => "Header",
             .form => "Field",
             .variables => "Variable",
-        }, key_weight, values.sort == .key_up, values.sort == .key_down, "Sort by name") and !on_boundary) sort = if (values.sort == .key_up) .key_down else .key_up;
-        if (sortHeading(ui, "kv-value-heading", "Value", value_weight, values.sort == .value_up, values.sort == .value_down, "Sort by value") and !on_boundary) sort = if (values.sort == .value_up) .value_down else .value_up;
-        if (sort) |order| if (values.rows.items.len > 1) {
-            values.remember();
-            values.sortBy(order);
-            undoToast(ui, values, switch (order) {
-                .key_up => "Sorted by name, A to Z",
-                .key_down => "Sorted by name, Z to A",
-                .value_up => "Sorted by value, A to Z",
-                else => "Sorted by value, Z to A",
-            });
+        }, key_weight, values.sort == .key_up, values.sort == .key_down, "Sort by name") and !on_boundary) sort = switch (values.sort) {
+            .key_up => .key_down,
+            .key_down => .none,
+            else => .key_up,
+        };
+        if (sortHeading(ui, "kv-value-heading", "Value", value_weight, values.sort == .value_up, values.sort == .value_down, "Sort by value") and !on_boundary) sort = switch (values.sort) {
+            .value_up => .value_down,
+            .value_down => .none,
+            else => .value_up,
+        };
+        if (sort) |order| if (values.rows.items.len > 1 or order == .none) {
+            if (order == .none) values.unsort() else values.sortBy(order);
             changed = true;
         };
         if (files) {

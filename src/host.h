@@ -45,6 +45,7 @@ cui_doc_tabs_result kest_doc_tabs_ex(cui_ctx *ui, const char *id, const kest_doc
 bool kest_document_menu_item(cui_ctx *ui, const char *identity, const char *label, bool checked, const char *scroll);
 bool kest_scrolling_menu_item(cui_ctx *ui, const char *label, const cui_menu_item_opts *opts, const char *scroll);
 void kest_document_list_begin(cui_ctx *ui, const char *id, float max_height);
+void kest_resize_guide(cui_ctx *ui, float x, float y, float h, bool active);
 void kest_separator(cui_ctx *ui, const char *id, bool vertical);
 void kest_split_next(cui_ctx *ui, const char *id, bool vertical);
 cui_path_bar_result kest_path_bar_ex(cui_ctx *ui, const char *id, const char *const *segments, int count, const cui_path_bar_opts *opts);
@@ -62,6 +63,7 @@ void kest_set_cursor(cui_ctx *ui, cui_cursor cursor);
 bool kest_row_hovered(cui_ctx *ui);
 bool kest_table_menu_begin(cui_ctx *ui, const char *id, bool row, const char *notice, cui_color color);
 bool kest_context_menu_begin(cui_ctx *ui, const char *key, cui_id anchor);
+bool kest_popup_open(cui_ctx *ui, cui_id pid);
 bool kest_right_pressed(cui_ctx *ui, cui_id id);
 int kest_click_count(cui_ctx *ui);
 void kest_wake_after(cui_ctx *ui, float seconds);
@@ -110,6 +112,7 @@ void kest_a11y_label(cui_ctx *ui, int role, const char *name, const char *value)
 void kest_a11y_label_id(cui_ctx *ui, cui_id id, int role, const char *name, const char *value);
 void kest_a11y_selected(cui_ctx *ui, cui_id id);
 void kest_a11y_help_id(cui_ctx *ui, cui_id id, const char *text);
+void kest_collection_row_tooltip(cui_ctx *ui, const char *text);
 void kest_collection_row_selected(cui_ctx *ui);
 void kest_tooltip(cui_ctx *ui, const char *text);
 void kest_a11y_frame(cui_ctx *ui, void *window);

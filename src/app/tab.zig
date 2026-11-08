@@ -41,6 +41,9 @@ pub const Table = struct {
     select_anchor: ?u32 = null,
     /// The order last chosen from a heading, for its arrow.
     sort: Sort = .none,
+    /// Row uids in their order before the first heading sort, so a third
+    /// click on a heading puts the rows back as they were.
+    unsorted: std.ArrayList(u32) = .empty,
     /// A grip pressed, and once moved, the rows being dragged.
     drag: ?Drag = null,
     /// The rows as bulk text before the last bulk change, for Undo.
@@ -66,6 +69,7 @@ pub const Table = struct {
         t.rows.deinit(t.gpa);
         if (t.bulk) |*b| b.deinit();
         t.selected.deinit(t.gpa);
+        t.unsorted.deinit(t.gpa);
         if (t.undo_text) |u| t.gpa.free(u);
     }
 
@@ -139,6 +143,13 @@ pub const Table = struct {
 
     /// Sorts the rows (stably: equal names keep their order).
     pub fn sortBy(t: *Table, order: Sort) void {
+        if (order != .none and t.sort == .none) {
+            t.unsorted.clearRetainingCapacity();
+            for (t.rows.items) |r| t.unsorted.append(t.gpa, r.uid) catch {
+                t.unsorted.clearRetainingCapacity();
+                break;
+            };
+        }
         switch (order) {
             .none => return,
             .key_up, .key_down => std.mem.sort(*Row, t.rows.items, {}, lessByKey),
@@ -146,6 +157,26 @@ pub const Table = struct {
         }
         if (order == .key_down or order == .value_down) std.mem.reverse(*Row, t.rows.items);
         t.sort = order;
+    }
+
+    /// Back to the order before the first heading sort. Rows added since
+    /// then keep their place after the rows that were there; edits are kept.
+    pub fn unsort(t: *Table) void {
+        defer {
+            t.sort = .none;
+            t.unsorted.clearRetainingCapacity();
+        }
+        if (t.unsorted.items.len == 0) return;
+        const Rank = struct {
+            order: []const u32,
+            fn of(r: @This(), row: *Row) usize {
+                return std.mem.indexOfScalar(u32, r.order, row.uid) orelse r.order.len;
+            }
+            fn less(r: @This(), x: *Row, y: *Row) bool {
+                return r.of(x) < r.of(y);
+            }
+        };
+        std.mem.sort(*Row, t.rows.items, Rank{ .order = t.unsorted.items }, Rank.less);
     }
 
     /// Moves the picked rows (or just `uid` when it isn't picked) to before

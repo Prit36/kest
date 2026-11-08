@@ -19,9 +19,9 @@ pub fn build(b: *std.Build) void {
     cui.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/src"));
     cui.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/"));
     cui.addCSourceFiles(.{ .root = dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/"), .files = &.{
-        "src/cui_core.c",         "src/cui_theme.c",            "src/cui_draw.c",
+        "src/cui_core.c",         "src/cui_theme.c",
         "src/cui_layout.c",       "src/cui_widgets.c",          "src/cui_controls.c",
-        "src/cui_overlay.c",      "src/cui_data.c",             "src/cui_actions.c",
+        "src/cui_data.c",             "src/cui_actions.c",
         "src/cui_disclosure.c",   "src/cui_extras.c",
         "src/cui_grid.c",         "src/cui_treetable.c",        "src/cui_markdown.c",
         "src/cui_editor.c",       "src/cui_diff.c",             "src/cui_code.c",
@@ -32,6 +32,8 @@ pub fn build(b: *std.Build) void {
     }, .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_text.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_textedit.c"), .flags = c_flags });
+    cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_overlay.c"), .flags = c_flags });
+    cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_draw.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_render_gl.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_render_sw.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/text_win32.c"), .flags = c_flags });
