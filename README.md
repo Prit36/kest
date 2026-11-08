@@ -93,7 +93,10 @@ body selector. Wrap changes presentation only. JSON errors identify a location
 without discarding or blocking invalid drafts; template validation follows the
 active environment. Body actions includes undo/redo, minify and copy.
 Multipart rows show Text/File controls and a file picker; row actions also offer
-keyboard access to field type and file selection. Switching formats preserves
+keyboard access to field type and file selection.
+The body editor has word and line clicks, drag-to-move, Find and Replace with
+regular expressions, JSON folding, multiple carets (Alt+click, Alt+drag for a
+column, Ctrl+Alt+Up/Down) and Ctrl+wheel zoom. Switching formats preserves
 all text, form fields and the binary path. URL-encoded forms treat values as
 text while retaining multipart file flags for later. Binary mode shows the
 selected file name/size, with Change file, Remove and Refresh. Metadata checks

@@ -63,6 +63,7 @@ fn menuItem(ui: *c.cui_ctx, label: [*:0]const u8, shortcut: [*:0]const u8, enabl
 /// The editing commands of a text view's context menu, acting as their
 /// shortcuts do. Read-only views offer Copy and Select all.
 pub fn editItems(ui: *c.cui_ctx, s: *State, source: []const u8, read_only: bool) void {
+    if (s.multi()) return multiItems(ui, s, source, read_only);
     const range = s.selection();
     const selected = range[1] > range[0];
     if (!read_only) {
@@ -87,6 +88,27 @@ pub fn editItems(ui: *c.cui_ctx, s: *State, source: []const u8, read_only: bool)
         _ = s.command(.select_all, source, read_only);
         s.precise_goal = null;
     }
+}
+
+/// The editing commands with several carets: each acts at every one.
+fn multiItems(ui: *c.cui_ctx, s: *State, source: []const u8, read_only: bool) void {
+    if (!read_only) {
+        if (menuItem(ui, "Undo", "Ctrl Z", s.undo.items.len > 0)) _ = s.undoEdit();
+        c.cui_menu_separator(ui);
+        if (menuItem(ui, "Cut", "Ctrl X", true)) {
+            if (s.copyAll(w.arena.allocator(), source)) |joined| w.copy(ui, joined) else |_| {}
+            s.editAll(.{ .insert = "" });
+        }
+    }
+    if (menuItem(ui, "Copy", "Ctrl C", true)) {
+        if (s.copyAll(w.arena.allocator(), source)) |joined| w.copy(ui, joined) else |_| {}
+    }
+    if (!read_only and menuItem(ui, "Paste", "Ctrl V", true)) {
+        const clip = c.kest_clipboard(ui);
+        if (clip != null) pasteAll(s, std.mem.span(clip));
+    }
+    c.cui_menu_separator(ui);
+    if (menuItem(ui, w.fmt("Keep one caret ({d} now)", .{s.extra.items.len + 1}), "Esc", true)) s.collapse();
 }
 
 /// A right-click focuses the view; outside the selection it also moves the
@@ -207,10 +229,13 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
     c.kest_editor_tabs(ui, identity, @intFromBool(!read_only and !s.tab_moves_focus));
     const fold_click = result.pressed and c.kest_left_pressed(ui) and rect.w > 0 and foldClick(ui, s, source, rect, gutter, fold_w, char_w);
     if (result.pressed and rect.w > 0 and !fold_click and s.move_drag != .cancelled) if (hit(ui, s, source, rect, gutter, char_w)) |pos| {
-        pointer(ui, s, source, pos, read_only);
+        pointer(ui, s, source, pos, read_only, c.cui_mouse_pos(ui).x - rect.x - gutter - code_gap + s.scroll_x, char_w);
     };
     if (fold_click) s.move_drag = .cancelled;
     if (!c.cui_mouse_down(ui, c.CUI_MOUSE_LEFT)) {
+        // An Alt+click that never dragged adds (or removes) a caret.
+        if (s.column == .pending) s.toggleCaret(s.drop_at);
+        s.column = .none;
         switch (s.move_drag) {
             .moving => s.moveSelection(s.drop_at, c.cui_key_mods(ui) & c.CUI_MOD_PRIMARY != 0),
             // A click inside the selection that never moved places the caret.
@@ -226,13 +251,23 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
 /// The left button is down over the text at `pos`. A press starts a
 /// selection, by words or lines after a double or triple click; a press
 /// inside the selection may instead drag it somewhere else.
-fn pointer(ui: *c.cui_ctx, s: *State, source: []const u8, pos: usize, read_only: bool) void {
+fn pointer(ui: *c.cui_ctx, s: *State, source: []const u8, pos: usize, read_only: bool, text_x: f32, char_w: f32) void {
     const mouse = c.cui_mouse_pos(ui);
+    if (s.column != .none) return columnDrag(ui, s, source, pos, text_x, char_w);
     if (!s.selecting and s.move_drag == .none) {
         const range = s.selection();
         const clicks = c.kest_click_count(ui);
         const shift = c.cui_key_mods(ui) & c.CUI_MOD_SHIFT != 0;
-        if (!read_only and clicks <= 1 and !shift and range[1] > range[0] and pos >= range[0] and pos < range[1]) {
+        // Alt+click adds a caret; Alt+drag selects a column.
+        if (!read_only and c.cui_key_mods(ui) & c.CUI_MOD_ALT != 0) {
+            s.column = .pending;
+            s.column_row = s.folds.visualOf(s.index.rowOf(pos));
+            s.column_x = text_x;
+            s.drop_at = pos;
+            s.selecting = true;
+            return;
+        }
+        if (!read_only and clicks <= 1 and !shift and !s.multi() and range[1] > range[0] and pos >= range[0] and pos < range[1]) {
             s.move_drag = .pending;
             s.press_x = mouse.x;
             s.press_y = mouse.y;
@@ -254,6 +289,128 @@ fn pointer(ui: *c.cui_ctx, s: *State, source: []const u8, pos: usize, read_only:
         .cancelled => {},
         .none => s.dragTo(source, pos),
     }
+}
+
+/// An Alt+drag: one selection per row between where it began and the
+/// pointer, each from the starting column to the pointer's.
+fn columnDrag(ui: *c.cui_ctx, s: *State, source: []const u8, pos: usize, text_x: f32, char_w: f32) void {
+    const row_now = s.folds.visualOf(s.index.rowOf(pos));
+    if (s.column == .pending) {
+        if (row_now == s.column_row and @abs(text_x - s.column_x) < char_w / 2) return;
+        s.column = .dragging;
+    }
+    const top = @min(row_now, s.column_row);
+    const bottom = @max(row_now, s.column_row);
+    var all: std.ArrayList(code.Sel) = .empty;
+    defer all.deinit(s.gpa);
+    var main: usize = 0;
+    for (top..bottom + 1) |visual| {
+        const row = s.folds.rowAt(visual);
+        const bounds = s.index.bounds(source, row);
+        const text = source[bounds[0]..bounds[1]];
+        const from = bounds[0] + byteAt(ui, text, @max(0, s.column_x), char_w);
+        const to = bounds[0] + byteAt(ui, text, @max(0, text_x), char_w);
+        if (visual == row_now) main = all.items.len;
+        all.append(s.gpa, .{ .anchor = from, .caret = to }) catch return;
+    }
+    s.setSelections(all.items, main);
+}
+
+/// The caret one row up or down from `pos`, at the same distance in.
+fn vertical(ui: *c.cui_ctx, s: *State, source: []const u8, pos: usize, up: bool, char_w: f32) usize {
+    const row = s.index.rowOf(pos);
+    const bounds = s.index.bounds(source, row);
+    const x = advance(ui, source[bounds[0]..@min(pos, bounds[1])], char_w);
+    const visual = s.folds.visualOf(row);
+    const target = s.folds.rowAt(if (up) visual -| 1 else @min(visual + 1, s.folds.rows(s.index.count()) - 1));
+    if (target == row) return pos;
+    const next = s.index.bounds(source, target);
+    return next[0] + byteAt(ui, source[next[0]..next[1]], x, char_w);
+}
+
+/// Pastes at every caret: a line each when the clipboard holds as many
+/// lines as there are carets, else the whole of it at each.
+pub fn pasteAll(s: *State, clip: []const u8) void {
+    const count = s.extra.items.len + 1;
+    var pieces: std.ArrayList([]const u8) = .empty;
+    defer pieces.deinit(s.gpa);
+    var lines = std.mem.splitScalar(u8, clip, '\n');
+    while (lines.next()) |line| pieces.append(s.gpa, std.mem.trimEnd(u8, line, "\r")) catch return;
+    if (pieces.items.len == count) s.editAll(.{ .each = pieces.items }) else s.editAll(.{ .insert = clip });
+}
+
+/// Keys while there are several carets: edits and moves act at each.
+fn multiKeys(ui: *c.cui_ctx, s: *State, source: []const u8, read_only: bool, char_w: f32) void {
+    const mods = c.cui_key_mods(ui);
+    const shift = mods & c.CUI_MOD_SHIFT != 0;
+    const ctrl = mods & c.CUI_MOD_PRIMARY != 0;
+    if (c.cui_key_pressed(ui, c.CUI_KEY_ESCAPE)) {
+        c.kest_consume_key(ui, c.CUI_KEY_ESCAPE);
+        s.collapse();
+        return;
+    }
+    if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_A)) {
+        s.collapse();
+        _ = s.command(.select_all, source, read_only);
+        return;
+    }
+    if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_C) or (!read_only and c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_X))) {
+        if (s.copyAll(w.arena.allocator(), source)) |joined| w.copy(ui, joined) else |_| {}
+        if (!read_only and c.cui_key_pressed(ui, c.CUI_KEY_X)) s.editAll(.{ .insert = "" });
+        return;
+    }
+    if (!read_only) {
+        if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_V)) {
+            const clip = c.kest_clipboard(ui);
+            if (clip != null) pasteAll(s, std.mem.span(clip));
+            return;
+        }
+        if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_Z)) {
+            _ = s.undoEdit();
+            return;
+        }
+        if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_Y) or c.cui_shortcut(ui, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT, c.CUI_KEY_Z)) {
+            _ = s.redoEdit();
+            return;
+        }
+        const entered = c.kest_editor_text(ui);
+        if (!ctrl and entered != null and entered[0] != 0) s.editAll(.{ .insert = std.mem.span(entered) });
+        if (c.cui_key_pressed(ui, c.CUI_KEY_BACKSPACE)) s.editAll(if (ctrl) .delete_word_backward else .delete_backward);
+        if (c.cui_key_pressed(ui, c.CUI_KEY_DELETE)) s.editAll(if (ctrl) .delete_word_forward else .delete_forward);
+        if (!ctrl and c.cui_key_pressed(ui, c.CUI_KEY_ENTER)) s.editAll(.{ .insert = "\n" });
+        if (!ctrl and !s.tab_moves_focus and c.cui_key_pressed(ui, c.CUI_KEY_TAB)) s.editAll(.{ .insert = "  " });
+    }
+    const now = s.text();
+    if (c.cui_key_pressed(ui, c.CUI_KEY_LEFT)) s.commandAll(if (ctrl) (if (shift) .select_word_left else .move_word_left) else (if (shift) .select_left else .move_left), now);
+    if (c.cui_key_pressed(ui, c.CUI_KEY_RIGHT)) s.commandAll(if (ctrl) (if (shift) .select_word_right else .move_word_right) else (if (shift) .select_right else .move_right), now);
+    if (c.cui_key_pressed(ui, c.CUI_KEY_HOME)) s.commandAll(if (shift) .select_line_start else .move_line_start, now);
+    if (c.cui_key_pressed(ui, c.CUI_KEY_END)) s.commandAll(if (shift) .select_line_end else .move_line_end, now);
+    const up = c.cui_key_pressed(ui, c.CUI_KEY_UP);
+    if ((up or c.cui_key_pressed(ui, c.CUI_KEY_DOWN)) and mods & c.CUI_MOD_ALT == 0) {
+        var all: std.ArrayList(code.Sel) = .empty;
+        defer all.deinit(s.gpa);
+        s.selections(&all) catch return;
+        var main: usize = 0;
+        for (all.items, 0..) |*x, i| {
+            if (x.caret == s.caret) main = i;
+            const to = vertical(ui, s, now, x.caret, up, char_w);
+            x.* = .{ .caret = to, .anchor = if (shift) x.anchor else to };
+        }
+        s.setSelections(all.items, main);
+    }
+}
+
+/// Ctrl+Alt+Up or Down: a caret on the row above the first caret, or
+/// below the last.
+fn addCaretVertically(ui: *c.cui_ctx, s: *State, source: []const u8, up: bool, char_w: f32) void {
+    var all: std.ArrayList(code.Sel) = .empty;
+    defer all.deinit(s.gpa);
+    s.selections(&all) catch return;
+    const edge = if (up) all.items[0] else all.items[all.items.len - 1];
+    const to = vertical(ui, s, source, edge.caret, up, char_w);
+    if (to == edge.caret) return;
+    all.append(s.gpa, .{ .caret = to, .anchor = to }) catch return;
+    s.setSelections(all.items, all.items.len - 1);
 }
 
 /// The byte under the mouse in the editor's rectangle.
@@ -286,6 +443,11 @@ fn keys(ui: *c.cui_ctx, s: *State, source_in: []const u8, read_only: bool, char_
     const mods = c.cui_key_mods(ui);
     const shift = mods & c.CUI_MOD_SHIFT != 0;
     const ctrl = mods & c.CUI_MOD_PRIMARY != 0;
+    if (!read_only and ctrl and mods & c.CUI_MOD_ALT != 0) {
+        if (c.cui_key_pressed(ui, c.CUI_KEY_UP)) addCaretVertically(ui, s, source, true, char_w);
+        if (c.cui_key_pressed(ui, c.CUI_KEY_DOWN)) addCaretVertically(ui, s, source, false, char_w);
+    }
+    if (s.multi()) return multiKeys(ui, s, source, read_only, char_w);
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_A)) _ = s.command(.select_all, source, read_only);
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_C)) w.copy(ui, s.selected(source));
     if (!read_only) {
@@ -465,6 +627,7 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
             const selection_end = advance(ui, entire_row[0..hi], char_w);
             c.cui_draw_rect(ui, .{ .x = x + selection_x, .y = y, .w = selection_end - selection_x, .h = font.line() }, .{}, w.color(c.CUI_TOKEN_ACCENT_SUBTLE));
         }
+        if (s.multi()) drawExtras(ui, s, p.focused, entire_row, bounds, x, y, char_w);
         var number: [16]u8 = undefined;
         const label = if (s.index.isContinued(i)) "" else std.fmt.bufPrint(&number, "{d}", .{s.index.lineNumber(i)}) catch "";
         const label_w = c.cui_measure_text(ui, c.CUI_FONT_MONO, font.small(), label.ptr, @intCast(label.len)).width;
@@ -511,6 +674,30 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     if (total > visible) {
         const thumb = @max(20, visible * visible / total);
         c.cui_draw_rect(ui, .{ .x = rect.x + rect.w - 5, .y = rect.y + 8 + s.scroll_y / (total - visible) * (visible - thumb), .w = 3, .h = thumb }, .{ .tl = 2, .tr = 2, .br = 2, .bl = 2 }, w.color(c.CUI_TOKEN_BORDER_STRONG));
+    }
+}
+
+/// The other carets' selections and carets on one row.
+fn drawExtras(ui: *c.cui_ctx, s: *const State, focused: bool, row: []const u8, bounds: [2]usize, x: f32, y: f32, char_w: f32) void {
+    const items = s.extra.items;
+    // Sorted and apart, so their ends ascend too.
+    var lo: usize = 0;
+    var hi: usize = items.len;
+    while (lo < hi) {
+        const mid = (lo + hi) / 2;
+        if (items[mid].hi() < bounds[0]) lo = mid + 1 else hi = mid;
+    }
+    while (lo < items.len and items[lo].lo() <= bounds[1]) : (lo += 1) {
+        const sel = items[lo];
+        if (sel.hi() > bounds[0] and sel.lo() < bounds[1]) {
+            const a = advance(ui, row[0 .. @max(sel.lo(), bounds[0]) - bounds[0]], char_w);
+            const b = advance(ui, row[0 .. @min(sel.hi(), bounds[1]) - bounds[0]], char_w);
+            c.cui_draw_rect(ui, .{ .x = x + a, .y = y, .w = b - a, .h = font.line() }, .{}, w.color(c.CUI_TOKEN_ACCENT_SUBTLE));
+        }
+        if (focused and sel.caret >= bounds[0] and sel.caret <= bounds[1]) {
+            const caret_x = x + advance(ui, row[0..@min(sel.caret - bounds[0], row.len)], char_w);
+            c.cui_draw_line(ui, .{ .x = caret_x, .y = y }, .{ .x = caret_x, .y = y + font.caret() }, 1.5, w.color(c.CUI_TOKEN_ACCENT));
+        }
     }
 }
 

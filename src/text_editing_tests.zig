@@ -206,7 +206,124 @@ pub fn run(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime chord: a
     try zoom(ui, app, t, frame, chord);
     try findReplace(ui, app, t, frame, chord);
     try folding(ui, app, t, frame, chord);
-    std.debug.print("CUI text editing: word/line clicks, text drag, wheel glide, zoom, find/replace/regex and folding passed\n", .{});
+    try multiModel(app);
+    try multiCaret(ui, app, t, frame, chord);
+    std.debug.print("CUI text editing: word/line clicks, text drag, wheel glide, zoom, find/replace/regex, folding and multiple carets passed\n", .{});
+}
+
+var clipboard: [4096:0]u8 = @splat(0);
+fn getClipboard(_: ?*anyopaque) callconv(.c) [*c]const u8 {
+    return &clipboard;
+}
+fn setClipboard(_: ?*anyopaque, value: [*c]const u8) callconv(.c) void {
+    const text = std.mem.span(value);
+    const len = @min(text.len, clipboard.len);
+    @memcpy(clipboard[0..len], text[0..len]);
+    clipboard[len] = 0;
+}
+
+/// Edits at every caret are one change; deletions stop at the caret before.
+fn multiModel(app: *App) !void {
+    var s = code.State.init(app.gpa);
+    defer s.deinit();
+    s.setText("ab\ncd\nef");
+    s.moveTo(1, false);
+    s.toggleCaret(4);
+    s.toggleCaret(7);
+    try check(@src(), s.extra.items.len == 2 and s.caret == 7);
+    s.editAll(.{ .insert = "X" });
+    try equal(@src(), "aXb\ncXd\neXf", s.text());
+    s.editAll(.delete_backward);
+    try equal(@src(), "ab\ncd\nef", s.text());
+    s.editAll(.{ .each = &.{ "1", "2", "3" } });
+    try equal(@src(), "a1b\nc2d\ne3f", s.text());
+    const joined = try s.copyAll(app.gpa, s.text());
+    defer app.gpa.free(joined);
+    try equal(@src(), "\n\n", joined);
+    // One undo takes the whole edit back and drops the extra carets.
+    try check(@src(), s.undoEdit());
+    try equal(@src(), "ab\ncd\nef", s.text());
+    try check(@src(), !s.multi());
+    // Carets that meet merge.
+    s.moveTo(1, false);
+    s.toggleCaret(2);
+    s.editAll(.delete_backward);
+    s.editAll(.delete_backward);
+    try equal(@src(), "\ncd\nef", s.text());
+    try check(@src(), !s.multi());
+    // Toggling an existing caret takes it away.
+    s.moveTo(0, false);
+    s.toggleCaret(3);
+    s.toggleCaret(3);
+    try check(@src(), !s.multi());
+    // A plain edit drops the extras.
+    s.toggleCaret(3);
+    s.replaceSelection("z", true);
+    try check(@src(), !s.multi());
+}
+
+/// Alt+click adds carets, Alt+drag selects a column, Ctrl+Alt+Down adds a
+/// caret below; typing, arrows, copy and paste act at each; Escape keeps one.
+fn multiCaret(ui: *c.cui_ctx, app: *App, t: *tab.Tab, comptime frame: anytype, comptime chord: anytype) !void {
+    c.cui_set_platform(ui, &.{ .get_clipboard = getClipboard, .set_clipboard = setClipboard });
+    defer c.cui_set_platform(ui, null);
+    t.body.setText("alpha one\nbravo two\ncharlie three");
+    t.body.moveTo(0, false);
+    focus(ui, t, "body-editor");
+    for (0..30) |_| frame(ui, app);
+    clicks(ui, app, spot(ui, t, 0, 5), 1, frame);
+    for (0..30) |_| frame(ui, app);
+    c.cui_input_key(ui, c.CUI_KEY_NONE, false, c.CUI_MOD_ALT);
+    clicks(ui, app, spot(ui, t, 1, 5), 1, frame);
+    for (0..30) |_| frame(ui, app);
+    clicks(ui, app, spot(ui, t, 2, 7), 1, frame);
+    c.cui_input_key(ui, c.CUI_KEY_NONE, false, 0);
+    try check(@src(), t.body.extra.items.len == 2);
+    c.cui_input_text(ui, "!");
+    frame(ui, app);
+    try equal(@src(), "alpha! one\nbravo! two\ncharlie! three", t.body.text());
+    chord(ui, app, c.CUI_KEY_LEFT, c.CUI_MOD_SHIFT);
+    chord(ui, app, c.CUI_KEY_C, c.CUI_MOD_PRIMARY);
+    try equal(@src(), "!\n!\n!", std.mem.span(c.kest_clipboard(ui)));
+    chord(ui, app, c.CUI_KEY_BACKSPACE, 0);
+    try equal(@src(), "alpha one\nbravo two\ncharlie three", t.body.text());
+    // A paste of as many lines as carets puts one line at each.
+    w.copy(ui, "1\n2\n3");
+    chord(ui, app, c.CUI_KEY_V, c.CUI_MOD_PRIMARY);
+    try equal(@src(), "alpha1 one\nbravo2 two\ncharlie3 three", t.body.text());
+    chord(ui, app, c.CUI_KEY_Z, c.CUI_MOD_PRIMARY);
+    try equal(@src(), "alpha one\nbravo two\ncharlie three", t.body.text());
+    try check(@src(), !t.body.multi());
+
+    // Alt+drag down two rows from column 0 to column 5: a box.
+    for (0..30) |_| frame(ui, app);
+    c.cui_input_key(ui, c.CUI_KEY_NONE, false, c.CUI_MOD_ALT);
+    press(ui, app, spot(ui, t, 0, 0), frame);
+    dragTo(ui, app, spot(ui, t, 2, 5), frame);
+    release(ui, app, frame);
+    c.cui_input_key(ui, c.CUI_KEY_NONE, false, 0);
+    try check(@src(), t.body.extra.items.len == 2);
+    chord(ui, app, c.CUI_KEY_C, c.CUI_MOD_PRIMARY);
+    try equal(@src(), "alpha\nbravo\ncharl", std.mem.span(c.kest_clipboard(ui)));
+    c.cui_input_text(ui, "x");
+    frame(ui, app);
+    try equal(@src(), "x one\nx two\nxie three", t.body.text());
+    // Escape goes back to one caret.
+    chord(ui, app, c.CUI_KEY_ESCAPE, 0);
+    try check(@src(), !t.body.multi());
+
+    // Ctrl+Alt+Down adds a caret on the next row; Down moves both.
+    t.body.setText("abc\ndef\nghi\njkl");
+    t.body.moveTo(1, false);
+    frame(ui, app);
+    chord(ui, app, c.CUI_KEY_DOWN, c.CUI_MOD_PRIMARY | c.CUI_MOD_ALT);
+    try check(@src(), t.body.extra.items.len == 1 and t.body.caret == 5);
+    chord(ui, app, c.CUI_KEY_DOWN, 0);
+    try check(@src(), t.body.caret == 9 and t.body.extra.items[0].caret == 5);
+    // A plain click keeps just the one caret.
+    for (0..30) |_| frame(ui, app);
+    clicks(ui, app, spot(ui, t, 0, 0), 1, frame);
+    try check(@src(), !t.body.multi());
 }
 
 /// JSON objects and arrays over several lines fold from the gutter, from

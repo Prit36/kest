@@ -10,6 +10,30 @@ const Allocator = std.mem.Allocator;
 /// Undo stops growing past this: the oldest edits go first.
 const undo_budget = 16 * 1024 * 1024;
 
+/// One selection: where the caret is and where the selection began.
+pub const Sel = struct {
+    caret: usize,
+    anchor: usize,
+
+    pub fn lo(x: Sel) usize {
+        return @min(x.caret, x.anchor);
+    }
+    pub fn hi(x: Sel) usize {
+        return @max(x.caret, x.anchor);
+    }
+};
+
+/// What every caret does at once.
+pub const MultiEdit = union(enum) {
+    insert: []const u8,
+    /// One piece per caret, in document order (a paste of as many lines).
+    each: []const []const u8,
+    delete_backward,
+    delete_forward,
+    delete_word_backward,
+    delete_word_forward,
+};
+
 const Edit = struct {
     at: usize,
     removed: []u8,
@@ -75,6 +99,15 @@ pub const State = struct {
     press_y: f32 = 0,
     /// Where the dragged text would land.
     drop_at: usize = 0,
+    /// Carets besides the main one (Alt+click, column selection), sorted
+    /// by position and not overlapping each other or the main selection.
+    extra: std.ArrayList(Sel) = .empty,
+    /// An edit of every caret is underway; any other edit drops the extras.
+    multi_editing: bool = false,
+    /// Where an Alt+drag began: its row and its distance into the row.
+    column_row: usize = 0,
+    column_x: f32 = 0,
+    column: enum { none, pending, dragging } = .none,
     /// Folded JSON regions in an editor.
     folds: @import("folding.zig").Folds = .{},
     /// Wheel scrolling on its way.
@@ -140,6 +173,7 @@ pub const State = struct {
         s.query.deinit();
         s.replacement.deinit();
         s.folds.deinit(s.gpa);
+        s.extra.deinit(s.gpa);
         s.index.deinit(s.gpa);
         s.continued_strings.deinit(s.gpa);
         s.matches.deinit(s.gpa);
@@ -198,6 +232,7 @@ pub const State = struct {
         s.marked = null;
         s.scroll_x = 0;
         s.folds.clear();
+        s.extra.clearRetainingCapacity();
         s.version += 1;
         s.undo_bytes = 0;
         s.clearStack(&s.undo);
@@ -253,6 +288,7 @@ pub const State = struct {
                 } else |_| {}
             }
         }
+        if (!s.multi_editing) s.extra.clearRetainingCapacity();
         if (!joined and !s.record(lo, removed, t)) return;
         const removed_len = removed.len;
         if (s.buffer.replace(lo, hi, t) != t.len) return;
@@ -297,6 +333,7 @@ pub const State = struct {
 
     pub fn undoEdit(s: *State) bool {
         if (s.undo.items.len == 0) return false;
+        s.extra.clearRetainingCapacity();
         const next = s.undo.items[s.undo.items.len - 1];
         if (!s.buffer.reserve(s.buffer.len - next.inserted.len + next.removed.len)) return false;
         s.redo.ensureUnusedCapacity(s.gpa, 1) catch return false;
@@ -314,6 +351,7 @@ pub const State = struct {
 
     pub fn redoEdit(s: *State) bool {
         if (s.redo.items.len == 0) return false;
+        s.extra.clearRetainingCapacity();
         const next = s.redo.items[s.redo.items.len - 1];
         if (!s.buffer.reserve(s.buffer.len - next.removed.len + next.inserted.len)) return false;
         s.undo.ensureUnusedCapacity(s.gpa, 1) catch return false;
@@ -339,10 +377,177 @@ pub const State = struct {
         s.precise_goal = null;
     }
 
+    pub fn multi(s: *const State) bool {
+        return s.extra.items.len > 0;
+    }
+
+    /// Back to the main caret alone.
+    pub fn collapse(s: *State) void {
+        s.extra.clearRetainingCapacity();
+    }
+
+    /// Every selection, main one included, in document order.
+    pub fn selections(s: *const State, out: *std.ArrayList(Sel)) !void {
+        out.clearRetainingCapacity();
+        try out.ensureTotalCapacity(s.gpa, s.extra.items.len + 1);
+        out.appendSliceAssumeCapacity(s.extra.items);
+        out.appendAssumeCapacity(.{ .caret = s.caret, .anchor = s.anchor });
+        std.mem.sort(Sel, out.items, {}, byStart);
+    }
+
+    fn byStart(_: void, x: Sel, y: Sel) bool {
+        return x.lo() < y.lo() or (x.lo() == y.lo() and x.hi() < y.hi());
+    }
+
+    /// Sets every selection; `main` becomes the main caret. Overlapping
+    /// selections merge and repeated carets go.
+    pub fn setSelections(s: *State, all: []Sel, main: usize) void {
+        const primary = all[main];
+        std.mem.sort(Sel, all, {}, byStart);
+        s.extra.clearRetainingCapacity();
+        var kept: usize = 0;
+        for (all) |x| {
+            if (kept > 0) {
+                const last = &all[kept - 1];
+                if (x.lo() < last.hi() or x.lo() == last.lo()) {
+                    // Merge, keeping the direction of the one before.
+                    const lo_ = last.lo();
+                    const hi_ = @max(last.hi(), x.hi());
+                    last.* = if (last.caret >= last.anchor) .{ .anchor = lo_, .caret = hi_ } else .{ .anchor = hi_, .caret = lo_ };
+                    continue;
+                }
+            }
+            all[kept] = x;
+            kept += 1;
+        }
+        var main_at: usize = kept - 1;
+        for (all[0..kept], 0..) |x, i| if (x.lo() <= primary.caret and primary.caret <= x.hi()) {
+            main_at = i;
+            break;
+        };
+        for (all[0..kept], 0..) |x, i| if (i != main_at) s.extra.append(s.gpa, x) catch break;
+        s.caret = all[main_at].caret;
+        s.anchor = all[main_at].anchor;
+        s.typing = false;
+        s.reveal = true;
+        s.goal_x = null;
+    }
+
+    /// Adds a caret at `pos`, or takes away the one there. The new caret
+    /// becomes the main one.
+    pub fn toggleCaret(s: *State, pos: usize) void {
+        for (s.extra.items, 0..) |x, i| if (x.caret == pos and x.anchor == pos) {
+            _ = s.extra.orderedRemove(i);
+            return;
+        };
+        if (s.caret == pos and s.anchor == pos) {
+            // Removing the main caret promotes the last extra.
+            const next = s.extra.pop() orelse return;
+            s.caret = next.caret;
+            s.anchor = next.anchor;
+            return;
+        }
+        var all: std.ArrayList(Sel) = .empty;
+        defer all.deinit(s.gpa);
+        s.selections(&all) catch return;
+        all.append(s.gpa, .{ .caret = pos, .anchor = pos }) catch return;
+        s.setSelections(all.items, all.items.len - 1);
+    }
+
+    /// The selected text of every selection, one per line.
+    pub fn copyAll(s: *const State, a: std.mem.Allocator, from: []const u8) ![]u8 {
+        var all: std.ArrayList(Sel) = .empty;
+        defer all.deinit(s.gpa);
+        try s.selections(&all);
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(a);
+        for (all.items, 0..) |x, i| {
+            if (i > 0) try out.append(a, '\n');
+            try out.appendSlice(a, from[@min(x.lo(), from.len)..@min(x.hi(), from.len)]);
+        }
+        return out.toOwnedSlice(a);
+    }
+
+    /// The same edit at every caret, as one change that undo takes back.
+    pub fn editAll(s: *State, op: MultiEdit) void {
+        const from = s.text();
+        var all: std.ArrayList(Sel) = .empty;
+        defer all.deinit(s.gpa);
+        s.selections(&all) catch return;
+        const main_pos = s.caret;
+        var out: std.ArrayList(u8) = .empty;
+        defer out.deinit(s.gpa);
+        var carets: std.ArrayList(usize) = .empty;
+        defer carets.deinit(s.gpa);
+        var span_lo: ?usize = null;
+        var copied: usize = 0;
+        var main_index: usize = 0;
+        for (all.items, 0..) |x, i| {
+            var lo = @min(x.lo(), from.len);
+            var hi = @min(x.hi(), from.len);
+            var piece: []const u8 = "";
+            if (lo == hi) switch (op) {
+                .delete_backward => lo = prevChar(from, lo),
+                .delete_forward => hi = nextChar(from, hi),
+                .delete_word_backward => lo = prevWord(from, lo),
+                .delete_word_forward => hi = nextWord(from, hi),
+                else => {},
+            };
+            switch (op) {
+                .insert => |text_in| piece = text_in,
+                .each => |pieces| piece = if (i < pieces.len) pieces[i] else "",
+                else => {},
+            }
+            // A deletion reaching into the selection before stops there.
+            lo = @max(lo, copied);
+            hi = @max(hi, lo);
+            if (span_lo == null) {
+                span_lo = lo;
+                copied = lo;
+            }
+            out.appendSlice(s.gpa, from[copied..lo]) catch return;
+            out.appendSlice(s.gpa, piece) catch return;
+            carets.append(s.gpa, span_lo.? + out.items.len) catch return;
+            if (x.lo() <= main_pos and main_pos <= x.hi()) main_index = i;
+            copied = hi;
+        }
+        const lo = span_lo orelse return;
+        if (copied == lo and out.items.len == 0) return;
+        s.multi_editing = true;
+        defer s.multi_editing = false;
+        const version = s.version;
+        s.change(lo, copied, out.items, false);
+        if (version == s.version) return;
+        for (all.items, carets.items) |*x, at| x.* = .{ .caret = at, .anchor = at };
+        s.setSelections(all.items, main_index);
+        if (s.undo.items.len > 0) {
+            s.undo.items[s.undo.items.len - 1].caret_after = s.caret;
+            s.undo.items[s.undo.items.len - 1].anchor_after = s.anchor;
+        }
+    }
+
+    /// Runs a caret command (moves and selections) at every caret.
+    pub fn commandAll(s: *State, cmd: ui.Command, from: []const u8) void {
+        var all: std.ArrayList(Sel) = .empty;
+        defer all.deinit(s.gpa);
+        s.selections(&all) catch return;
+        const main_pos = s.caret;
+        var main_index: usize = 0;
+        for (all.items, 0..) |*x, i| {
+            if (x.lo() <= main_pos and main_pos <= x.hi()) main_index = i;
+            s.caret = x.caret;
+            s.anchor = x.anchor;
+            _ = s.command(cmd, from, true);
+            x.* = .{ .caret = s.caret, .anchor = s.anchor };
+        }
+        s.setSelections(all.items, main_index);
+    }
+
     /// A press at `pos` after `clicks` clicks: one places the caret (Shift
     /// extends), two select the word, three the line. Dragging afterwards
     /// grows the selection by the same unit.
     pub fn pressAt(s: *State, from: []const u8, pos: usize, clicks: c_int, extend: bool) void {
+        s.collapse();
         s.unit = switch (clicks) {
             0, 1 => .char,
             2 => .word,
@@ -632,6 +837,7 @@ pub const State = struct {
         if (n == 0) return;
         const at: i64 = @as(i64, @intCast(s.match_at)) + delta;
         s.match_at = @intCast(@mod(at, @as(i64, @intCast(n))));
+        s.collapse();
         const m = s.matches.items[s.match_at];
         s.anchor = m.start;
         s.caret = m.end;

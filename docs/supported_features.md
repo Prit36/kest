@@ -87,7 +87,8 @@ does not establish coverage for this interface.
 - Response Find searches available text (up to 16 MiB, literal queries up to
   4096 bytes). Spilled bytes beyond the available response preview are not
   searched. Case-insensitive matching folds ASCII A-Z; other UTF-8 characters
-  match exactly. Full Unicode case folding and regular expressions are absent.
+  match exactly. Full Unicode case folding is absent. Regular expressions have
+  no lookaround or backreferences, so matching stays linear in the text.
 - Screen readers are checked through the UIA tree they read, not real
   speech output. No complex-script validation. UTF-8 advances align codepoint carets/hit testing; grapheme behavior
   retain their native audit. Response wrap uses native font advances; editable
@@ -107,3 +108,27 @@ does not establish coverage for this interface.
 - Pin/unpin tabs from their context menu. Pins stay at the start of the strip, survive workspace reloads, and are protected from bulk close. Explicit close still works.
 - Recently closed lists the last ten closed requests for this session. Ctrl+Shift+T reopens the most recent, retaining request edits. Response data and background work are released when closing.
 - The tab strip supports wheel/trackpad scrolling, left/right scroll buttons, active-tab reveal, and the existing Tabs menu.
+
+### Text editing
+
+These apply to the request body editor; the response text view shares the
+clicks, scrolling, zoom and bracket outline.
+
+- Double-click selects a word and triple-click a line; dragging afterwards grows
+  the selection by whole words or lines.
+- Drag selected text to move it; hold Ctrl when dropping to copy instead. Escape
+  cancels the drag. Each move is one undo step.
+- The wheel glides to its target instead of jumping (immediate with reduced motion).
+- Ctrl+wheel, Ctrl+= and Ctrl+- zoom the code font; Ctrl+0 resets it. Settings
+  has a Code font size (9-24 px) that persists with the workspace.
+- Find has Replace (Ctrl+H), case (Aa), whole word (W) and regular expression
+  (.*) toggles. Replacements accept `$0`/`$&`, `$1`-`$99` and `$$`. Replace all
+  is one undo step. An invalid pattern says what is wrong and where.
+- JSON bodies fold objects and arrays from gutter arrows, the line's marker,
+  Ctrl+Shift+- or the context menu (Fold all / Unfold all). Folds follow edits,
+  and moving the caret into one opens it. The bracket at the caret and its partner
+  are outlined.
+- Alt+click adds or removes a caret; Alt+drag selects a column; Ctrl+Alt+Up/Down
+  adds a caret on the row above or below. Typing, deleting, arrows, Home/End,
+  Cut, Copy and Paste act at every caret as one undo step. A paste with as many
+  lines as carets puts one line at each. Escape or a plain click returns to one caret.
