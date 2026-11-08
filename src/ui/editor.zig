@@ -24,7 +24,83 @@ pub fn gutterWidth(ui: *c.cui_ctx, lines: usize) f32 {
 }
 const code_gap = 12;
 
+/// Items a view adds to its editor's context menu after the editing commands.
+pub const Menu = struct {
+    ctx: *anyopaque,
+    items: *const fn (ui: *c.cui_ctx, ctx: *anyopaque) void,
+};
+
+fn menuItem(ui: *c.cui_ctx, label: [*:0]const u8, shortcut: [*:0]const u8, enabled: bool) bool {
+    return c.cui_menu_item_ex(ui, label, &.{ .shortcut = shortcut, .disabled = !enabled });
+}
+
+/// The editing commands of a text view's context menu, acting as their
+/// shortcuts do. Read-only views offer Copy and Select all.
+pub fn editItems(ui: *c.cui_ctx, s: *State, source: []const u8, read_only: bool) void {
+    const range = s.selection();
+    const selected = range[1] > range[0];
+    if (!read_only) {
+        if (menuItem(ui, "Undo", "Ctrl Z", s.undo.items.len > 0)) _ = s.undoEdit();
+        if (menuItem(ui, "Redo", "Ctrl Y", s.redo.items.len > 0)) _ = s.redoEdit();
+        c.cui_menu_separator(ui);
+        if (menuItem(ui, "Cut", "Ctrl X", selected)) {
+            w.copy(ui, s.selected(source));
+            s.replaceSelection("", false);
+        }
+    }
+    if (menuItem(ui, "Copy", "Ctrl C", selected)) w.copy(ui, s.selected(source));
+    if (!read_only) {
+        if (menuItem(ui, "Paste", "Ctrl V", true)) {
+            const clip = c.kest_clipboard(ui);
+            if (clip != null) s.replaceSelection(std.mem.span(clip), false);
+        }
+        if (menuItem(ui, "Delete", "Del", selected)) s.replaceSelection("", false);
+    }
+    c.cui_menu_separator(ui);
+    if (menuItem(ui, "Select all", "Ctrl A", source.len > 0)) {
+        _ = s.command(.select_all, source, read_only);
+        s.precise_goal = null;
+    }
+}
+
+/// A right-click focuses the view; outside the selection it also moves the
+/// caret there, so the menu acts on what was clicked.
+pub fn rightClick(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, at: ?usize) void {
+    if (at) |pos| {
+        const range = s.selection();
+        if (range[0] == range[1] or pos < range[0] or pos > range[1]) s.moveTo(pos, false);
+        s.precise_goal = null;
+    }
+    c.kest_focus(ui, id);
+}
+
+/// The context menu of the view `id`, built before the view paints: its
+/// commands can replace the text the paint would otherwise still point at.
+/// Returns true when an item changed the text or the selection.
+pub fn contextMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source: []const u8, read_only: bool, extra: ?Menu) bool {
+    if (!c.kest_context_menu_begin(ui, w.fmt("{s}-menu", .{std.mem.span(id)}), c.cui_make_id(ui, id))) return false;
+    const v0 = s.version;
+    const caret = s.caret;
+    const anchor = s.anchor;
+    editItems(ui, s, source, read_only);
+    if (extra) |menu| {
+        c.cui_menu_separator(ui);
+        menu.items(ui, menu.ctx);
+    }
+    c.cui_context_menu_end(ui);
+    const chosen = v0 != s.version or caret != s.caret or anchor != s.anchor;
+    if (chosen) {
+        s.reveal = true;
+        c.kest_focus(ui, id);
+    }
+    return chosen;
+}
+
 pub fn view(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8, read_only: bool, lang: hl.Lang) bool {
+    return viewMenu(ui, id, s, source_in, read_only, lang, null);
+}
+
+pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8, read_only: bool, lang: hl.Lang, extra: ?Menu) bool {
     const char_w = cellWidth(ui);
     var source = source_in;
     const v0 = s.version;
@@ -41,6 +117,12 @@ pub fn view(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8,
         keys(ui, s, source, read_only, char_w);
         if (!read_only) source = s.text();
     }
+    if (c.kest_right_pressed(ui, identity) and previous.w > 0) {
+        index(s, source, wrap_at);
+        rightClick(ui, id, s, hit(ui, s, source, previous, gutter0, char_w));
+    }
+    _ = contextMenu(ui, id, s, source, read_only, extra);
+    if (!read_only) source = s.text();
     index(s, source, wrap_at);
     if (s.word_wrap) s.scroll_x = 0;
     if (lang == .json and s.syntax_generation != s.index_generation) {
@@ -63,23 +145,25 @@ pub fn view(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const u8,
     const gutter = gutterWidth(ui, if (s.index.count() > 0) s.index.lineNumber(s.index.count() - 1) else 1);
     const paint = Paint{ .state = s, .source = source, .lang = lang, .focused = focused, .char_w = char_w, .gutter = gutter };
     const result = c.cui_canvas(ui, id, w.fill, w.fill, draw, &paint, @sizeOf(Paint));
+    const rect = result.rect;
     c.kest_editor_register(ui, identity);
     c.kest_editor_tabs(ui, identity, @intFromBool(!read_only and !s.tab_moves_focus));
-    const rect = result.rect;
-    if (result.pressed and rect.w > 0) {
-        const m = c.cui_mouse_pos(ui);
-        const row_n: usize = @intFromFloat(@max(0, @floor((m.y - rect.y - 8 + s.scroll_y) / line_h)));
-        if (s.index.count() > 0) {
-            const row_at = @min(row_n, s.index.count() - 1);
-            const bounds = s.index.bounds(source, row_at);
-            const col = byteAt(ui, source[bounds[0]..bounds[1]], @max(0, m.x - rect.x - gutter - code_gap + s.scroll_x), char_w);
-            const pos = bounds[0] + col;
-            s.moveTo(pos, c.cui_key_mods(ui) & c.CUI_MOD_SHIFT != 0 or s.selecting);
-            s.selecting = true;
-        }
-    }
+    if (result.pressed and rect.w > 0) if (hit(ui, s, source, rect, gutter, char_w)) |pos| {
+        s.moveTo(pos, c.cui_key_mods(ui) & c.CUI_MOD_SHIFT != 0 or s.selecting);
+        s.selecting = true;
+    };
     if (!c.cui_mouse_down(ui, c.CUI_MOUSE_LEFT)) s.selecting = false;
     return v0 != s.version;
+}
+
+/// The byte under the mouse in the editor's rectangle.
+fn hit(ui: *c.cui_ctx, s: *State, source: []const u8, rect: c.cui_rect, gutter: f32, char_w: f32) ?usize {
+    if (s.index.count() == 0) return null;
+    const m = c.cui_mouse_pos(ui);
+    const row_n: usize = @intFromFloat(@max(0, @floor((m.y - rect.y - 8 + s.scroll_y) / line_h)));
+    const row_at = @min(row_n, s.index.count() - 1);
+    const bounds = s.index.bounds(source, row_at);
+    return bounds[0] + byteAt(ui, source[bounds[0]..bounds[1]], @max(0, m.x - rect.x - gutter - code_gap + s.scroll_x), char_w);
 }
 
 fn index(s: *State, source: []const u8, wrap_at: usize) void {

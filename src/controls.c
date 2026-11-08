@@ -3,6 +3,7 @@
 #include "host.h"
 #include <stdio.h>
 #include "cui_internal.h"
+#include "kest_edit.h"
 void kest_focus(cui_ctx *ui, const char *id) { ui->focus = cui_make_id(ui, id); }
 void kest_input_select_all(cui_ctx *ui, const char *key, int length) {
     if (ui->focus != cui_make_id(ui, key) || !ui->edit) return;
@@ -612,6 +613,7 @@ int kest_flat_input(cui_ctx *ui, const char *key, char *buf, size_t cap, const c
     cui_id id = cui_make_id(ui, key);
     if (opts && opts->autofocus) ui->focus = id;
     int first = ui->node_count;
+    kest_edit_menu_owned = cell;   /* a cell's right-click opens its row menu */
     int flags = cui__text_field(ui, id, buf, cap, opts, false, 1, NULL);
     kest_a11y_label_id(ui, id, KEST_A11Y_EDIT, opts ? (opts->label ? opts->label : opts->placeholder) : NULL, buf);
     cui_node *n = &ui->nodes[first];
@@ -867,6 +869,10 @@ bool kest_table_menu_begin(cui_ctx *ui, const char *key, bool row, const char *n
         cui__popup_set(ui, pid, open);
         popup = cui__popup_get(ui, pid, false);
         if (popup) { popup->at_mouse = context; popup->mouse = (cui_vec2){ui->mx, ui->my}; }
+        /* a right-click on a text cell puts the cell's edit commands first */
+        cui_id *target = cui_state(ui, pid ^ 0xED17u, sizeof *target);
+        cui_id key_id = cui_make_id(ui, "key"), value_id = cui_make_id(ui, "value");
+        *target = context && ui->hot == key_id ? key_id : context && ui->hot == value_id ? value_id : 0;
         if (keyboard) {
             ui->focus = id; ui->focus_visible = true; ui->kpressed[CUI_KEY_DOWN] = ui->kpressed[CUI_KEY_F10] = 0;
             cui__menu_nav *nav = cui_state(ui, pid ^ 0x4E4156u, sizeof *nav);
@@ -875,6 +881,13 @@ bool kest_table_menu_begin(cui_ctx *ui, const char *key, bool row, const char *n
     }
     bool open = cui__popup_begin(ui, pid, id, CUI_PLACE_BOTTOM_END, 220, 6, 0, true);
     table_popup_register(ui, pid);
+    if (open) {
+        cui_id *target = cui_state(ui, pid ^ 0xED17u, sizeof *target);
+        if (*target) {
+            kest_edit_menu_items(ui, *target);
+            cui_menu_separator(ui);
+        }
+    }
     return open;
 }
 
@@ -1062,4 +1075,27 @@ bool kest_reveal(cui_ctx *ui, cui_id id, cui_id target, bool horizontal) {
         st->y = st->ty;
     }
     return true;
+}
+
+/* A context menu anchored to `anchor`, which may not be built yet this frame:
+ * a view builds its menu before painting so that menu commands run before the
+ * paint takes the view's text. A popup slot is taken only once it opens. */
+bool kest_context_menu_begin(cui_ctx *ui, const char *key, cui_id anchor) {
+    cui_id pid = cui_make_id(ui, key) ^ 0xC7Cu;
+    if (kest_right_pressed(ui, anchor)) {
+        cui__close_all_popups(ui);
+        cui__popup_set(ui, pid, true);
+        cui_popup *p = cui__popup_get(ui, pid, false);
+        if (p) { p->at_mouse = true; p->mouse.x = ui->mx; p->mouse.y = ui->my; }
+    }
+    if (!cui__popup_get(ui, pid, false)) return false;
+    return cui__popup_begin(ui, pid, anchor, CUI_PLACE_BOTTOM_START, 220, 6, 0, true);
+}
+
+/* A right-click on `id`: on the control itself, or anywhere over a layout
+ * box (a row has no hit area of its own) in the layer under the mouse. */
+bool kest_right_pressed(cui_ctx *ui, cui_id id) {
+    if (!id || !ui->mpressed[CUI_MOUSE_RIGHT]) return false;
+    if (ui->hot == id) return true;
+    return ui->hot_layer == ui->current_layer && cui__rect_contains(cui__prev_rect(ui, id), ui->mx, ui->my);
 }

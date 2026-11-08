@@ -288,6 +288,8 @@ pub fn run(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]const
     frame(ui, app);
     c.cui_input_mouse_button(ui, c.CUI_MOUSE_RIGHT, false);
     frame(ui, app);
+    // A text cell's edit commands come first in its row menu.
+    try check(@src(), menu(ui, t, .headers, h0.uid, "Copy").w > 0 and menu(ui, t, .headers, h0.uid, "Paste").w > 0);
     try tap(@src(), ui, app, menu(ui, t, .headers, h0.uid, "Inspect row"), click);
     for (0..3) |_| frame(ui, app);
     try capture(ui, sw, app, snapshot, "inspect");

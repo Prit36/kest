@@ -145,6 +145,13 @@ Below 840 px the collection browser opens as an overlay. The minimum window is
 drag a folder or request to reorder it or drop it into a folder (Esc cancels).
 The request menu includes Save as and Copy as cURL. New/Open requests reveal their
 tab and collection location.
+Right-click menus: every text field offers Undo, Redo, Cut, Copy, Paste, Delete
+and Select all, and a table cell's row menu starts with them. The body editor
+adds Format/Minify JSON, Find and Wrap; response text adds Find, Wrap, Copy raw
+body and Save. Request tabs offer Close, Close others, Close tabs to the right,
+Save, Duplicate, Rename, Copy as cURL and Reveal in collection; closing several
+tabs keeps those with unsaved changes open. JSON tree rows offer Copy value, key
+and path (`$.data[0].id`), Expand/Collapse children and Expand/Collapse all.
 
 ## Verification
 

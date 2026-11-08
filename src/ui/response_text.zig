@@ -121,6 +121,9 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, id: [*:0]const u8, s: *State, so
     if (s.layout_pending or (needs_layout and s.layout_failure)) w.text(ui, if (s.layout_failure) "Reflow unavailable; keeping the previous layout." else "Reflowing text...", .{ .width = w.fill, .size = c.KEST_TEXT_CAPTION, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     const focused = c.kest_editor_focus(ui, identity) != 0;
     if (focused) keys(ui, s, source, previous.h);
+    if (c.kest_right_pressed(ui, identity) and previous.w > 0) editor.rightClick(ui, id, s, hit(ui, s, source, previous, gutter));
+    var menu_ctx: MenuContext = .{ .app = app, .t = t };
+    _ = editor.contextMenu(ui, id, s, source, true, .{ .ctx = &menu_ctx, .items = menuItems });
     const wheel = c.kest_editor_scroll_axes(ui, identity);
     s.scroll_y = @max(0, s.scroll_y - wheel.y * line_h * 3);
     s.precise_x = @max(0, s.precise_x - @as(f64, wheel.x) * char_w * 3);
@@ -158,7 +161,8 @@ fn fallbackView(ui: *c.cui_ctx, app: *App, id: [*:0]const u8, s: *State, source:
     if (base > 0) w.text(ui, w.fmt("Viewing bytes {d}-{d} of {d}", .{ base + 1, end, source.len }), .{ .width = w.fill, .size = c.KEST_TEXT_CAPTION, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     const caret_before = fallback.caret;
     const anchor_before = fallback.anchor;
-    _ = editor.view(ui, id, fallback, window, true, lang);
+    var menu_ctx: MenuContext = .{ .app = app, .t = null };
+    _ = editor.viewMenu(ui, id, fallback, window, true, lang, .{ .ctx = &menu_ctx, .items = menuItems });
     if (fallback.caret != caret_before or fallback.anchor != anchor_before) {
         s.caret = base + fallback.caret;
         s.anchor = base + fallback.anchor;
@@ -264,6 +268,31 @@ fn scrollbars(s: *State, rect: c.cui_rect, gutter: f32) Scrollbars {
     const vh = @min(height, @max(24, height * height / @max(height, total)));
     return .{ .width = width, .height = height, .max_x = max_x, .max_y = max_y, .horizontal = horizontal, .vertical = vertical, .hthumb = .{ .x = horizontal.x + (if (max_x > 0) @as(f32, @floatCast(s.precise_x / max_x)) * (width - hw) else 0), .y = horizontal.y + 3, .w = hw, .h = 6 }, .vthumb = .{ .x = vertical.x + 3, .y = vertical.y + (if (max_y > 0) s.scroll_y / max_y * (height - vh) else 0), .w = 6, .h = vh } };
 }
+/// The byte under the mouse in the text area (not its scroll bars).
+fn hit(ui: *c.cui_ctx, s: *State, source: []const u8, rect: c.cui_rect, gutter: f32) ?usize {
+    if (s.index.count() == 0 or s.geometry == null) return null;
+    const mouse = c.cui_mouse_pos(ui);
+    const bars = scrollbars(s, rect, gutter);
+    if ((bars.max_x > 0 and inside(bars.horizontal, mouse)) or (bars.max_y > 0 and inside(bars.vertical, mouse))) return null;
+    const row = @min(s.index.count() - 1, @as(usize, @intFromFloat(@max(0, @floor((mouse.y - rect.y - 8 + s.scroll_y) / line_h)))));
+    return s.geometry.?.byteAt(&s.index, source, row, @max(0, mouse.x - rect.x - gutter - gap + s.precise_x), metrics(ui));
+}
+
+const MenuContext = struct { app: *App, t: ?*Tab };
+/// Response commands after Copy and Select all in a response text view's
+/// context menu. The bounded fallback window has no tab of its own: it always
+/// shows the current tab's response.
+fn menuItems(ui: *c.cui_ctx, raw: *anyopaque) void {
+    const ctx: *MenuContext = @ptrCast(@alignCast(raw));
+    const t = ctx.t orelse ctx.app.current() orelse return;
+    const resp = if (t.shown) |job| &job.resp else return;
+    if (c.cui_menu_item_ex(ui, "Find in response", &.{ .shortcut = "Ctrl F" })) find.open(t);
+    if (c.cui_menu_item_ex(ui, "Wrap lines", &.{ .checked = t.response.wrap_response })) t.response.wrap_response = !t.response.wrap_response;
+    c.cui_menu_separator(ui);
+    if (c.cui_menu_item_ex(ui, if (resp.isPartial()) "Copy raw body prefix" else "Copy raw body", &.{})) w.copy(ui, resp.preview.items);
+    if (c.cui_menu_item_ex(ui, if (resp.spill_failed) "Save available response..." else "Save response...", &.{})) @import("response.zig").save(ctx.app, resp);
+}
+
 fn inside(rect: c.cui_rect, mouse: c.cui_vec2) bool {
     return mouse.x >= rect.x and mouse.x < rect.x + rect.w and mouse.y >= rect.y and mouse.y < rect.y + rect.h;
 }

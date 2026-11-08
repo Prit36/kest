@@ -151,11 +151,13 @@ fn tree(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) void {
     var last: c_int = 0;
     c.cui_virtual_list_begin(ui, "json-rows", @intCast(tr.rows.items.len), 26, w.fill, &first, &last);
     var toggle: ?u32 = null;
+    var subtree: ?struct { index: u32, collapsed: bool } = null;
+    var all: ?bool = null;
     for (@as(usize, @intCast(first))..@as(usize, @intCast(last))) |i| {
         const index = tr.rows.items[i];
         const n = tr.nodes.items[index];
         c.cui_push_id_int(ui, @intCast(index));
-        w.row(ui, .{ .height = w.px(26), .pad_left = 16 + @as(f32, @floatFromInt(@min(n.depth, 24))) * 16, .gap = 6 });
+        w.row(ui, .{ .id = "json-row", .height = w.px(26), .width = w.fill, .pad_left = 16 + @as(f32, @floatFromInt(@min(n.depth, 24))) * 16, .gap = 6 });
         if (tr.isContainer(index)) {
             if (w.icon(ui, if (tr.isCollapsed(index)) c.CUI_ICON_CHEVRON_RIGHT else c.CUI_ICON_CHEVRON_DOWN, "Expand or collapse")) toggle = index;
         } else {
@@ -166,16 +168,30 @@ fn tree(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) void {
         const val = tr.value(index);
         if (key.len > 0) w.text(ui, w.fmt("{s}:", .{short(key)}), .{ .font = c.CUI_FONT_MONO, .size = c.KEST_TEXT_SECONDARY, .nowrap = true, .color = @import("design.zig").syntax(ui, .key) });
         w.text(ui, short(val), .{ .font = c.CUI_FONT_MONO, .size = c.KEST_TEXT_SECONDARY, .nowrap = true, .width = w.fill, .color = if (n.kind == .string) @import("design.zig").syntax(ui, .string) else if (n.kind == .number) @import("design.zig").syntax(ui, .number) else w.color(c.CUI_TOKEN_FOREGROUND) });
-        if (c.cui_context_menu_begin(ui, "json-menu")) {
+        w.end(ui);
+        // The whole row answers a right-click, not only its text.
+        if (c.kest_context_menu_begin(ui, "json-menu", c.cui_make_id(ui, "json-row"))) {
+            const container = tr.isContainer(index);
             if (w.menuItem(ui, "Copy value")) w.copy(ui, tr.sourceOf(index));
-            if (w.menuItem(ui, "Copy key")) w.copy(ui, key);
+            if (key.len >= 2 and w.menuItem(ui, "Copy key")) w.copy(ui, key[1 .. key.len - 1]);
+            if (w.menuItem(ui, "Copy path")) w.copy(ui, tr.path(w.arena.allocator(), index) catch "");
+            if (container) {
+                c.cui_menu_separator(ui);
+                if (w.menuItem(ui, "Expand children")) subtree = .{ .index = index, .collapsed = false };
+                if (w.menuItem(ui, "Collapse children")) subtree = .{ .index = index, .collapsed = true };
+            }
+            c.cui_menu_separator(ui);
+            if (w.menuItem(ui, "Expand all")) all = false;
+            if (w.menuItem(ui, "Collapse all")) all = true;
             c.cui_context_menu_end(ui);
         }
-        w.end(ui);
         c.cui_pop_id(ui);
     }
     c.cui_virtual_list_end(ui);
+    // Rows change only after the list is built from them.
     if (toggle) |index| tr.toggle(app.gpa, index) catch {};
+    if (subtree) |change| tr.setSubtree(app.gpa, change.index, change.collapsed) catch {};
+    if (all) |collapsed| tr.setAll(app.gpa, collapsed) catch {};
 }
 
 fn preview(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) void {

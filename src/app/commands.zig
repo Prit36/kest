@@ -60,9 +60,23 @@ fn indexOfTab(app: *const App, t: *const Tab) ?usize {
 }
 
 /// Closes a tab, asking first if that would lose edits.
+/// Closing would lose edits: changes to a saved request or an unsaved draft.
+fn unsaved(t: *const Tab) bool {
+    return t.dirty or (t.link == null and t.has_draft);
+}
+
+/// Closes `t` unless closing would lose edits; returns false when it is kept.
+/// Bulk closes use this, so they never stack one confirmation per tab.
+pub fn closeIfSaved(app: *App, t: *Tab) bool {
+    persist.flushTab(app, t, false);
+    if (unsaved(t)) return false;
+    closeNow(app, t);
+    return true;
+}
+
 pub fn requestClose(app: *App, t: *Tab) void {
     persist.flushTab(app, t, false);
-    if (t.dirty or (t.link == null and t.has_draft)) {
+    if (unsaved(t)) {
         var buf: [512]u8 = undefined;
         confirm(app, .{ .close_tab = t }, "Save changes?", std.fmt.bufPrint(&buf, "\"{s}\" has changes that haven't been saved. Save them before closing, or discard them.", .{t.name}) catch "This request has changes that haven't been saved.", "Discard");
         return;

@@ -68,7 +68,8 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
                 };
                 w.end(ui);
             }
-            if (editor.view(ui, "body-editor", &t.body, t.body.text(), false, if (t.body_kind == .json) .json else if (t.body_kind == .xml) .xml else .plain)) {
+            var menu_ctx: MenuContext = .{ .app = app, .t = t };
+            if (editor.viewMenu(ui, "body-editor", &t.body, t.body.text(), false, if (t.body_kind == .json) .json else if (t.body_kind == .xml) .xml else .plain, .{ .ctx = &menu_ctx, .items = menuItems })) {
                 persist.touchTab(app, t);
                 commands.bodyProblem(app, t);
                 c.cui_request_redraw(ui);
@@ -76,5 +77,24 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
         },
         .form_urlencoded, .multipart => if (@import("key_value.zig").view(ui, &t.form, t.body_kind == .multipart, "Form fields", .{ .kind = .form, .vars = app.activeVars(), .app = app })) persist.touchTab(app, t),
         .file => if (@import("upload.zig").binary(ui, app, t)) persist.touchTab(app, t),
+    }
+}
+
+const MenuContext = struct { app: *App, t: *tab.Tab };
+/// Body commands after the editing ones in the body editor's context menu.
+fn menuItems(ui: *c.cui_ctx, raw: *anyopaque) void {
+    const ctx: *MenuContext = @ptrCast(@alignCast(raw));
+    const t = ctx.t;
+    if (t.body_kind == .json) {
+        if (w.menuItem(ui, "Format JSON")) commands.formatBody(ctx.app, t, 2);
+        if (w.menuItem(ui, "Minify JSON")) commands.formatBody(ctx.app, t, 0);
+    }
+    if (c.cui_menu_item_ex(ui, "Find in body", &.{ .shortcut = "Ctrl F" })) {
+        t.body.search_open = true;
+        t.body.query.focus();
+    }
+    if (c.cui_menu_item_ex(ui, "Wrap lines", &.{ .checked = t.body.word_wrap })) {
+        t.body.word_wrap = !t.body.word_wrap;
+        t.body.reveal = true;
     }
 }

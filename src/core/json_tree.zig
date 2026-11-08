@@ -220,6 +220,52 @@ pub const Tree = struct {
         return t.text[n.val_off .. close.val_off + 1];
     }
 
+    /// Opens container `i` and everything inside it, or (`collapsed`) keeps
+    /// `i` open and collapses every container inside it.
+    pub fn setSubtree(t: *Tree, a: Allocator, i: u32, collapsed: bool) !void {
+        if (!t.isContainer(i)) return;
+        t.collapsed.unset(i);
+        const end = i + t.nodes.items[i].skip;
+        var j = i + 1;
+        while (j < end) : (j += 1) if (t.isContainer(j)) t.collapsed.setValue(j, collapsed);
+        try t.refresh(a);
+    }
+
+    /// The JSONPath of node `i`, as `$.data[0]["first name"]`: names that
+    /// are plain identifiers follow a dot, others keep their JSON quoting.
+    pub fn path(t: *const Tree, a: Allocator, i: u32) ![]u8 {
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(a);
+        try out.append(a, '$');
+        var parent: u32 = 0;
+        while (parent != i and t.isContainer(parent)) {
+            const end = parent + t.nodes.items[parent].skip;
+            var child = parent + 1;
+            var index: usize = 0;
+            const found = while (child < end) {
+                const last = if (t.isContainer(child)) child + t.nodes.items[child].skip else child;
+                if (i >= child and i <= last) break child;
+                child = last + 1;
+                index += 1;
+            } else break;
+            if (t.nodes.items[parent].kind == .array) {
+                try out.print(a, "[{d}]", .{index});
+            } else {
+                const name = t.key(found);
+                const bare = if (name.len >= 2) name[1 .. name.len - 1] else name;
+                if (identifier(bare)) try out.print(a, ".{s}", .{bare}) else try out.print(a, "[{s}]", .{name});
+            }
+            parent = found;
+        }
+        return out.toOwnedSlice(a);
+    }
+
+    fn identifier(name: []const u8) bool {
+        if (name.len == 0 or std.ascii.isDigit(name[0])) return false;
+        for (name) |ch| if (!std.ascii.isAlphanumeric(ch) and ch != '_' and ch != '$') return false;
+        return true;
+    }
+
     /// How many direct children a container has.
     pub fn childCount(t: *const Tree, i: u32) usize {
         const n = t.nodes.items[i];
@@ -269,6 +315,39 @@ test "collapsing skips what's inside, and reveal opens it" {
     try testing.expect(t.rowOf(5) != null);
     try t.setAll(a, false);
     try testing.expectEqual(@as(usize, 12), t.rows.items.len);
+}
+
+test "paths name each node from the root" {
+    const a = testing.allocator;
+    var t = try Tree.build(a, doc, 1000);
+    defer t.deinit(a);
+    const cases = [_]struct { u32, []const u8 }{ .{ 0, "$" }, .{ 1, "$.a" }, .{ 3, "$.b[0]" }, .{ 5, "$.b[1].c" }, .{ 6, "$.b[1]" }, .{ 8, "$.d" }, .{ 9, "$.e" } };
+    for (cases) |case| {
+        const p = try t.path(a, case[0]);
+        defer a.free(p);
+        try testing.expectEqualStrings(case[1], p);
+    }
+    var quoted = try Tree.build(a, "{\"first name\":1,\"9x\":[[2]]}", 1000);
+    defer quoted.deinit(a);
+    const p1 = try quoted.path(a, 1);
+    defer a.free(p1);
+    try testing.expectEqualStrings("$[\"first name\"]", p1);
+    const p2 = try quoted.path(a, 4);
+    defer a.free(p2);
+    try testing.expectEqualStrings("$[\"9x\"][0][0]", p2);
+}
+
+test "subtree expand and collapse leave the rest alone" {
+    const a = testing.allocator;
+    var t = try Tree.build(a, doc, 1000);
+    defer t.deinit(a);
+    try t.setAll(a, true);
+    try t.setSubtree(a, 2, false);
+    try testing.expect(!t.isCollapsed(2) and !t.isCollapsed(4));
+    try testing.expect(t.isCollapsed(9));
+    try t.setSubtree(a, 2, true);
+    try testing.expect(!t.isCollapsed(2) and t.isCollapsed(4));
+    try testing.expectEqual(@as(usize, 9), t.rows.items.len);
 }
 
 test "limits and bad input" {

@@ -132,7 +132,7 @@ fn documents(ui: *c.cui_ctx, app: *App) void {
     }
     w.end(ui);
     w.separator(ui, "document-boundary");
-    if (close) |t| commands.requestClose(app, t);
+    if (close) |t| commands.requestClose(app, t) else tabMenu(ui, app);
 }
 
 fn context(ui: *c.cui_ctx, app: *App, t: *Tab) void {
@@ -161,14 +161,7 @@ fn context(ui: *c.cui_ctx, app: *App, t: *Tab) void {
     });
     if (path.clicked >= 0) {
         const i: usize = @intCast(path.clicked);
-        if (i < ancestors.items.len) {
-            @import("sidebar.zig").reveal(app, ancestors.items[i]);
-            app.mode = .collections;
-            if (c.cui_viewport_size(ui).x < w.design.geometry.sidebar_sheet) @import("shell.zig").narrow_open = true else {
-                app.prefs.sidebar_open = true;
-                persist.prefsChanged(app);
-            }
-        }
+        if (i < ancestors.items.len) revealNode(ui, app, ancestors.items[i]);
     }
     const paths = w.arena.allocator().alloc([]const u8, segments.items.len) catch return;
     for (segments.items, paths) |segment, *value| value.* = std.mem.span(segment);
@@ -218,6 +211,75 @@ fn actions(ui: *c.cui_ctx, app: *App, t: *Tab) void {
     }
     if (w.menuItem(ui, "Encode URL")) commands.encodeUrl(app, t);
     if (w.menuItem(ui, "Decode URL")) commands.decodeUrl(app, t);
+}
+
+/// Shows `node` in the collection browser, opening the sidebar if needed.
+fn revealNode(ui: *c.cui_ctx, app: *App, node: *@import("../core/collection.zig").Node) void {
+    @import("sidebar.zig").reveal(app, node);
+    app.mode = .collections;
+    if (c.cui_viewport_size(ui).x < w.design.geometry.sidebar_sheet) @import("shell.zig").narrow_open = true else {
+        app.prefs.sidebar_open = true;
+        persist.prefsChanged(app);
+    }
+}
+
+/// The saved request a tab edits, if it is still in a collection.
+fn savedNode(app: *App, t: *const Tab) ?*@import("../core/collection.zig").Node {
+    const link = t.link orelse return null;
+    for (app.collections.items) |root| if (std.mem.eql(u8, &root.id, &link.collection)) return root.find(&link.request);
+    return null;
+}
+
+/// The tab whose context menu is open, by uid: a closed tab never matches.
+var menu_tab: u64 = 0;
+
+/// Right-clicking a request tab opens its menu.
+fn tabMenu(ui: *c.cui_ctx, app: *App) void {
+    // The tabs' scope, as in kest_doc_tabs_ex; the menu's items are built in it.
+    c.cui_push_id(ui, "request-documents");
+    defer c.cui_pop_id(ui);
+    for (app.tabs.items) |t| {
+        if (c.kest_right_pressed(ui, c.cui_make_id(ui, documentTitle(t)))) menu_tab = t.uid;
+    }
+    var index: ?usize = null;
+    for (app.tabs.items, 0..) |t, i| if (t.uid == menu_tab) {
+        index = i;
+    };
+    const i = index orelse return;
+    const t = app.tabs.items[i];
+    if (!c.kest_context_menu_begin(ui, "tab-menu", c.cui_make_id(ui, documentTitle(t)))) return;
+    const count = app.tabs.items.len;
+    var close: enum { none, this, others, right } = .none;
+    if (c.cui_menu_item_ex(ui, "Close", &.{ .shortcut = "Ctrl W" })) close = .this;
+    if (c.cui_menu_item_ex(ui, "Close others", &.{ .disabled = count < 2 })) close = .others;
+    if (c.cui_menu_item_ex(ui, "Close tabs to the right", &.{ .disabled = i + 1 >= count })) close = .right;
+    c.cui_menu_separator(ui);
+    if (c.cui_menu_item_ex(ui, "Save", &.{ .icon = c.CUI_ICON_SAVE, .shortcut = "Ctrl S" })) commands.save(app, t);
+    if (c.cui_menu_item_ex(ui, "Duplicate", &.{ .icon = c.CUI_ICON_COPY, .shortcut = "Ctrl D" })) commands.duplicateTab(app, t);
+    if (w.menuItem(ui, "Rename")) dialogs.askName(app, .{ .rename_tab = t }, t.name);
+    if (w.menuItem(ui, "Copy as cURL")) {
+        if (t.toRequest(w.arena.allocator()) catch null) |req| w.copy(ui, @import("../import_export/curl.zig").generate(w.arena.allocator(), req) catch "");
+    }
+    const node = savedNode(app, t);
+    if (c.cui_menu_item_ex(ui, "Reveal in collection", &.{ .disabled = node == null })) if (node) |n| revealNode(ui, app, n);
+    c.cui_context_menu_end(ui);
+    switch (close) {
+        .none => {},
+        .this => commands.requestClose(app, t),
+        .others, .right => {
+            // Close from the end so earlier indexes stay valid; tabs with
+            // edits stay open rather than asking once per tab.
+            var kept: usize = 0;
+            var k = app.tabs.items.len;
+            while (k > 0) {
+                k -= 1;
+                const other = app.tabs.items[k];
+                if (other == t or (close == .right and k <= i)) continue;
+                if (!commands.closeIfSaved(app, other)) kept += 1;
+            }
+            if (kept > 0) app.toast(.info, "Unsaved tabs kept open", w.fmt("{d} tab{s} with unsaved changes stayed open. Close {s} to save or discard the changes.", .{ kept, if (kept == 1) "" else "s", if (kept == 1) "it" else "them" }));
+        },
+    }
 }
 
 // A stable ### identity keeps selection and drag state when a request is renamed.

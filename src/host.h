@@ -2,6 +2,7 @@
 #include <cui/cui_app.h>
 #include <cui/cui_render.h>
 #include "ui/metrics.h"
+#include "kest_edit.h"
 void kest_host_attach(cui_app *app);
 typedef struct kest_window_geometry {
     int x, y, width, height;
@@ -56,6 +57,8 @@ void kest_response_header_source(cui_ctx *ui, const void *source, int count);
 void kest_table_focus(cui_ctx *ui, unsigned row, int column, int index);
 void kest_table_row_begin(cui_ctx *ui);
 bool kest_table_menu_begin(cui_ctx *ui, const char *id, bool row, const char *notice, cui_color color);
+bool kest_context_menu_begin(cui_ctx *ui, const char *key, cui_id anchor);
+bool kest_right_pressed(cui_ctx *ui, cui_id id);
 bool kest_table_details_begin(cui_ctx *ui, const char *id);
 bool kest_inspector_begin(cui_ctx *ui, const char *id, const char *anchor, float width);
 void kest_popup_track(cui_ctx *ui, const char *trigger);

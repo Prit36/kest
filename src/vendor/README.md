@@ -16,6 +16,18 @@ CUI's bundled fonts as their fallbacks. Font metrics, kerning, layout, icons and
 cache keys remain CUI's. If a native face or glyph cannot be rendered, the
 original stb rasterization is used.
 
+## `cui_textedit.c`
+
+Local changes: an edit menu in every text field. A right-click focuses the
+field and places the caret (keeping a selection it lands in), then opens Undo,
+Redo, Cut, Copy, Paste, Delete and Select all (Copy and Select all for
+read-only fields; nothing that copies a password). A chosen command is kept
+until the field's next frame and runs through the same code as its shortcut.
+A caller can set `kest_edit_menu_owned` so that its own menu answers the
+right-click instead; table cells do, and `kest_edit_menu_items` adds the
+cell's edit commands to the top of the row menu. The interface is
+`src/kest_edit.h`.
+
 ## `cui_render_gl.c` and `cui_render_sw.c`
 
 Local changes: include paths, and text blending. Glyph coverage is read from the
