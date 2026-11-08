@@ -138,9 +138,9 @@ fn icon(ui: *c.cui_ctx, key: [*:0]const u8, glyph: [*:0]const u8, hint: [*:0]con
 }
 fn controls(ui: *c.cui_ctx, s: *State, canvas: [*:0]const u8, compact: bool) void {
     if (w.action(ui, "response-find-case", "Aa", null, s.search_case, 28, 28, 0)) s.search_case = !s.search_case;
-    c.cui_tooltip(ui, "Match case (off: A-Z ignore case; other UTF-8 characters match exactly)");
+    c.kest_tooltip(ui, "Match case (off: A-Z ignore case; other UTF-8 characters match exactly)");
     w.text(ui, caption(s), .{ .width = if (compact) w.fill else w.px(112), .size = 11, .nowrap = true, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
-    if (s.search_failure) |failure| c.cui_tooltip(ui, switch (failure) {
+    if (s.search_failure) |failure| c.kest_tooltip(ui, switch (failure) {
         .query_limit => "Find accepts a literal query up to 4096 bytes.",
         .input_limit => "Search supports up to 16 MiB of available text.",
         .unavailable => "Search could not be prepared. Change the query or reopen Find to try again.",

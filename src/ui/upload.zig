@@ -66,13 +66,13 @@ pub fn details(ui: *c.cui_ctx, app: *App, configured: []const u8, vars: []const 
     w.row(ui, .{ .width = w.fill, .gap = 6, .min_height = 28 });
     w.text(ui, prepare.basename(path.resolved), .{ .width = w.fill, .font = c.CUI_FONT_MEDIUM, .size = 13 });
     const refresh = w.action(ui, "refresh-file-info", "", c.CUI_ICON_ROTATE_CCW, false, 28, 28, 3);
-    c.cui_tooltip(ui, "Refresh checked size and availability; the file is read again when sending");
+    c.kest_tooltip(ui, "Refresh checked size and availability; the file is read again when sending");
     w.end(ui);
     const result = info(app, path.resolved, refresh);
     if (result.status == .ready) {
         w.row(ui, .{ .id = "upload-size", .width = w.fill });
         w.text(ui, w.bytes(result.size), .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
-        c.cui_tooltip(ui, "Size at last check; the file is read again when sending");
+        c.kest_tooltip(ui, "Size at last check; the file is read again when sending");
         w.end(ui);
     }
     if (result.status != .ready) w.text(ui, metadata.message(result.status), .{ .width = w.fill, .size = 12, .color = w.color(if (result.status == .checking) c.CUI_TOKEN_TEXT_SECONDARY else c.CUI_TOKEN_DANGER) });
@@ -88,7 +88,7 @@ pub fn binary(ui: *c.cui_ctx, app: *App, t: *@import("../app/tab.zig").Tab) bool
             t.file_path.clear();
             changed = true;
         }
-        c.cui_tooltip(ui, "Remove selected upload file");
+        c.kest_tooltip(ui, "Remove selected upload file");
     }
     w.end(ui);
     w.column(ui, .{ .id = "upload-metadata", .width = w.fill, .height = w.fill, .pad_x = 12, .pad_top = 4, .pad_bottom = 8 });

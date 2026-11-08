@@ -33,7 +33,7 @@ fn cell(ui: *c.cui_ctx, id: [*:0]const u8, source: []const u8, weight: f32) bool
     const display = preview(source, cell_limit);
     const buffer = w.z(display.text);
     const flags = c.kest_table_input(ui, id, @constCast(buffer.ptr), buffer.len + 1, &.{ .width = weighted(weight), .read_only = true, .placeholder = "(empty)" });
-    c.cui_tooltip(ui, "Read-only preview. Enter inspects the full header; Alt Down opens row actions.");
+    c.kest_tooltip(ui, "Read-only preview. Enter inspects the full header; Alt Down opens row actions.");
     return flags & c.CUI_SUBMITTED != 0;
 }
 fn heading(ui: *c.cui_ctx, id: [*:0]const u8, label: []const u8, weight: f32) void {

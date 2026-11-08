@@ -97,6 +97,12 @@ static LRESULT ime_query(void) {
  * monitor at `dpi`, by sending the WM_DPICHANGED Windows sends then, with the
  * suggested rectangle scaled about the window's top-left corner. */
 #define KEST_DPI_SIMULATE (WM_APP + 75)
+/* Harness only: Windows switched apps to dark (wp 1) or light (wp 0); then
+ * the same WM_SETTINGCHANGE Windows broadcasts on that switch. */
+#define KEST_THEME_SIMULATE (WM_APP + 77)
+/* Harness only: the title bar colour last given to DWM (COLORREF), which DWM
+ * itself does not report back. */
+#define KEST_CAPTION_QUERY (WM_APP + 78)
 static LRESULT dpi_simulate(HWND h, unsigned dpi, unsigned from) {
     RECT r;
     if (dpi < 48 || dpi > 480 || !from || !GetWindowRect(h, &r)) return 0;
@@ -105,11 +111,57 @@ static LRESULT dpi_simulate(HWND h, unsigned dpi, unsigned from) {
     return SendMessageW(h, WM_DPICHANGED, MAKEWPARAM(dpi, dpi), (LPARAM)&suggested);
 }
 
+int cui__plat_system_dark(void);   /* CUI's Win32 backend: AppsUseLightTheme */
+static int system_dark = -2, system_motion = -1;   /* -2 / -1: read again */
+static int simulated_dark = -1;   /* harness only: stands in for the registry */
+int kest_system_dark(void) {
+    if (system_dark == -2) system_dark = simulated_dark >= 0 ? simulated_dark : cui__plat_system_dark();
+    return system_dark;
+}
+/* "Show animations in Windows" off (Settings > Accessibility > Visual effects). */
+bool kest_system_reduced_motion(void) {
+    if (system_motion < 0) {
+        BOOL on = TRUE;
+        if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &on, 0)) on = TRUE;
+        system_motion = on ? 1 : 0;
+    }
+    return system_motion == 0;
+}
 static LRESULT CALLBACK dispatch(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == KEST_WAKE) return 0;
     if (msg == WM_MOUSELEAVE && synthetic_pointer) return 0;
     if (msg == KEST_IME_QUERY && synthetic_pointer) return ime_query();
     if (msg == KEST_DPI_SIMULATE && synthetic_pointer) return dpi_simulate(h, (unsigned)wp, (unsigned)lp);
+    /* The harness sizes the window to a fixed layout whatever the screen;
+     * Windows would otherwise cap it at the screen size. */
+    if (msg == WM_GETMINMAXINFO && synthetic_pointer) {
+        LRESULT r = CallWindowProcW(previous, h, msg, wp, lp);
+        MINMAXINFO *m = (MINMAXINFO *)lp;
+        m->ptMaxTrackSize.x = m->ptMaxTrackSize.y = 8192;
+        return r;
+    }
+    if (msg == WM_GETOBJECT) {
+        intptr_t result;
+        if (kest_a11y_get_object(h, wp, lp, &result)) return (LRESULT)result;
+    }
+    /* Posted key messages carry no modifier state, and CUI reads modifiers
+     * with GetKeyState. For the harness, a posted Ctrl/Shift/Alt press or
+     * release updates this thread's keyboard state as real input would. */
+    if (synthetic_pointer && (msg == WM_KEYDOWN || msg == WM_KEYUP) && (wp == VK_CONTROL || wp == VK_SHIFT || wp == VK_MENU)) {
+        BYTE keys[256];
+        if (GetKeyboardState(keys)) {
+            BYTE v = msg == WM_KEYDOWN ? 0x80 : 0;
+            keys[wp] = v;
+            keys[wp == VK_CONTROL ? VK_LCONTROL : wp == VK_SHIFT ? VK_LSHIFT : VK_LMENU] = v;
+            SetKeyboardState(keys);
+        }
+    }
+    if (msg == KEST_CAPTION_QUERY && synthetic_pointer) return caption_valid ? (LRESULT)caption_color : -1;
+    if (msg == KEST_THEME_SIMULATE && synthetic_pointer) {
+        simulated_dark = wp ? 1 : 0;
+        return SendMessageW(h, WM_SETTINGCHANGE, 0, (LPARAM)L"ImmersiveColorSet");
+    }
+    if (msg == WM_SETTINGCHANGE) { system_dark = -2; system_motion = -1; kest_host_wake(); }
     if (msg == WM_IME_STARTCOMPOSITION) ime_apply();
     if (msg == WM_TIMER && wp == KEST_FLUSH) {
         KillTimer(h, KEST_FLUSH);
@@ -201,6 +253,7 @@ void kest_host_sync_chrome(cui_ctx *ui) {
     if (!window) return;
     if (ui->platform.set_text_input_rect != ime_caret_moved) ui->platform.set_text_input_rect = ime_caret_moved;
     if (cui_dpi_scale(ui) != ime_scale) { ime_scale = cui_dpi_scale(ui); ime_apply(); }
+    kest_a11y_frame(ui, window);
     cui_color bg = CUI_C(ui, BACKGROUND), fg = CUI_C(ui, FOREGROUND);
     /* Read this frame's actual animated scrims, including sheets, the palette
      * and closing dialogs. Kest's scrims are all black, so their order does
@@ -257,6 +310,7 @@ void kest_editor_register(cui_ctx *ui, cui_id id) {
     cui__interact(ui, id, CUI_IF_FOCUSABLE | CUI_IF_TEXT);
     cui__mark_interactive(ui, ui->last_node, CUI_IF_FOCUSABLE | CUI_IF_TEXT);
     if (ui->focus == id) ui->edit_prev = true;
+    kest_a11y_label_id(ui, id, KEST_A11Y_EDIT, "Text editor", NULL);
 }
 float kest_editor_scroll(cui_ctx *ui, cui_id id) {
     if (ui->hot != id) return 0;

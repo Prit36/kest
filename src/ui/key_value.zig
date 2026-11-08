@@ -87,7 +87,7 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
         slot(ui, c.KEST_TABLE_ENABLED);
         if (!insertion) {
             changed = c.cui_checkbox_ex(ui, "###enabled", &row.enabled, &.{}) or changed;
-            c.cui_tooltip(ui, "Include this row");
+            c.kest_tooltip(ui, "Include this row");
         }
         w.end(ui);
         const key_changed = field(ui, "key", &row.key, switch (opts.kind) {
@@ -111,7 +111,7 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
                     row.has_equals = true;
                     if (insertion) commit = true else changed = true;
                 }
-                c.cui_tooltip(ui, "Choose a file for this field");
+                c.kest_tooltip(ui, "Choose a file for this field");
             }
             w.end(ui);
             slot(ui, c.KEST_TABLE_TYPE);
@@ -120,7 +120,7 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
                 if (!insertion) changed = true;
                 c.cui_request_redraw(ui);
             }
-            c.cui_tooltip(ui, if (row.is_file) "File field; switch to text without discarding the value" else "Text field; switch to a file path without discarding the value");
+            c.kest_tooltip(ui, if (row.is_file) "File field; switch to text without discarding the value" else "Text field; switch to a file path without discarding the value");
             w.end(ui);
         }
         if (insertion) {

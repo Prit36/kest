@@ -1,6 +1,7 @@
 /* App-specific controls on CUI's existing input, focus and popup machinery.
  * No dependency sources are patched. No animation state is introduced. */
 #include "host.h"
+#include <stdio.h>
 #include "cui_internal.h"
 void kest_focus(cui_ctx *ui, const char *id) { ui->focus = cui_make_id(ui, id); }
 void kest_input_select_all(cui_ctx *ui, const char *key, int length) {
@@ -18,6 +19,50 @@ bool kest_focus_within(cui_ctx *ui, const char *key) {
         for (int at = i; at >= 0; at = ui->nodes[at].parent) if (ui->nodes[at].id == parent) return true;
     }
     return false;
+}
+
+/* Focus bookkeeping for overlays and hidden panes (shell.zig). */
+cui_id kest_get_focus(cui_ctx *ui) { return ui->focus; }
+void kest_set_focus(cui_ctx *ui, cui_id id) { ui->focus = id; }
+cui_id kest_last_id(cui_ctx *ui) { return ui->last_id; }
+/* `id` took part in the previous frame's keyboard focus order. */
+bool kest_was_focusable(cui_ctx *ui, cui_id id) {
+    for (int i = 0; i < ui->prev_focus_count; i++) if (ui->prev_focus_order[i] == id) return true;
+    return false;
+}
+
+/* Keyboard focus is on `key` or inside it (any control, not only text). */
+bool kest_focus_inside(cui_ctx *ui, const char *key) {
+    if (!ui->focus) return false;
+    cui_id parent = cui_make_id(ui, key);
+    if (ui->focus == parent) return true;
+    for (int i = 0; i < ui->node_count; ++i) if (ui->nodes[i].id == ui->focus) {
+        for (int at = i; at >= 0; at = ui->nodes[at].parent) if (ui->nodes[at].id == parent) return true;
+        return false;
+    }
+    return false;
+}
+
+/* Test diagnostics: the text inside the focused node (empty when none). */
+static void focus_text(cui_ctx *ui, int index, char *out, size_t cap, size_t *len, int depth) {
+    if (depth > 16 || *len + 2 >= cap) return;
+    cui_node *n = &ui->nodes[index];
+    if (n->text && n->text_len > 0 && n->font != CUI_FONT_ICONS) {
+        if (*len) out[(*len)++] = ' ';
+        size_t take = (size_t)n->text_len < cap - 1 - *len ? (size_t)n->text_len : cap - 1 - *len;
+        memcpy(out + *len, n->text, take); *len += take; out[*len] = 0;
+    }
+    for (int ch = n->first; ch >= 0; ch = ui->nodes[ch].next) focus_text(ui, ch, out, cap, len, depth + 1);
+}
+const char *kest_focus_label(cui_ctx *ui) {
+    static char text[256];
+    size_t len = 0;
+    text[0] = 0;
+    if (!ui->focus) return text;
+    cui_rect r = cui_get_rect(ui, ui->focus);
+    len = (size_t)snprintf(text, sizeof text, "@%.0f,%.0f %.0fx%.0f", r.x, r.y, r.w, r.h);
+    for (int i = 0; i < ui->node_count; ++i) if (ui->nodes[i].id == ui->focus) { focus_text(ui, i, text, 120, &len, 0); break; }
+    return text;
 }
 
 void kest_collection_top(cui_ctx *ui, const char *key) {
@@ -108,11 +153,18 @@ static void mark_match(cui_ctx *ui, int label, const char *name, int start, int 
     m->w = cui_measure_text(ui, n->font, size, name + start, length).width;
     n->paint = paint_match; n->paint_data = m;
 }
+void kest_collection_row_selected(cui_ctx *ui) { kest_a11y_selected(ui, collection_row_id); }
 void kest_collection_name(cui_ctx *ui, const char *name, const char *method, const char *icon, cui_color color, int match_start, int match_length) {
     int row = cui__current(ui);
     if (row >= 0) { ui->nodes[row].paint = NULL; ui->nodes[row].paint_data = NULL; }
     collection_row_id = row >= 0 ? ui->nodes[row].id : 0;
     cui_tree_table_name(ui, method ? method : name, method ? NULL : icon);
+    {
+        char spoken[192];
+        if (method) snprintf(spoken, sizeof spoken, "%s %s", method, name);
+        else snprintf(spoken, sizeof spoken, "%s %s", icon && strcmp(icon, CUI_ICON_FOLDER) == 0 ? "Folder" : "Collection", name);
+        kest_a11y_label_id(ui, collection_row_id, KEST_A11Y_TREE_ITEM, spoken, NULL);
+    }
     int label = ui->last_node;
     if (method) {
         /* The slot stays 44px so names align; long verbs such as PROPFIND
@@ -264,7 +316,9 @@ bool kest_control_begin(cui_ctx *ui, const char *key, bool selected, float width
 
 bool kest_content_tab_begin(cui_ctx *ui, const char *key, bool selected) {
     /* One Tab stop per strip; arrows move focus and activate another section. */
-    return kest_control_begin(ui, key, selected, 0, KEST_CONTENT_TAB_HEIGHT, 2);
+    bool open = kest_control_begin(ui, key, selected, 0, KEST_CONTENT_TAB_HEIGHT, 2);
+    kest_a11y_label_id(ui, cui_make_id(ui, key), KEST_A11Y_TAB, NULL, NULL);
+    return open;
 }
 
 int kest_tab_navigation(cui_ctx *ui, const char *const *keys, int count, int selected) {
@@ -344,6 +398,14 @@ cui_doc_tabs_result kest_doc_tabs_ex(cui_ctx *ui, const char *key, const kest_do
             }
             cui_id close_id = id ^ 0xC105Eu;
             int close_node = -1;
+            {
+                const char *label = tabs[k].label ? tabs[k].label : tabs[k].title;
+                char spoken[192];
+                snprintf(spoken, sizeof spoken, "%s%s%s%s", tabs[k].method ? tabs[k].method : "", tabs[k].method ? " " : "", label, tabs[k].dirty ? ", unsaved changes" : "");
+                kest_a11y_label_id(ui, id, KEST_A11Y_TAB, spoken, NULL);
+                snprintf(spoken, sizeof spoken, "Close %s", label);
+                kest_a11y_label_id(ui, close_id, KEST_A11Y_BUTTON, spoken, NULL);
+            }
             for (int child = n->first; child >= 0; child = ui->nodes[child].next) {
                 cui_node *item = &ui->nodes[child];
                 if (item->text && item->font == CUI_FONT_ICONS && tabs[k].method) {
@@ -509,6 +571,7 @@ int kest_flat_input(cui_ctx *ui, const char *key, char *buf, size_t cap, const c
     if (opts && opts->autofocus) ui->focus = id;
     int first = ui->node_count;
     int flags = cui__text_field(ui, id, buf, cap, opts, false, 1, NULL);
+    kest_a11y_label_id(ui, id, KEST_A11Y_EDIT, opts ? (opts->label ? opts->label : opts->placeholder) : NULL, buf);
     cui_node *n = &ui->nodes[first];
     n->min_w = 1;
     n->pad[1] = n->pad[3] = cell ? 10 : 8;
@@ -753,6 +816,8 @@ bool kest_table_menu_begin(cui_ctx *ui, const char *key, bool row, const char *n
     kest_item_end(ui);
     ui->nodes[first].opacity = !row || notice || hover || cell_focus || ui->focus == id || (popup && popup->open) ? 1 : 0;
     cui_tooltip(ui, notice ? notice : row ? "Row actions (Alt Down or Shift F10)" : "Table actions");
+    kest_a11y_label_id(ui, id, KEST_A11Y_MENU_BUTTON, row ? "Row actions" : "Table actions", NULL);
+    kest_a11y_help_id(ui, id, notice);
     bool activate = clicked && !(popup && popup->open && (cui_key_pressed(ui, CUI_KEY_ENTER) || cui_key_pressed(ui, CUI_KEY_SPACE)));
     if (allowed && (activate || keyboard || context)) {
         bool open = keyboard || context || !(popup && popup->open);
@@ -808,6 +873,7 @@ bool kest_dropdown_begin(cui_ctx *ui, const char *label, const cui_menu_opts *op
     }
     ui->nodes[ui->last_node].scale = 1;
     cui_id anchor = ui->last_id;
+    kest_a11y_label_id(ui, anchor, KEST_A11Y_MENU_BUTTON, label, NULL);
     bool focused = ui->focus == anchor && ui->focus_visible;
     bool keyboard = focused && (cui_key_pressed(ui, CUI_KEY_ENTER) || cui_key_pressed(ui, CUI_KEY_SPACE));
     if (clicked && !(popup && popup->open && keyboard)) {
@@ -870,6 +936,9 @@ void kest_url_invalid(cui_ctx *ui, bool invalid) {
 bool kest_button_ex(cui_ctx *ui, const char *label, const cui_button_opts *opts) {
     int first = ui->node_count;
     bool clicked = cui_button_ex(ui, label, opts);
+    /* Icon-only buttons ("###key") are named by their tooltip. */
+    kest_a11y_label_id(ui, ui->nodes[first].id, KEST_A11Y_BUTTON, NULL, NULL);
+    if (opts) kest_a11y_help_id(ui, ui->nodes[first].id, opts->tooltip);
     if (opts && (opts->variant == CUI_BUTTON_PRIMARY || opts->variant == CUI_BUTTON_DANGER)) {
         ui->nodes[first].paint = NULL;
         ui->nodes[first].paint_data = NULL;

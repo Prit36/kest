@@ -154,6 +154,8 @@ pub const App = struct {
     tree_menu_open: bool = false,
     tree_menu_at: ?ui.Rect = null,
     tree_menu_node: ?*col.Node = null,
+    /// The tree takes keyboard focus on the next frame (after a delete).
+    focus_tree: bool = false,
     history_menu_open: bool = false,
     history_menu_at: ?ui.Rect = null,
     history_menu_row: usize = 0,

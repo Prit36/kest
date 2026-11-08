@@ -104,7 +104,7 @@ fn documents(ui: *c.cui_ctx, app: *App) void {
     }
     if (selected >= 0) commands.activate(app, @intCast(selected));
     if (w.action(ui, "new-document", "", c.CUI_ICON_PLUS, false, 34, 34, 3)) _ = commands.newTab(app);
-    c.cui_tooltip(ui, "New request (Ctrl N)");
+    c.kest_tooltip(ui, "New request (Ctrl N)");
     var chosen: ?usize = null;
     if (app.tabs.items.len > 1 and c.kest_menu_begin(ui, w.fmt("Tabs ({d})###open-requests", .{app.tabs.items.len}), &.{ .width = @min(520, c.cui_viewport_size(ui).x - 32), .placement = c.CUI_PLACE_BOTTOM_END }, 108, w.design.control.normal, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
         c.kest_document_list_begin(ui, "open-requests-list", @min(320, c.cui_viewport_size(ui).y - 120));
@@ -173,7 +173,7 @@ fn context(ui: *c.cui_ctx, app: *App, t: *Tab) void {
     const paths = w.arena.allocator().alloc([]const u8, segments.items.len) catch return;
     for (segments.items, paths) |segment, *value| value.* = std.mem.span(segment);
     const full_path = std.mem.join(w.arena.allocator(), " / ", paths) catch return;
-    c.cui_tooltip(ui, w.z(full_path));
+    c.kest_tooltip(ui, w.z(full_path));
 }
 
 fn layoutMenu(ui: *c.cui_ctx, app: *App) void {

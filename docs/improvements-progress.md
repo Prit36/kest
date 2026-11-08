@@ -10,24 +10,24 @@ after inspection; historical documentation is not fresh verification.
 | --- | --- | --- |
 | 0. Architecture and baseline | 1, 59; initial inventory for 56 | Initial audit and ReleaseFast baseline complete |
 | 1. Request content selection | 4; selection-related parts of 25, 44 | Complete |
-| 2. Shared visual primitives | 6, 20, 60 | Shared foundation complete; per-view rollout continues in later slices |
-| 3. Shell and pane geometry | 2–3, 5, 8, 12, 15, 17–19, 36, 42–44, 61 | Core phase complete (3a/3b); full component/edge-case audit remains in 14 |
-| 4. Document navigation | 7; request switching and tab keyboard behavior | Complete; broader keyboard/data-safety audit remains in 11/14 |
-| 5. Request composer | 9–10, 21–22 | Complete; OS/accessibility and data-safety audit remains in 11/12/14 |
-| 6. Params and headers | 11, 23–24 | Complete (6a/6b); broad data-safety/native audits remain in 11/12/14 |
-| 7. Body editing | Remaining 25, including form/upload/validation | Complete (7a/7b); broad native/data-safety/performance audits remain in 11–14 |
+| 2. Shared visual primitives | 6, 20, 60 | Complete; rolled out per view in slices 3–10 |
+| 3. Shell and pane geometry | 2–3, 5, 8, 12, 15, 17–19, 36, 42–44, 61 | Complete (3a/3b); nine window sizes × four scales × both themes in `geometry_tests.zig` |
+| 4. Document navigation | 7; request switching and tab keyboard behavior | Complete; keyboard/data-safety audit done in 11 and the final pass |
+| 5. Request composer | 9–10, 21–22 | Complete; OS input, UIA and keyboard-only use verified in 12 and the final pass |
+| 6. Params and headers | 11, 23–24 | Complete (6a/6b); covered by the 11/12 audits |
+| 7. Body editing | Remaining 25, including form/upload/validation | Complete (7a/7b); covered by the 11–14 audits |
 | 8. Response inspection | 13–14, 26–31 | Complete. 8b3c added formatted/minified JSON copy and content-typed save names; raw copy/save already existed |
 | 9. Collections | 16, 32–35 | Complete (see completion pass), including drag reordering in the tree |
 | 10. Global workflows and secondary views | 37–40, 63 | Palette and close dialog reworked; env picker/dialogs audited by capture. Import measured at 79 ms for 20,000 requests, so no progress UI is needed |
-| 11. Keyboard and data safety | 45–48 | Save/Discard/Cancel close, failed-write dirty state, shortcut table verified |
-| 12. Themes, accessibility and native behavior | 49–51 | Both themes captured; no screen-reader/IME/OS-input verification possible here |
+| 11. Keyboard and data safety | 45–48 | Complete: Save/Discard/Cancel close, failed-write dirty state, shortcut table, keyboard-only workflow and focus after palette/dialog/sidebar/delete/send |
+| 12. Themes, accessibility and native behavior | 49–51 | Complete: both themes, Windows app theme followed until one is chosen, Windows "Show animations" honoured, real OS input, IME placement, UI Automation provider |
 | 13. Performance | 52–55 | Measured before/after: no regression (see completion pass) |
-| 14. Full regression and polish | 41, 56–58, 64–67; all acceptance criteria | Captures reviewed at 1282×832 and 1024×768, both themes; limits listed below |
+| 14. Full regression and polish | 41, 56–58, 64–67; all acceptance criteria | Complete; acceptance matrix in "Final pass" below; limits listed there |
 
 The document's Parts XIII–XV describe strategy, acceptance and deliverables;
 they apply across these slices. Each slice includes relevant verification rather
 than deferring all tests to the final pass. Broad window/DPI and accessibility
-acceptance remains pending even when individual components pass headless tests.
+acceptance was settled in the final pass (see "Final pass: requirements re-checked").
 
 ## Architecture audit
 
@@ -1059,12 +1059,9 @@ notification. Nothing changes otherwise.
 
 What this does not cover, and why:
 
-- **Screen readers.** UI Automation sees the window ("Kest") with 0
-  descendant elements: CUI's Win32 backend has no `WM_GETOBJECT` provider.
-  Req. 50 asks for screen-reader semantics "where supported by the native
-  framework"; CUI does not support them, so adding a provider means
-  extending the UI library, not Kest. Accessible names do exist for every
-  icon button (CUI labels, tooltips) for when CUI gains that support.
+- **Screen readers (fixed).** CUI's Win32 backend answers no
+  `WM_GETOBJECT`, so UI Automation saw the window with 0 descendants. See
+  "Screen readers (req. 50)" below: Kest now publishes its own provider.
 - **IME composition (fixed).** Committed IME text arrives as `WM_CHAR` and
   works (CJK above). CUI's fields and editors report their caret through
   `platform.set_text_input_rect`, but its Win32 backend never installed that
@@ -1084,6 +1081,40 @@ What this does not cover, and why:
   at 100%, 125% and 150%. Clicks, drags and typing map correctly, and the IME
   point scales (917,182 at 150% = 611,122 × 1.5). Not covered: real monitor
   hot-plug and the window manager's own rectangle choice.
+
+### Screen readers (req. 50)
+
+`src/a11y.c` is a UI Automation provider, answered from `host.c`'s
+`WM_GETOBJECT`. Nothing runs until a UIA client asks for the window, and it
+stops again once `UiaClientsAreListening()` is false.
+
+- After each frame it publishes every control CUI hit-tests this frame
+  (buttons, fields, tabs, rows, menu buttons): name, control type, screen
+  rectangle (DPI-scaled), keyboard focus, help text, and field text through
+  `IValueProvider`. Focus changes raise `UIA_AutomationFocusChangedEventId`.
+  UIA threads read the published list under an SRW lock, by stable CUI id.
+- Names come from the visible text, or from labels Kest registers: icon-only
+  buttons by their tooltip (`kest_tooltip`, `kest_button_ex`), fields by
+  label or placeholder, menu buttons, table/row actions. Lucide icon glyphs
+  (private-use characters) and the text of interactive children are left out
+  of names.
+- Roles: request sections and open requests are tab items (`GET Alpha`,
+  `, unsaved changes` when dirty), each with a `Close Alpha` button; the
+  collection tree is a Tree whose rows are tree items (`GET Beta`,
+  `Folder Folder A`). While the tree has focus, its selected row is the
+  focused element, so arrowing through it is announced.
+- `os_input.ps1` attaches a UIA client before any input (so the provider is
+  live during dragging and typing) and checks: at least 20 controls; Send,
+  Save, menu buttons, the search field, section tabs, open-request tabs,
+  close buttons and tree rows by name and role; the focused tree row after a
+  click; the focused URL field and its typed text; every rectangle inside
+  the window; no unnamed controls apart from fields; no icon glyphs in
+  names. Passes at 100%, 125% and 150% (`test-output/os-input-a11y-*.log`).
+- The harness now sets the client area to 1280×800 logical. The default
+  window follows the screen; on this machine's current 1024×768 screen it
+  opened at 1008×681, which moved the URL field from under the harness's
+  fixed click point. With `KEST_SYNTHETIC_POINTER` only, `host.c` lifts the
+  maximum tracking size so this works on any screen.
 
 ### Sidebar search highlighting and toasts
 
@@ -1110,12 +1141,91 @@ What this does not cover, and why:
 
 - Real Windows mouse/keyboard/committed-text input is verified by
   `tests/integration/os_input.ps1` (above), including IME placement and
-  simulated 125%/150% monitor moves. Not verifiable or not supported here:
-  screen readers (CUI exposes no UI Automation tree; req. 50 scopes this to
-  framework support), the real clipboard, GPU pixels on a hidden desktop, and
-  a physical second monitor (one is available).
+  simulated 125%/150% monitor moves, and what UI Automation clients see.
+  Not verifiable here: speech output of a real screen reader (NVDA/Narrator
+  are not installed; the harness checks the UIA tree they read), the real
+  clipboard, GPU pixels on a hidden desktop, and a physical second monitor.
+- The UIA provider is flat (window → controls) and read-only: it has no
+  Invoke, ExpandCollapse or SelectionItem patterns, and fields do not accept
+  `IValueProvider::SetValue`. Readers announce names, roles, focus and field
+  text; activation goes through the keyboard as for sighted users.
 - Settings text fields only re-sync from `settings` on load; code that
   changes `settings` directly (only test fixtures today) leaves stale text.
+
+## Final pass: requirements re-checked against `improvements.md`
+
+Every numbered requirement and Part XIV criterion was re-read against this
+log and the code. Three gaps were found and fixed:
+
+- **Keyboard-only use (req. 46, criterion "Test keyboard-only navigation").**
+  No test drove a whole request without a pointer. `src/keyboard_tests.zig`
+  now does, with no mouse input: Ctrl N (URL focused), type the URL, Shift
+  Tab to the method and pick POST from its menu, Tab to the sections and
+  arrow to Body, pick JSON, type the body, Ctrl Enter (focus stays put),
+  Ctrl M so Tab leaves the editor (Tab indents by default; Escape also
+  leaves, to the body type), Tab to the response status and body viewer,
+  Ctrl F opens response Find.
+- **Focus after closing a modal, hiding the sidebar or deleting (req. 46).**
+  The new test found two bugs. Escape on the command palette (and closing a
+  dialog) left keyboard focus on the closed overlay, so the next Tab
+  restarted at the window's first control; hiding the sidebar with focus
+  inside it left focus on hidden controls. `shell.zig` now records focus
+  before an overlay opens and returns it when the overlay closes with focus
+  still on it (actions that moved focus, such as Find, keep theirs). A
+  focused control that is no longer drawn hands focus to the sidebar toggle
+  (sidebar closed) or the URL field. Deleting the selected tree item now
+  selects the next item (else previous, else parent) and keeps focus in the
+  tree. With these fixes disabled the new test fails at the palette check.
+- **System theme and reduced motion (req. 49–51).** First launch was always
+  dark, and only headless runs reduced motion. Until an appearance is
+  chosen, Kest now follows the Windows app theme (`AppsUseLightTheme`, via
+  CUI's Win32 backend), re-read on `WM_SETTINGCHANGE`. The choice is stored
+  by omitting `"dark"` from `workspace.json`, so existing files keep their
+  explicit setting; Settings has "Match Windows appearance". When Windows
+  "Show animations" is off (`SPI_GETCLIENTAREAANIMATION`), motion is off.
+  Verified on the real app: an empty workspace saved no `"dark"` key.
+
+### Acceptance matrix (Part XIV)
+
+| Criterion | Evidence |
+| --- | --- |
+| Layout: borders, dividers, gaps, alignment, splitters, tab overflow | Slices 3a/3b/4; `geometry_tests.zig` (nine sizes from 640×420 to 2560×1440, 100–200 %, both themes); reviewed captures |
+| Usability: discoverable composer, POST body easy to find, full names discoverable | Slices 1, 5–7, 9; tooltips and full-name menus; UIA names |
+| Keyboard operations | Shortcut table (slice 11), `keyboard_tests.zig`, OS-level keys in `os_input.ps1` |
+| Visual quality, contrast, both themes | Shared tokens (slice 2), 4.5:1 badge checks (8a), captures in both themes |
+| Reliability: execution, bodies, headers, collections, environments, import/export, saving, cancel | Loopback integration suite, table/body/upload round trips, failed-write test, cancel tests |
+| Performance | Startup after this pass: 139.8 ms first idle, 59.3 MiB, 0 % idle CPU (pre-overhaul 149.6 ms / 58.7 MiB); `zig build bench`; 4 MiB editor frame medians |
+| 1282×832, smaller and larger windows, high DPI | `geometry_tests.zig`; `os_input.ps1` at 100/125/150 % |
+| Different methods and body types | Composer, table, body and upload suites (all seven body modes) |
+| Accessibility | UIA provider and checks; focus rings; reduced motion; tooltips and names for icon buttons |
+
+### Closing the remaining verifiable items
+
+- **200 % in the real window:** `os_input.ps1 -Dpi 192` passes every check
+  (2560×1600 client, IME point scaled).
+- **Real clipboard:** Ctrl A / Ctrl C in the URL field puts the exact text
+  (CJK and emoji included) on the Windows clipboard; Ctrl V pastes at the
+  caret. The harness saves every clipboard format first and restores it
+  (checked). Posted keys carry no modifier state, so under the harness flag
+  only, `host.c` records posted Ctrl/Shift/Alt in its thread key state.
+- **Live theme switch:** a second launch with no appearance chosen; a
+  harness-only message replaces the registry value and sends the real
+  `WM_SETTINGCHANGE`. The title bar colour the app gives DWM goes dark →
+  light (luminance 10 → 252) → dark, and no `"dark"` key is written.
+- **Deliverables (§66):** `docs/overhaul/README.md` has the audit summary,
+  fix summary, verification table and limitations, with before (`582ae63`)
+  and after captures at 1282×832 in both themes.
+
+### Remaining limitations after the final pass
+
+- Spoken output of a real screen reader (the UIA tree it reads is tested;
+  the provider is read-only).
+- GPU-rendered pixels of the real window on a hidden desktop (software
+  renderer captures share the layout and drawing code).
+- A second physical monitor (DPI moves are simulated with `WM_DPICHANGED`).
+
+Logs: `test-output/finish2-{debug,release,startup}.log`,
+`test-output/os-input-a11y-{0,120,144,192}.log`.
 
 ## Verification log
 

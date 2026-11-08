@@ -56,7 +56,7 @@ fn pickf(day: f32, night: f32) f32 {
     return day + (night - day) * blend;
 }
 pub fn apply(ui: *c.cui_ctx, dark: bool) void {
-    const still = @import("platform.zig").headless;
+    const still = @import("platform.zig").headless or c.kest_system_reduced_motion();
     c.cui_set_reduced_motion(ui, still);
     c.cui_set_theme(ui, if (dark) c.CUI_THEME_DARK else c.CUI_THEME_LIGHT);
     const t = c.cui_theme_get(ui);

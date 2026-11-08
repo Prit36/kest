@@ -34,9 +34,9 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
             selectPane(app, t, pane);
         }
         switch (pane) {
-            .body => c.cui_tooltip(ui, if (t.hasBodyContent()) "Request body contains content" else "Request body"),
-            .headers => c.cui_tooltip(ui, "Configured request headers; automatic headers are in the table actions menu"),
-            .settings => c.cui_tooltip(ui, if (custom) "Timeout, size, redirect and TLS options; some differ from the defaults" else "Timeout, size, redirect and TLS options"),
+            .body => c.kest_tooltip(ui, if (t.hasBodyContent()) "Request body contains content" else "Request body"),
+            .headers => c.kest_tooltip(ui, "Configured request headers; automatic headers are in the table actions menu"),
+            .settings => c.kest_tooltip(ui, if (custom) "Timeout, size, redirect and TLS options; some differ from the defaults" else "Timeout, size, redirect and TLS options"),
             .params => {},
         }
     }

@@ -142,19 +142,19 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
         if (t.running()) c.cui_spinner(ui, 12);
         w.text(ui, label, .{ .size = 12, .font = c.CUI_FONT_MEDIUM, .color = w.color(value.token), .nowrap = true });
         c.kest_item_end(ui);
-        c.cui_tooltip(ui, if (t.running()) "Current request is running; click for execution details" else if (t.start_failure != .none) "Request was not sent; click for details" else if (r != null and r.?.status > 0) w.z(states.category(r.?.status)) else "Execution outcome; click for details");
+        c.kest_tooltip(ui, if (t.running()) "Current request is running; click for execution details" else if (t.start_failure != .none) "Request was not sent; click for details" else if (r != null and r.?.status > 0) w.z(states.category(r.?.status)) else "Execution outcome; click for details");
         if (clicked) c.cui_popover_open(ui, "response-details");
         w.end(ui);
         if (show_duration) {
             w.row(ui, .{ .id = "response-duration" });
             w.text(ui, value.duration, .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
-            c.cui_tooltip(ui, if (t.running()) "Elapsed time for the current request" else "Total request duration, including redirects; a dash means no measurement");
+            c.kest_tooltip(ui, if (t.running()) "Elapsed time for the current request" else "Total request duration, including redirects; a dash means no measurement");
             w.end(ui);
         }
         if (show_size) {
             w.row(ui, .{ .id = "response-size" });
             w.text(ui, value.size, .{ .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY), .nowrap = true });
-            c.cui_tooltip(ui, "Decoded response byte count; body warnings describe preview and storage limits");
+            c.kest_tooltip(ui, "Decoded response byte count; body warnings describe preview and storage limits");
             w.end(ui);
         }
         w.end(ui);

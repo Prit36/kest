@@ -17,6 +17,46 @@ fn toggleSidebar(ui: *c.cui_ctx, app: *App) void {
         app.prefs.sidebar_open = !app.prefs.sidebar_open;
         persist.prefsChanged(app);
     }
+    // Focus inside a sidebar that just closed moves to the toggle.
+    focus_check = .sidebar_closed;
+}
+
+/// Keyboard focus across overlays and hidden panes. CUI leaves focus on a
+/// closed palette or dialog, or on a control that is no longer drawn; Tab
+/// would then restart at the window's first control.
+var plain_focus: c.cui_id = 0; // last frame-start focus with no overlay open
+var focus_before_overlay: c.cui_id = 0;
+var overlay_focus: c.cui_id = 0;
+var overlay_was_open = false;
+var sidebar_toggle: c.cui_id = 0;
+var focus_check: enum { none, overlay_closed, sidebar_closed } = .none;
+
+fn keepFocus(ui: *c.cui_ctx, app: *App) void {
+    const focus = c.kest_get_focus(ui);
+    // A check scheduled last frame: the focused control is no longer drawn.
+    if (focus_check != .none and focus != 0 and !c.kest_was_focusable(ui, focus)) {
+        if (focus_check == .sidebar_closed and sidebar_toggle != 0) c.kest_set_focus(ui, sidebar_toggle) else if (app.current()) |t| t.url.focus();
+    }
+    focus_check = .none;
+    const open = app.palette_open or app.modal_open;
+    if (open) {
+        if (!overlay_was_open) focus_before_overlay = plain_focus;
+        overlay_focus = focus;
+    } else if (overlay_was_open) {
+        // Closed with focus still on it (Escape, Cancel, most choices):
+        // return to where the keyboard was. Actions that moved focus keep it.
+        if (focus_before_overlay != 0 and (focus == overlay_focus or focus == 0)) {
+            c.kest_set_focus(ui, focus_before_overlay);
+            focus_check = .overlay_closed;
+        }
+    } else plain_focus = focus;
+    overlay_was_open = open;
+}
+
+/// Test hook: the toggle button's id, which takes focus when the sidebar
+/// it controls closes around the keyboard.
+pub fn sidebarToggleId() c.cui_id {
+    return sidebar_toggle;
 }
 
 pub fn view(ui: *c.cui_ctx, app: *App) void {
@@ -33,6 +73,13 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
         persist.writeFailed(app, path);
     }
     commands.ensureTab(app);
+    followSystemAppearance(app);
+    keepFocus(ui, app);
+    // Requested last frame; dropped if no tree is drawn to take it.
+    const tree_focus_requested = app.focus_tree;
+    defer if (tree_focus_requested) {
+        app.focus_tree = false;
+    };
     @import("design.zig").apply(ui, app.prefs.dark);
     shortcuts(ui, app);
     const size = c.cui_viewport_size(ui);
@@ -75,9 +122,9 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
 fn topbar(ui: *c.cui_ctx, app: *App, width: f32) void {
     w.row(ui, .{ .id = "global-toolbar", .height = w.px(36), .pad_x = 10, .gap = w.design.space.normal, .width = w.fill });
     defer w.end(ui);
-    if (w.icon(ui, c.CUI_ICON_PANEL_LEFT, "Toggle workspace (Ctrl B)")) {
-        toggleSidebar(ui, app);
-    }
+    const toggled = w.icon(ui, c.CUI_ICON_PANEL_LEFT, "Toggle workspace (Ctrl B)");
+    sidebar_toggle = c.kest_last_id(ui);
+    if (toggled) toggleSidebar(ui, app);
     var running: usize = 0;
     for (app.tabs.items) |t| if (t.running()) {
         running += 1;
@@ -103,14 +150,15 @@ fn topbar(ui: *c.cui_ctx, app: *App, width: f32) void {
         c.cui_menu_end(ui);
     }
     if (w.action(ui, "command-search", if (width >= 1000) "Commands" else "", c.CUI_ICON_SEARCH, false, if (width >= 1000) 122 else 28, 28, 3)) app.palette_open = true;
-    c.cui_tooltip(ui, "Commands (Ctrl Shift P)");
+    c.kest_tooltip(ui, "Commands (Ctrl Shift P)");
     if (w.action(ui, "activity-toggle", if (width >= 1000) "Activity" else "", c.CUI_ICON_SQUARE_TERMINAL, app.prefs.log_open, if (width >= 1000) 96 else 28, 28, 3)) {
         app.prefs.log_open = !app.prefs.log_open;
         persist.prefsChanged(app);
     }
-    c.cui_tooltip(ui, "Activity console (Ctrl J)");
+    c.kest_tooltip(ui, "Activity console (Ctrl J)");
     if (w.icon(ui, if (app.prefs.dark) c.CUI_ICON_SUN else c.CUI_ICON_MOON, "Switch appearance")) {
         app.prefs.dark = !app.prefs.dark;
+        app.prefs.follow_system = false;
         persist.prefsChanged(app);
     }
     if (c.kest_dropdown_begin(ui, "Workspace actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END })) {
@@ -271,6 +319,7 @@ fn runPalette(ui: *c.cui_ctx, app: *App, action: PaletteAction) void {
         },
         .appearance => {
             app.prefs.dark = !app.prefs.dark;
+            app.prefs.follow_system = false;
             persist.prefsChanged(app);
         },
         .settings => settings(app),
@@ -285,4 +334,15 @@ fn collect(a: std.mem.Allocator, n: *col.Node, items: *std.ArrayList(c.cui_comma
         nodes.append(a, n) catch return;
     }
     for (n.children.items) |child| collect(a, child, items, nodes);
+}
+
+/// Until an appearance is chosen, match the Windows app theme (read again
+/// when Windows reports a settings change). Headless runs keep theirs.
+pub fn followSystemAppearance(app: *App) void {
+    if (!app.prefs.follow_system or @import("platform.zig").headless) return;
+    switch (c.kest_system_dark()) {
+        0 => app.prefs.dark = false,
+        1 => app.prefs.dark = true,
+        else => {},
+    }
 }

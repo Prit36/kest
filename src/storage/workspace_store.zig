@@ -35,6 +35,9 @@ pub const WindowPlacement = struct {
 
 pub const Prefs = struct {
     dark: bool = true,
+    /// No appearance chosen yet: `dark` follows the Windows app theme and is
+    /// not written, so the saved file keeps following it too.
+    follow_system: bool = true,
     sidebar_width: f32 = 280,
     sidebar_open: bool = true,
     /// The request pane's share of the workspace's height.
@@ -66,7 +69,10 @@ pub fn parsePrefs(a: Allocator, text: []const u8) !Prefs {
     };
     if (v != .object) return error.Malformed;
     var p: Prefs = .{};
-    p.dark = json.boolean(v, "dark") orelse p.dark;
+    if (json.boolean(v, "dark")) |dark| {
+        p.dark = dark;
+        p.follow_system = false;
+    }
     p.sidebar_open = json.boolean(v, "sidebarOpen") orelse p.sidebar_open;
     p.log_open = json.boolean(v, "logOpen") orelse p.log_open;
     p.autosave = json.boolean(v, "autosave") orelse p.autosave;
@@ -118,7 +124,7 @@ pub fn prefsJson(a: Allocator, p: Prefs) ![]u8 {
 fn writePrefs(s: *std.json.Stringify, p: Prefs) !void {
     try s.beginObject();
     try json.field(s, "format", "kest.workspace/1");
-    try json.field(s, "dark", p.dark);
+    if (!p.follow_system) try json.field(s, "dark", p.dark);
     try json.field(s, "sidebarOpen", p.sidebar_open);
     try json.field(s, "sidebarWidth", @as(i64, @intFromFloat(p.sidebar_width)));
     try json.field(s, "splitPercent", @as(i64, @intFromFloat(p.split * 100)));
@@ -182,15 +188,32 @@ pub const history_file = "history.jsonl";
 
 const t = std.testing;
 
+test "appearance follows Windows until one is chosen" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    // New and older files without "dark" follow the system and stay that way.
+    const fresh = try parsePrefs(a, "{\"sidebarOpen\":true}");
+    try t.expect(fresh.follow_system);
+    const following = try prefsJson(a, .{ .dark = false });
+    try t.expect(std.mem.indexOf(u8, following, "\"dark\"") == null);
+    try t.expect((try parsePrefs(a, following)).follow_system);
+    // A chosen appearance (including any saved before this setting) is kept.
+    const chosen = try parsePrefs(a, try prefsJson(a, .{ .dark = false, .follow_system = false }));
+    try t.expect(!chosen.follow_system and !chosen.dark);
+    try t.expect(!(try parsePrefs(a, "{\"dark\":true}")).follow_system);
+}
+
 test "preferences round trip, and forgive what's wrong" {
     var ar = std.heap.ArenaAllocator.init(t.allocator);
     defer ar.deinit();
     const a = ar.allocator();
     const env = col.newId(t.io);
     const req = col.newId(t.io);
-    const text = try prefsJson(a, .{ .dark = false, .sidebar_width = 333, .split = 0.6, .editor_layout = .stacked, .column_split = 0.55, .retention = 50, .active_env = env, .autosave = false, .open_tabs = &.{ .{ .collection = req, .request = req }, .{ .draft = env } }, .active_tab = 1 });
+    const text = try prefsJson(a, .{ .dark = false, .follow_system = false, .sidebar_width = 333, .split = 0.6, .editor_layout = .stacked, .column_split = 0.55, .retention = 50, .active_env = env, .autosave = false, .open_tabs = &.{ .{ .collection = req, .request = req }, .{ .draft = env } }, .active_tab = 1 });
     const p = try parsePrefs(a, text);
     try t.expect(!p.dark);
+    try t.expect(!p.follow_system);
     try t.expectEqual(EditorLayout.stacked, p.editor_layout);
     try t.expectApproxEqAbs(@as(f32, 0.55), p.column_split, 0.001);
     try t.expect(!p.autosave);

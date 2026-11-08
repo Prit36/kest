@@ -104,7 +104,14 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
         },
         .settings => {
             if (c.cui_switch_ex(ui, "Save edits automatically", &app.prefs.autosave, &.{})) persist.prefsChanged(app);
-            if (c.cui_switch_ex(ui, "Dark appearance", &app.prefs.dark, &.{})) persist.prefsChanged(app);
+            if (c.cui_switch_ex(ui, "Match Windows appearance", &app.prefs.follow_system, &.{})) {
+                @import("shell.zig").followSystemAppearance(app);
+                persist.prefsChanged(app);
+            }
+            if (c.cui_switch_ex(ui, "Dark appearance", &app.prefs.dark, &.{})) {
+                app.prefs.follow_system = false;
+                persist.prefsChanged(app);
+            }
             if (w.field(ui, "retention", &app.retention_text, .{ .label = "History entries to keep (1-10000)" })) {
                 app.prefs.retention = std.math.clamp(std.fmt.parseInt(u32, app.retention_text.text(), 10) catch 1000, 1, 10000);
                 app.history.setRetention(app.prefs.retention);

@@ -117,12 +117,16 @@ pub fn main(init: std.process.Init) !void {
     }
     if (platform.headless) {
         if (comptime @import("build_options").diagnostics) {
-            if (light) app.prefs.dark = false;
+            if (light) {
+                app.prefs.dark = false;
+                app.prefs.follow_system = false;
+            }
             if (!test_mode) shell.narrow_open = show_sidebar;
             try @import("headless.zig").run(&app, test_mode, snapshot, width, height, scale);
         }
         return;
     }
+    shell.followSystemAppearance(&app);
     // Restore and clamp before showing. Avoid allocating an enormous initial
     // surface for stale preferences from a monitor that is no longer attached.
     const window = c.cui_app_create(&.{ .title = if (demo_mode) "Kest (Demo)" else "Kest", .width = @intFromFloat(@min(1280, app.prefs.window_width)), .height = @intFromFloat(@min(800, app.prefs.window_height)), .hidden = true, .min_width = 640, .min_height = 420, .theme = if (app.prefs.dark) c.CUI_THEME_DARK else c.CUI_THEME_LIGHT, .accent = c.CUI_ACCENT_BLUE }) orelse return error.WindowCreationFailed;

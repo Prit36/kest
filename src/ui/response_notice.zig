@@ -14,7 +14,7 @@ pub fn view(ui: *c.cui_ctx, t: *Tab, issue: Issue, detail: []const u8, full: boo
         t.response.error_details_open = !t.response.error_details_open;
         c.cui_request_redraw(ui);
     }
-    c.cui_tooltip(ui, "Show or hide execution details");
+    c.kest_tooltip(ui, "Show or hide execution details");
     w.end(ui);
     if (full or bounds.h >= 160) w.text(ui, issue.hint, .{ .width = w.fill, .size = 12, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
     if (t.response.error_details_open) {

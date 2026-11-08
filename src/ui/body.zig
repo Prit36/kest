@@ -26,19 +26,19 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     if (t.body_kind == .json) {
         const wide = c.cui_get_rect(ui, c.cui_make_id(ui, "body-toolbar")).w >= 480;
         if (w.action(ui, "format-body", if (wide) "Format" else "", c.CUI_ICON_LIST, false, if (wide) 88 else 28, 28, 3)) commands.formatBody(app, t, 2);
-        c.cui_tooltip(ui, "Format JSON");
+        c.kest_tooltip(ui, "Format JSON");
     }
     if (raw) {
         if (w.action(ui, "wrap-body", "Wrap", null, t.body.word_wrap, 48, 28, 3)) {
             t.body.word_wrap = !t.body.word_wrap;
             t.body.reveal = true;
         }
-        c.cui_tooltip(ui, "Wrap long lines without changing the body");
+        c.kest_tooltip(ui, "Wrap long lines without changing the body");
         if (w.action(ui, "find-body", "", c.CUI_ICON_SEARCH, false, 28, 28, 3)) {
             t.body.search_open = !t.body.search_open;
             t.body.query.focus();
         }
-        c.cui_tooltip(ui, "Find in body");
+        c.kest_tooltip(ui, "Find in body");
         w.row(ui, .{ .id = "body-actions", .width = w.px(28), .height = w.px(28) });
         if (c.kest_dropdown_begin(ui, "Body actions", &.{ .icon = c.CUI_ICON_ELLIPSIS, .icon_only = true, .placement = c.CUI_PLACE_BOTTOM_END, .width = 260 })) {
             if (t.body_kind == .json) {

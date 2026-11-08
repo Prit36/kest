@@ -219,7 +219,11 @@ pub fn deleteNode(app: *App, n: *Node) void {
     // Tabs of what's going lose their home but keep their text.
     closeTabsOf(app, n);
     if (app.selected) |s| if (n.contains(s)) {
-        app.selected = null;
+        // The keyboard stays in the tree on a neighbour: the next item,
+        // else the previous one, else the parent.
+        app.selected = neighbour(app, n);
+        app.focus_tree = true;
+        app.rows_dirty = true;
     };
     app.tree_menu_node = null;
     app.save_target = null;
@@ -236,6 +240,14 @@ pub fn deleteNode(app: *App, n: *Node) void {
     col.detach(n);
     col.destroy(app.gpa, n);
     persist.saveTree(app, c);
+}
+
+fn neighbour(app: *App, n: *Node) ?*Node {
+    const siblings = if (n.parent) |p| p.children.items else app.collections.items;
+    const i = std.mem.indexOfScalar(*Node, siblings, n) orelse return n.parent;
+    if (i + 1 < siblings.len) return siblings[i + 1];
+    if (i > 0) return siblings[i - 1];
+    return n.parent;
 }
 
 fn closeTabsOf(app: *App, n: *const Node) void {

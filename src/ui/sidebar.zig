@@ -142,7 +142,7 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
 fn collections(ui: *c.cui_ctx, app: *App) void {
     w.column(ui, .{ .pad_x = 10, .pad_y = 8 });
     var filter_changed = w.field(ui, "collection-filter", &app.filter, .{ .placeholder = "Search requests", .icon = c.CUI_ICON_SEARCH, .size = c.CUI_SIZE_SM });
-    c.cui_tooltip(ui, "Filter by request, folder or collection name (Esc clears)");
+    c.kest_tooltip(ui, "Filter by request, folder or collection name (Esc clears)");
     // Escape clears an active search while the field keeps focus.
     if (app.filter.len > 0 and c.kest_focus_within(ui, "collection-filter") and c.cui_key_pressed(ui, c.CUI_KEY_ESCAPE)) {
         app.filter.clear();
@@ -225,6 +225,11 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
         .guides = true,
         .cursor = &cursor,
     });
+    c.kest_a11y_label_id(ui, c.cui_make_id(ui, "collection-rows"), c.KEST_A11Y_TREE, "Collections", null);
+    if (app.focus_tree) {
+        app.focus_tree = false;
+        c.kest_focus(ui, "collection-rows");
+    }
     c.kest_collection_style(ui, "collection-rows", @import("design.zig").sidebar());
     // Row actions appear for the hovered or selected row, and stay while that
     // row's menu is open. Right-click works on every row.
@@ -286,6 +291,7 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
         const match: ?usize = if (query.len > 0) std.ascii.findIgnoreCase(n.name, query) else null;
         c.kest_collection_name(ui, w.z(n.name), if (n.kind == .request) w.z(n.method) else null, icon, w.methodColor(n.method), if (match) |m| @intCast(m) else -1, if (match != null) @intCast(query.len) else 0);
         if (match != null and c.kest_collection_name_marked(ui)) highlighted += 1;
+        if (app.selected == n) c.kest_collection_row_selected(ui);
         const rect = c.kest_collection_row_rect(ui);
         const over = rect.h > 0 and mouse.x >= rect.x and mouse.x < rect.x + rect.w and mouse.y >= rect.y and mouse.y < rect.y + rect.h;
         // A press on the actions button opens its menu instead of dragging.
@@ -295,7 +301,7 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
             drop = dropFor(p.node, n, (mouse.y - rect.y) / rect.h);
             if (drop) |d| c.kest_collection_drop(ui, d.where);
         };
-        c.cui_tooltip(ui, if (n.kind == .request) w.fmt("{s} {s}", .{ n.method, n.name }) else w.z(n.name));
+        c.kest_tooltip(ui, if (n.kind == .request) w.fmt("{s} {s}", .{ n.method, n.name }) else w.z(n.name));
         const hot = c.kest_collection_row_hot(ui) or app.selected == n or menu_owner == n;
         c.cui_push_id(ui, w.z(&n.id));
         if (c.cui_context_menu_begin(ui, "node-menu")) {
@@ -426,7 +432,7 @@ fn history(ui: *c.cui_ctx, app: *App) void {
         w.end(ui);
         w.end(ui);
         c.kest_item_end(ui);
-        c.cui_tooltip(ui, w.z(e.url));
+        c.kest_tooltip(ui, w.z(e.url));
         if (clicked) _ = commands.openHistory(app, index);
         if (c.cui_context_menu_begin(ui, "history-menu")) {
             if (w.menuItem(ui, "Send again")) {

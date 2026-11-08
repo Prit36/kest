@@ -32,7 +32,9 @@ pub fn button(ui: *c.cui_ctx, label: []const u8, opts: c.cui_button_opts) bool {
     return c.kest_button_ex(ui, z(label), &opts);
 }
 pub fn icon(ui: *c.cui_ctx, glyph: [*:0]const u8, hint: [*:0]const u8) bool {
-    return c.cui_icon_button_ex(ui, glyph, &.{ .tooltip = hint, .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_GHOST, .color = color(c.CUI_TOKEN_TEXT_SECONDARY) });
+    const clicked = c.cui_icon_button_ex(ui, glyph, &.{ .tooltip = hint, .size = c.CUI_SIZE_SM, .variant = c.CUI_BUTTON_GHOST, .color = color(c.CUI_TOKEN_TEXT_SECONDARY) });
+    c.kest_a11y_label(ui, c.KEST_A11Y_BUTTON, hint, null);
+    return clicked;
 }
 pub fn text(ui: *c.cui_ctx, value: []const u8, opts: c.cui_text_opts) void {
     c.cui_text_ex(ui, z(value), &opts);
@@ -49,6 +51,7 @@ pub fn field(ui: *c.cui_ctx, id: [*:0]const u8, buffer: *model.TextBuffer, opts_
     }
     buffer.want_focus = false;
     const flags = c.cui_input_ex(ui, id, buffer.data.ptr, buffer.data.len, &opts);
+    c.kest_a11y_label_id(ui, c.cui_make_id(ui, id), c.KEST_A11Y_EDIT, if (opts.label != null) opts.label else opts.placeholder, buffer.data.ptr);
     if (flags & c.CUI_CHANGED != 0) {
         buffer.len = std.mem.indexOfScalar(u8, buffer.data, 0) orelse buffer.data.len - 1;
         return true;

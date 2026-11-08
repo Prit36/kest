@@ -13,6 +13,10 @@ bool kest_host_get_geometry(kest_window_geometry *geometry);
 void kest_host_restore_geometry(const kest_window_geometry *geometry, bool show);
 void kest_host_sync_chrome(cui_ctx *ui);
 void kest_host_wake(void);
+/* Windows settings, cached and refreshed on WM_SETTINGCHANGE.
+ * kest_system_dark: -1 unknown, 0 light apps, 1 dark apps. */
+int kest_system_dark(void);
+bool kest_system_reduced_motion(void);
 void kest_host_schedule(unsigned ms);
 int kest_host_events(void);
 const char *kest_clipboard(cui_ctx *ui);
@@ -68,6 +72,12 @@ bool kest_reveal(cui_ctx *ui, cui_id scroll_id, cui_id target, bool horizontal);
 void kest_focus(cui_ctx *ui, const char *id);
 void kest_input_select_all(cui_ctx *ui, const char *id, int length);
 bool kest_focus_within(cui_ctx *ui, const char *id);
+bool kest_focus_inside(cui_ctx *ui, const char *key);
+const char *kest_focus_label(cui_ctx *ui);
+cui_id kest_get_focus(cui_ctx *ui);
+void kest_set_focus(cui_ctx *ui, cui_id id);
+cui_id kest_last_id(cui_ctx *ui);
+bool kest_was_focusable(cui_ctx *ui, cui_id id);
 void kest_collection_style(cui_ctx *ui, const char *id, cui_color background);
 void kest_collection_top(cui_ctx *ui, const char *id);
 bool kest_collection_reveal(cui_ctx *ui, const char *id, int index, float row_h);
@@ -82,6 +92,16 @@ float kest_collection_scroll_y(cui_ctx *ui, const char *key);
 void kest_collection_scroll_by(cui_ctx *ui, const char *key, float dy);
 bool kest_button_ex(cui_ctx *ui, const char *label, const cui_button_opts *opts);
 bool kest_select_ex(cui_ctx *ui, const char *id, const char *const *items, int count, int *index, const cui_select_opts *opts);
+/* Screen readers (a11y.c): roles Kest gives the controls it labels. */
+enum { KEST_A11Y_AUTO = 0, KEST_A11Y_BUTTON = 1, KEST_A11Y_EDIT = 2, KEST_A11Y_TAB = 3, KEST_A11Y_TREE_ITEM = 4, KEST_A11Y_MENU_BUTTON = 5, KEST_A11Y_MENU_ITEM = 6, KEST_A11Y_TREE = 7 };
+void kest_a11y_label(cui_ctx *ui, int role, const char *name, const char *value);
+void kest_a11y_label_id(cui_ctx *ui, cui_id id, int role, const char *name, const char *value);
+void kest_a11y_selected(cui_ctx *ui, cui_id id);
+void kest_a11y_help_id(cui_ctx *ui, cui_id id, const char *text);
+void kest_collection_row_selected(cui_ctx *ui);
+void kest_tooltip(cui_ctx *ui, const char *text);
+void kest_a11y_frame(cui_ctx *ui, void *window);
+bool kest_a11y_get_object(void *window, uintptr_t wp, intptr_t lp, intptr_t *result);
 /* failure: 0 success, 1 invalid/unsupported, 2 resource limit, 3 allocation. */
 unsigned char *kest_image_decode(const unsigned char *bytes, int length, int *out_width, int *out_height, int *source_width, int *source_height, int *failure);
 void kest_image_free(unsigned char *rgba);
