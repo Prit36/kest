@@ -74,6 +74,10 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
     }
     commands.ensureTab(app);
     followSystemAppearance(app);
+    const font = @import("code_font.zig");
+    const steps = font.takeWheel();
+    if (steps != 0) commands.zoomCode(app, steps);
+    font.size = @floatFromInt(app.prefs.editor_font_size);
     keepFocus(ui, app);
     // Requested last frame; dropped if no tree is drawn to take it.
     const tree_focus_requested = app.focus_tree;
@@ -191,6 +195,10 @@ fn shortcuts(ui: *c.cui_ctx, app: *App) void {
     }
     const request_submit = c.kest_request_shortcut(ui);
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_N)) _ = commands.newTab(app);
+    // Ctrl+= (or Ctrl++), Ctrl+- and Ctrl+0 zoom the code font.
+    if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_EQUAL) or c.cui_shortcut(ui, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT, c.CUI_KEY_EQUAL)) commands.zoomCode(app, 1);
+    if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_MINUS)) commands.zoomCode(app, -1);
+    if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_0)) commands.zoomCode(app, 0);
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_B)) {
         toggleSidebar(ui, app);
     }

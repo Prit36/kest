@@ -50,6 +50,8 @@ pub const Prefs = struct {
     retention: u32 = history.default_retention,
     /// How deep a JSON response opens: 0 shows every level.
     json_depth: u8 = 0,
+    /// The code font's size in the editors, in pixels at 100%.
+    editor_font_size: u8 = 13,
     active_env: ?col.Id = null,
     open_tabs: []const OpenTab = &.{},
     active_tab: usize = 0,
@@ -85,6 +87,7 @@ pub fn parsePrefs(a: Allocator, text: []const u8) !Prefs {
     if (json.int(v, "columnSplitPercent")) |value| p.column_split = std.math.clamp(@as(f32, @floatFromInt(value)) / 100, 0.2, 0.8);
     if (json.int(v, "retention")) |r| p.retention = @intCast(std.math.clamp(r, 1, 100_000));
     if (json.int(v, "jsonDepth")) |d| p.json_depth = @intCast(std.math.clamp(d, 0, 9));
+    if (json.int(v, "editorFontSize")) |size| p.editor_font_size = @intCast(std.math.clamp(size, 9, 24));
     if (json.int(v, "windowWidth")) |w| p.window_width = std.math.clamp(@as(f32, @floatFromInt(w)), 640, 8000);
     if (json.int(v, "windowHeight")) |h| p.window_height = std.math.clamp(@as(f32, @floatFromInt(h)), 420, 8000);
     if (json.get(v, "windowPlacement")) |placement| p.window_placement = parsePlacement(placement);
@@ -139,6 +142,7 @@ fn writePrefs(s: *std.json.Stringify, p: Prefs) !void {
     try json.field(s, "autosave", p.autosave);
     try json.field(s, "retention", p.retention);
     try json.field(s, "jsonDepth", p.json_depth);
+    try json.field(s, "editorFontSize", p.editor_font_size);
     try json.field(s, "windowWidth", @as(i64, @intFromFloat(p.window_width)));
     try json.field(s, "windowHeight", @as(i64, @intFromFloat(p.window_height)));
     if (p.window_placement) |placement| try json.field(s, "windowPlacement", placement);
@@ -217,7 +221,7 @@ test "preferences round trip, and forgive what's wrong" {
     const a = ar.allocator();
     const env = col.newId(t.io);
     const req = col.newId(t.io);
-    const text = try prefsJson(a, .{ .dark = false, .follow_system = false, .sidebar_width = 333, .split = 0.6, .editor_layout = .stacked, .column_split = 0.55, .retention = 50, .json_depth = 2, .active_env = env, .autosave = false, .open_tabs = &.{ .{ .collection = req, .request = req }, .{ .draft = env } }, .active_tab = 1 });
+    const text = try prefsJson(a, .{ .dark = false, .follow_system = false, .sidebar_width = 333, .split = 0.6, .editor_layout = .stacked, .column_split = 0.55, .retention = 50, .json_depth = 2, .editor_font_size = 17, .active_env = env, .autosave = false, .open_tabs = &.{ .{ .collection = req, .request = req }, .{ .draft = env } }, .active_tab = 1 });
     const p = try parsePrefs(a, text);
     try t.expect(!p.dark);
     try t.expect(!p.follow_system);
@@ -227,6 +231,7 @@ test "preferences round trip, and forgive what's wrong" {
     try t.expectEqual(@as(f32, 333), p.sidebar_width);
     try t.expectEqual(@as(u32, 50), p.retention);
     try t.expectEqual(@as(u8, 2), p.json_depth);
+    try t.expectEqual(@as(u8, 17), p.editor_font_size);
     try t.expectEqualStrings(&env, &p.active_env.?);
     try t.expectEqual(@as(usize, 2), p.open_tabs.len);
     try t.expectEqual(@as(usize, 1), p.active_tab);

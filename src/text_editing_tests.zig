@@ -8,6 +8,7 @@ const tab = @import("app/tab.zig");
 const commands = @import("app/commands.zig");
 const code = @import("ui/code_state.zig");
 const editor = @import("ui/editor.zig");
+const font = @import("ui/code_font.zig");
 
 fn check(src: std.builtin.SourceLocation, ok: bool) !void {
     if (!ok) {
@@ -38,7 +39,7 @@ fn spot(ui: *c.cui_ctx, t: *tab.Tab, line: usize, column: usize) Spot {
     const r = rect(ui, t, "body-editor");
     const char_w = editor.cellWidth(ui);
     const gutter = editor.gutterWidth(ui, t.body.index.lineNumber(t.body.index.count() - 1));
-    return .{ .x = r.x + gutter + 12 + @as(f32, @floatFromInt(column)) * char_w + 1, .y = r.y + 8 + @as(f32, @floatFromInt(line)) * 20 + 10 - t.body.scroll_y };
+    return .{ .x = r.x + gutter + 12 + @as(f32, @floatFromInt(column)) * char_w + 1, .y = r.y + 8 + (@as(f32, @floatFromInt(line)) + 0.5) * font.line() - t.body.scroll_y };
 }
 fn press(ui: *c.cui_ctx, app: *App, at: Spot, comptime frame: anytype) void {
     c.cui_input_mouse_move(ui, at.x, at.y);
@@ -202,6 +203,38 @@ pub fn run(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime chord: a
     frame(ui, app);
     try check(@src(), t.body.scroll_y == 0);
     try glide();
+    try zoom(ui, app, t, frame, chord);
+}
+
+/// Ctrl+= and Ctrl+- step the code font, Ctrl+wheel over a view too, and
+/// Ctrl+0 resets it; rows grow with it and clicks still land.
+fn zoom(ui: *c.cui_ctx, app: *App, t: *tab.Tab, comptime frame: anytype, comptime chord: anytype) !void {
+    app.prefs.editor_font_size = font.default;
+    t.body.setText("first word here\nsecond line\nthird");
+    frame(ui, app);
+    chord(ui, app, c.CUI_KEY_EQUAL, c.CUI_MOD_PRIMARY);
+    try check(@src(), app.prefs.editor_font_size == 14 and font.size == 14);
+    chord(ui, app, c.CUI_KEY_EQUAL, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT);
+    chord(ui, app, c.CUI_KEY_MINUS, c.CUI_MOD_PRIMARY);
+    try check(@src(), app.prefs.editor_font_size == 14);
+    const r = rect(ui, t, "body-editor");
+    c.cui_input_mouse_move(ui, r.x + r.w / 2, r.y + r.h / 2);
+    frame(ui, app);
+    c.cui_input_key(ui, c.CUI_KEY_NONE, false, c.CUI_MOD_PRIMARY);
+    c.cui_input_scroll(ui, 0, 4);
+    frame(ui, app);
+    frame(ui, app);
+    c.cui_input_key(ui, c.CUI_KEY_NONE, false, 0);
+    try check(@src(), app.prefs.editor_font_size == 18 and font.line() == 28 and t.body.scroll_y == 0);
+    for (0..30) |_| frame(ui, app);
+    clicks(ui, app, spot(ui, t, 1, 3), 2, frame);
+    try equal(@src(), "second", t.body.selected(t.body.text()));
+    for (0..30) |_| frame(ui, app);
+    chord(ui, app, c.CUI_KEY_0, c.CUI_MOD_PRIMARY);
+    try check(@src(), app.prefs.editor_font_size == font.default and font.line() == 20);
+    for (0..40) |_| chord(ui, app, c.CUI_KEY_MINUS, c.CUI_MOD_PRIMARY);
+    try check(@src(), app.prefs.editor_font_size == font.min);
+    chord(ui, app, c.CUI_KEY_0, c.CUI_MOD_PRIMARY);
 }
 
 /// With motion on, a wheel step eases over a few frames and stops there;

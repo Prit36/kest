@@ -124,6 +124,15 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
                 persist.prefsChanged(app);
             }
             w.end(ui);
+            w.column(ui, .{ .width = w.fill, .gap = 4 });
+            w.text(ui, "Code font size", .{ .size = c.KEST_TEXT_SECONDARY, .font = c.CUI_FONT_MEDIUM });
+            const font = @import("code_font.zig");
+            var sizes: [font.max - font.min + 1][]const u8 = undefined;
+            for (&sizes, font.min..) |*label, px| label.* = if (px == font.default) w.fmt("{d} px (default)", .{px}) else w.fmt("{d} px", .{px});
+            var size: c_int = @as(c_int, app.prefs.editor_font_size) - font.min;
+            if (w.select(ui, "editor-font-size", &sizes, &size, w.fill)) @import("../app/commands.zig").zoomCode(app, @as(i32, size + font.min) - app.prefs.editor_font_size);
+            w.text(ui, "Ctrl+wheel, Ctrl+= and Ctrl+- zoom the editors; Ctrl+0 resets.", .{ .size = c.KEST_TEXT_CAPTION, .color = w.color(c.CUI_TOKEN_TEXT_SECONDARY) });
+            w.end(ui);
         },
         .none => {},
     }

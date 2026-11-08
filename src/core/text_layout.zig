@@ -11,10 +11,12 @@ pub const max_checkpoints = 1_000_000;
 pub const Config = struct {
     wrap_width: f64 = 0,
     char_width: f64 = 8,
+    /// The font size widths were measured at.
+    font_size: f32 = 13,
     lang: hl.Lang = .plain,
 
     pub fn eql(a: Config, b: Config) bool {
-        return a.wrap_width == b.wrap_width and a.char_width == b.char_width and a.lang == b.lang;
+        return a.wrap_width == b.wrap_width and a.char_width == b.char_width and a.font_size == b.font_size and a.lang == b.lang;
     }
 };
 pub const Metrics = struct {

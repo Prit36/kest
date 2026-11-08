@@ -16,6 +16,16 @@ const App = state.App;
 const Tab = tab_mod.Tab;
 const Allocator = std.mem.Allocator;
 
+/// Zooms the code font `steps` steps; zero puts it back to the default.
+pub fn zoomCode(app: *App, steps: i32) void {
+    const font = @import("../ui/code_font.zig");
+    const next = if (steps == 0) font.default else font.zoomed(app.prefs.editor_font_size, steps);
+    if (next == app.prefs.editor_font_size) return;
+    app.prefs.editor_font_size = next;
+    font.size = @floatFromInt(next);
+    persist.prefsChanged(app);
+}
+
 pub fn newTab(app: *App) ?*Tab {
     if (app.tabs.items.len >= tab_mod.max_open_tabs) {
         app.toast(.warning, "Tab limit reached", "Close a request before opening another (64 tabs maximum).");

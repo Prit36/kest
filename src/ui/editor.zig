@@ -8,10 +8,10 @@ const hl = @import("../utils/highlight.zig");
 const State = code.State;
 const design = @import("design.zig");
 const Paint = struct { state: *State, source: []const u8, lang: hl.Lang, focused: bool, char_w: f32, gutter: f32 };
-const line_h = 20;
+const font = @import("code_font.zig");
 // Use the same font advance for text, token origins, hit testing and caret.
 pub fn cellWidth(ui: *c.cui_ctx) f32 {
-    return c.cui_measure_text(ui, c.CUI_FONT_MONO, 13, "M", 1).width;
+    return c.cui_measure_text(ui, c.CUI_FONT_MONO, font.size, "M", 1).width;
 }
 // The gutter fits the widest line number, so short documents keep code close
 // to their numbers and long ones never overlap. Code starts 12px after it.
@@ -19,7 +19,7 @@ pub fn gutterWidth(ui: *c.cui_ctx, lines: usize) f32 {
     var digits: f32 = 1;
     var n = lines;
     while (n >= 10) : (n /= 10) digits += 1;
-    const digit_w = c.cui_measure_text(ui, c.CUI_FONT_MONO, 12, "0", 1).width;
+    const digit_w = c.cui_measure_text(ui, c.CUI_FONT_MONO, font.small(), "0", 1).width;
     return @round(@max(2, digits) * digit_w + 20);
 }
 const code_gap = 12;
@@ -146,9 +146,10 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
         s.marked = null;
         s.marked_version = 0;
     }
-    s.glide.push(s.scroll_y, -c.kest_editor_scroll(ui, identity) * line_h * 3);
+    const wheel = c.kest_editor_scroll(ui, identity);
+    if (!font.ctrlWheel(c.cui_key_mods(ui) & c.CUI_MOD_PRIMARY != 0, wheel)) s.glide.push(s.scroll_y, -wheel * font.line() * 3);
     if (s.glide.target != null) {
-        const total: f32 = @floatFromInt(s.index.count() * line_h);
+        const total: f32 = @as(f32, @floatFromInt(s.index.count())) * font.line();
         s.glide.step(ui, &s.scroll_y, if (previous.h > 0) total - @max(1, previous.h - 16) else total);
     }
     const gutter = gutterWidth(ui, if (s.index.count() > 0) s.index.lineNumber(s.index.count() - 1) else 1);
@@ -210,7 +211,7 @@ fn pointer(ui: *c.cui_ctx, s: *State, source: []const u8, pos: usize, read_only:
 fn hit(ui: *c.cui_ctx, s: *State, source: []const u8, rect: c.cui_rect, gutter: f32, char_w: f32) ?usize {
     if (s.index.count() == 0) return null;
     const m = c.cui_mouse_pos(ui);
-    const row_n: usize = @intFromFloat(@max(0, @floor((m.y - rect.y - 8 + s.scroll_y) / line_h)));
+    const row_n: usize = @intFromFloat(@max(0, @floor((m.y - rect.y - 8 + s.scroll_y) / font.line())));
     const row_at = @min(row_n, s.index.count() - 1);
     const bounds = s.index.bounds(source, row_at);
     return bounds[0] + byteAt(ui, source[bounds[0]..bounds[1]], @max(0, m.x - rect.x - gutter - code_gap + s.scroll_x), char_w);
@@ -300,13 +301,13 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     const gutter = p.gutter;
     if (s.index.count() == 0) return;
     const visible: f32 = @max(1, rect.h - 16);
-    const total: f32 = @floatFromInt(s.index.count() * line_h);
+    const total: f32 = @as(f32, @floatFromInt(s.index.count())) * font.line();
     s.scroll_y = std.math.clamp(s.scroll_y, 0, @max(0, total - visible));
     if (s.reveal) {
         s.glide.stop();
-        const caret_row: f32 = @floatFromInt(s.index.rowOf(@min(s.caret, p.source.len)) * line_h);
+        const caret_row: f32 = @as(f32, @floatFromInt(s.index.rowOf(@min(s.caret, p.source.len)))) * font.line();
         if (caret_row < s.scroll_y) s.scroll_y = caret_row;
-        if (caret_row + line_h > s.scroll_y + visible) s.scroll_y = caret_row + line_h - visible;
+        if (caret_row + font.line() > s.scroll_y + visible) s.scroll_y = caret_row + font.line() - visible;
         const row_i = s.index.rowOf(@min(s.caret, p.source.len));
         const cb = s.index.bounds(p.source, row_i);
         const caret_col = advance(ui, p.source[cb[0]..@min(s.caret, cb[1])], char_w);
@@ -320,8 +321,8 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     c.cui_draw_rect(ui, .{ .x = rect.x, .y = rect.y, .w = gutter, .h = rect.h }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
     c.cui_draw_line(ui, .{ .x = rect.x + gutter, .y = rect.y }, .{ .x = rect.x + gutter, .y = rect.y + rect.h }, 1 / @max(1, c.cui_dpi_scale(ui)), w.color(c.CUI_TOKEN_BORDER_SUBTLE));
     if (p.focused) c.cui_draw_line(ui, .{ .x = rect.x, .y = rect.y + 0.5 }, .{ .x = rect.x + rect.w, .y = rect.y + 0.5 }, 1 / @max(1, c.cui_dpi_scale(ui)), w.color(c.CUI_TOKEN_FOCUS_RING));
-    const first: usize = @intFromFloat(@floor(s.scroll_y / line_h));
-    const count: usize = @intFromFloat(@ceil(visible / line_h) + 2);
+    const first: usize = @intFromFloat(@floor(s.scroll_y / font.line()));
+    const count: usize = @intFromFloat(@ceil(visible / font.line()) + 2);
     const last = @min(s.index.count(), first + count);
     const sel = s.selection();
     const active_row = s.index.rowOf(@min(s.caret, p.source.len));
@@ -330,13 +331,13 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         const entire_row = s.index.row(p.source, i);
         const col_lo = byteAt(ui, entire_row, @max(0, s.scroll_x - char_w), char_w);
         const col_hi = code.nextChar(entire_row, byteAt(ui, entire_row, s.scroll_x + @max(1, rect.w - gutter - code_gap) + char_w, char_w));
-        const y = rect.y + 8 + @as(f32, @floatFromInt(i * line_h)) - s.scroll_y;
+        const y = rect.y + 8 + @as(f32, @floatFromInt(i)) * font.line() - s.scroll_y;
         const x = rect.x + gutter + code_gap - s.scroll_x;
-        if (p.focused and active_row == i) c.cui_draw_rect(ui, .{ .x = rect.x + gutter + 1, .y = y, .w = @max(0, rect.w - gutter - 1), .h = line_h }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
+        if (p.focused and active_row == i) c.cui_draw_rect(ui, .{ .x = rect.x + gutter + 1, .y = y, .w = @max(0, rect.w - gutter - 1), .h = font.line() }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
         if (s.marked) |pair| for (pair) |pos| {
             if (pos >= bounds[0] and pos < bounds[1]) {
                 const mark_x = advance(ui, entire_row[0 .. pos - bounds[0]], char_w);
-                c.cui_draw_rect(ui, .{ .x = x + mark_x, .y = y, .w = char_w, .h = line_h }, .{}, w.color(c.CUI_TOKEN_ACCENT_SUBTLE));
+                c.cui_draw_rect(ui, .{ .x = x + mark_x, .y = y, .w = char_w, .h = font.line() }, .{}, w.color(c.CUI_TOKEN_ACCENT_SUBTLE));
             }
         };
         if (sel[1] > bounds[0] and sel[0] < bounds[1]) {
@@ -344,12 +345,12 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
             const hi = @min(sel[1], bounds[1]) - bounds[0];
             const selection_x = advance(ui, entire_row[0..lo], char_w);
             const selection_end = advance(ui, entire_row[0..hi], char_w);
-            c.cui_draw_rect(ui, .{ .x = x + selection_x, .y = y, .w = selection_end - selection_x, .h = line_h }, .{}, w.color(c.CUI_TOKEN_ACCENT_SUBTLE));
+            c.cui_draw_rect(ui, .{ .x = x + selection_x, .y = y, .w = selection_end - selection_x, .h = font.line() }, .{}, w.color(c.CUI_TOKEN_ACCENT_SUBTLE));
         }
         var number: [16]u8 = undefined;
         const label = if (s.index.isContinued(i)) "" else std.fmt.bufPrint(&number, "{d}", .{s.index.lineNumber(i)}) catch "";
-        const label_w = c.cui_measure_text(ui, c.CUI_FONT_MONO, 12, label.ptr, @intCast(label.len)).width;
-        c.cui_draw_text(ui, c.CUI_FONT_MONO, 12, .{ .x = rect.x + gutter - 10 - label_w, .y = y + 1 }, w.color(if (p.focused and active_row == i) c.CUI_TOKEN_TEXT_SECONDARY else c.CUI_TOKEN_TEXT_MUTED), label.ptr, @intCast(label.len));
+        const label_w = c.cui_measure_text(ui, c.CUI_FONT_MONO, font.small(), label.ptr, @intCast(label.len)).width;
+        c.cui_draw_text(ui, c.CUI_FONT_MONO, font.small(), .{ .x = rect.x + gutter - 10 - label_w, .y = y + 1 }, w.color(if (p.focused and active_row == i) c.CUI_TOKEN_TEXT_SECONDARY else c.CUI_TOKEN_TEXT_MUTED), label.ptr, @intCast(label.len));
         var tokens: [hl.max_tokens]hl.Token = undefined;
         const n = if (p.lang == .json) hl.jsonRow(p.source, bounds[0], bounds[1], @intCast(i), s.continued_strings.items, &tokens) else hl.tokens(entire_row, p.lang, &tokens);
         var at = col_lo;
@@ -372,11 +373,11 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         segment(ui, char_w, x, y, entire_row, at, col_hi, w.color(c.CUI_TOKEN_FOREGROUND));
         if (s.move_drag == .moving and (s.drop_at < s.selection()[0] or s.drop_at > s.selection()[1]) and s.drop_at >= bounds[0] and s.drop_at <= bounds[1] and (s.drop_at < bounds[1] or i + 1 == s.index.count() or s.index.bounds(p.source, i + 1)[0] > s.drop_at)) {
             const drop_x = x + advance(ui, entire_row[0..@min(s.drop_at - bounds[0], entire_row.len)], char_w);
-            c.cui_draw_line(ui, .{ .x = drop_x, .y = y }, .{ .x = drop_x, .y = y + 17 }, 2, w.color(c.CUI_TOKEN_TEXT_SECONDARY));
+            c.cui_draw_line(ui, .{ .x = drop_x, .y = y }, .{ .x = drop_x, .y = y + font.caret() }, 2, w.color(c.CUI_TOKEN_TEXT_SECONDARY));
         }
         if (p.focused and i == active_row) {
             const caret_x = x + advance(ui, entire_row[0..@min(s.caret -| bounds[0], entire_row.len)], char_w);
-            c.cui_draw_line(ui, .{ .x = caret_x, .y = y }, .{ .x = caret_x, .y = y + 17 }, 1.5, w.color(c.CUI_TOKEN_ACCENT));
+            c.cui_draw_line(ui, .{ .x = caret_x, .y = y }, .{ .x = caret_x, .y = y + font.caret() }, 1.5, w.color(c.CUI_TOKEN_ACCENT));
         }
     }
     if (total > visible) {
@@ -395,7 +396,7 @@ fn segment(ui: *c.cui_ctx, char_w: f32, x: f32, y: f32, source: []const u8, lo: 
         }
         const end = std.mem.indexOfAnyPos(u8, source, at, "\t\r") orelse hi;
         const stop = @min(hi, end);
-        c.cui_draw_text(ui, c.CUI_FONT_MONO, 13, .{ .x = x + advance(ui, source[0..at], char_w), .y = y }, tint, source[at..stop].ptr, @intCast(stop - at));
+        c.cui_draw_text(ui, c.CUI_FONT_MONO, font.size, .{ .x = x + advance(ui, source[0..at], char_w), .y = y }, tint, source[at..stop].ptr, @intCast(stop - at));
         at = stop;
     }
 }
@@ -408,7 +409,7 @@ pub fn advance(ui: *c.cui_ctx, source: []const u8, char_w: f32) f32 {
     var width: f32 = 0;
     while (at < source.len) {
         const stop = std.mem.indexOfAnyPos(u8, source, at, "\t\r") orelse source.len;
-        if (stop > at) width += c.cui_measure_text(ui, c.CUI_FONT_MONO, 13, source[at..stop].ptr, @intCast(stop - at)).width;
+        if (stop > at) width += c.cui_measure_text(ui, c.CUI_FONT_MONO, font.size, source[at..stop].ptr, @intCast(stop - at)).width;
         if (stop == source.len) break;
         if (source[stop] == '\t') width = (@floor(width / (char_w * 2)) + 1) * char_w * 2;
         at = stop + 1;

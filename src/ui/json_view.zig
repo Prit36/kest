@@ -15,12 +15,11 @@ const Tab = @import("../app/tab.zig").Tab;
 const editor = @import("editor.zig");
 
 pub const canvas_id = "json-rows";
-const line_h: f32 = 20;
+const font = @import("code_font.zig");
 const pad_y: f32 = 6;
 /// Room left of the root's text for its fold arrow.
 const pad_x: f32 = 26;
 const bar: f32 = 12;
-const size: f32 = 13;
 /// Strings shown whole at once, and how much of each.
 const open_limit = 32;
 const card_delay = 0.45;
@@ -45,8 +44,8 @@ const Geo = struct {
         return g.rect.x + pad_x + @as(f32, @floatFromInt(@min(depth, 48))) * g.indent;
     }
     fn total(g: Geo) f32 {
-        var sum = pad_y * 2 + @as(f32, @floatFromInt(g.rows)) * line_h;
-        for (g.extras) |e| sum += @as(f32, @floatFromInt(e.lines - 1)) * line_h;
+        var sum = pad_y * 2 + @as(f32, @floatFromInt(g.rows)) * font.line();
+        for (g.extras) |e| sum += @as(f32, @floatFromInt(e.lines - 1)) * font.line();
         return sum;
     }
     fn maxScroll(g: Geo) f32 {
@@ -54,10 +53,10 @@ const Geo = struct {
     }
     /// The top of `row` before scrolling.
     fn top(g: Geo, row: usize) f32 {
-        var y = pad_y + @as(f32, @floatFromInt(row)) * line_h;
+        var y = pad_y + @as(f32, @floatFromInt(row)) * font.line();
         for (g.extras) |e| {
             if (e.row >= row) break;
-            y += @as(f32, @floatFromInt(e.lines - 1)) * line_h;
+            y += @as(f32, @floatFromInt(e.lines - 1)) * font.line();
         }
         return y;
     }
@@ -74,14 +73,14 @@ const Geo = struct {
         var base_y = pad_y;
         var base_row: usize = 0;
         for (g.extras) |e| {
-            const start = base_y + @as(f32, @floatFromInt(e.row - base_row)) * line_h;
+            const start = base_y + @as(f32, @floatFromInt(e.row - base_row)) * font.line();
             if (y < start) break;
-            const end = start + @as(f32, @floatFromInt(e.lines)) * line_h;
+            const end = start + @as(f32, @floatFromInt(e.lines)) * font.line();
             if (y < end) return e.row;
             base_y = end;
             base_row = e.row + 1;
         }
-        const row = base_row + @as(usize, @intFromFloat(@floor((y - base_y) / line_h)));
+        const row = base_row + @as(usize, @intFromFloat(@floor((y - base_y) / font.line())));
         return if (row < g.rows) row else null;
     }
     const Thumb = struct { track: c.cui_rect, thumb: c.cui_rect };
@@ -95,7 +94,7 @@ const Geo = struct {
 };
 
 fn advance(ui: *c.cui_ctx, cw: f32, text: []const u8) f32 {
-    for (text) |b| if (b >= 0x80) return c.cui_measure_text(ui, c.CUI_FONT_MONO, size, text.ptr, @intCast(text.len)).width;
+    for (text) |b| if (b >= 0x80) return c.cui_measure_text(ui, c.CUI_FONT_MONO, font.size, text.ptr, @intCast(text.len)).width;
     return cw * @as(f32, @floatFromInt(text.len));
 }
 
@@ -106,7 +105,7 @@ fn fit(ui: *c.cui_ctx, cw: f32, text: []const u8, room: f32) usize {
     while (i < text.len) {
         const len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
         const end = @min(text.len, i + len);
-        const advance_by = if (text[i] < 0x80) cw else c.cui_measure_text(ui, c.CUI_FONT_MONO, size, text[i..end].ptr, @intCast(end - i)).width;
+        const advance_by = if (text[i] < 0x80) cw else c.cui_measure_text(ui, c.CUI_FONT_MONO, font.size, text[i..end].ptr, @intCast(end - i)).width;
         if (x + advance_by > room) return i;
         x += advance_by;
         i = end;
@@ -387,7 +386,7 @@ fn keys(ui: *c.cui_ctx, app: *App, tr: *Tree, s: *State, g: Geo, parts_of: anyty
     const mods = c.cui_key_mods(ui);
     const row = currentRow(tr, s);
     const node = tr.rows.items[row];
-    const page: usize = @intFromFloat(@max(1, @floor(g.rect.h / line_h) - 1));
+    const page: usize = @intFromFloat(@max(1, @floor(g.rect.h / font.line()) - 1));
     var next: ?usize = null;
     if (c.cui_key_pressed(ui, c.CUI_KEY_DOWN)) next = if (s.selected == null) 0 else landing(tr, row + 1, 1);
     if (c.cui_key_pressed(ui, c.CUI_KEY_UP)) next = landing(tr, row -| 1, -1);
@@ -535,15 +534,16 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, tr: *Tree) void {
         }
     }
     if (focused and !s.dragging) keys(ui, app, tr, s, before, PartsOf{ .ui = ui, .g = before, .tr = tr, .s = s });
-    const wheel = c.kest_editor_scroll_axes(ui, identity);
-    s.glide.push(s.scroll_y, -wheel.y * line_h * 3);
+    var wheel = c.kest_editor_scroll_axes(ui, identity);
+    if (font.ctrlWheel(c.cui_key_mods(ui) & c.CUI_MOD_PRIMARY != 0, wheel.y)) wheel = .{};
+    s.glide.push(s.scroll_y, -wheel.y * font.line() * 3);
     // A selection out of sight, maybe inside collapsed containers.
     if (s.reveal) if (s.selected) |node| if (tr.rowOf(node) == null and !tr.filtered) tr.reveal(app.gpa, node) catch {};
     var g = geometry(ui, tr, s, prev, cw);
     if (s.reveal) {
         if (s.selected) |node| if (tr.rowOf(node)) |row| {
             const top = g.top(row);
-            const bottom = top + @as(f32, @floatFromInt(g.lines(row))) * line_h;
+            const bottom = top + @as(f32, @floatFromInt(g.lines(row))) * font.line();
             if (top - pad_y < s.scroll_y) s.scroll_y = top - pad_y;
             if (bottom + pad_y > s.scroll_y + prev.h and prev.h > 0) s.scroll_y = @min(top - pad_y, bottom + pad_y - prev.h);
         };
@@ -646,7 +646,7 @@ fn summary(tr: *const Tree, node: u32) []const u8 {
 
 fn put(ui: *c.cui_ctx, x: f32, y: f32, value: []const u8, tint: c.cui_color) void {
     if (value.len == 0) return;
-    c.cui_draw_text(ui, c.CUI_FONT_MONO, size, .{ .x = x, .y = y }, tint, value.ptr, @intCast(value.len));
+    c.cui_draw_text(ui, c.CUI_FONT_MONO, font.size, .{ .x = x, .y = y }, tint, value.ptr, @intCast(value.len));
 }
 
 /// Marks where the search text is within `value`, drawn at `x`.
@@ -657,7 +657,7 @@ fn mark(ui: *c.cui_ctx, p: *const Paint, x: f32, y: f32, value: []const u8) void
         const at = from + (json_tree.locate(value[from..], p.query, p.case_sensitive) orelse return);
         const x0 = x + advance(ui, p.geo.char_w, value[0..at]);
         const x1 = x0 + advance(ui, p.geo.char_w, value[at .. at + p.query.len]);
-        c.cui_draw_rect(ui, .{ .x = x0, .y = y, .w = x1 - x0, .h = line_h }, .{}, w.tinted(ui, c.CUI_TOKEN_WARNING, 0.3));
+        c.cui_draw_rect(ui, .{ .x = x0, .y = y, .w = x1 - x0, .h = font.line() }, .{}, w.tinted(ui, c.CUI_TOKEN_WARNING, 0.3));
         from = at + p.query.len;
     }
 }
@@ -700,7 +700,7 @@ fn drawRow(ui: *c.cui_ctx, p: *const Paint, g: Geo, row: usize) void {
     const n = tr.nodes.items[node];
     const y = g.screenTop(row);
     const lines = g.lines(row);
-    const height = @as(f32, @floatFromInt(lines)) * line_h;
+    const height = @as(f32, @floatFromInt(lines)) * font.line();
     const band: c.cui_rect = .{ .x = g.rect.x, .y = y, .w = g.rect.w - bar, .h = height };
     const fg = w.color(c.CUI_TOKEN_FOREGROUND);
     const cw = g.char_w;
@@ -773,7 +773,7 @@ fn drawRow(ui: *c.cui_ctx, p: *const Paint, g: Geo, row: usize) void {
         while (rest.len > 0) {
             const len = nextLine(ui, cw, rest, room);
             const chunk = rest[0..len];
-            if (line_y + line_h >= g.rect.y and line_y <= g.rect.y + g.rect.h) {
+            if (line_y + font.line() >= g.rect.y and line_y <= g.rect.y + g.rect.h) {
                 mark(ui, p, parts.value_x + (if (first) cw else 0), line_y - 1, if (first and chunk.len > 0) chunk[1..] else chunk);
                 put(ui, parts.value_x, line_y, chunk, tint);
             }
@@ -783,7 +783,7 @@ fn drawRow(ui: *c.cui_ctx, p: *const Paint, g: Geo, row: usize) void {
                 const end = parts.value_x + advance(ui, cw, chunk);
                 if (n.comma) put(ui, end, line_y, ",", fg);
             }
-            line_y += line_h;
+            line_y += font.line();
         }
         return;
     }
@@ -828,7 +828,7 @@ fn drawCard(ui: *c.cui_ctx, p: *const Paint, g: Geo, card: Card) void {
     const hint = if (truncated) "Shortened here. Double-click the string to show all of it." else "Double-click the string to show it in place.";
     const height = @as(f32, @floatFromInt(lines.items.len)) * 17 + 34;
     const row_top = g.screenTop(card.row);
-    var y = row_top + line_h + 4;
+    var y = row_top + font.line() + 4;
     if (y + height > g.rect.y + g.rect.h) y = @max(g.rect.y + 4, row_top - height - 4);
     const x = std.math.clamp(card.mouse.x - 24, g.rect.x + 8, g.rect.x + g.rect.w - width - bar - 4);
     const box: c.cui_rect = .{ .x = x, .y = y, .w = width, .h = height };

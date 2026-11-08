@@ -12,7 +12,7 @@ const prep = @import("../app/response_prepare.zig");
 const find = @import("response_search.zig");
 const App = @import("../app/state.zig").App;
 const Tab = @import("../app/tab.zig").Tab;
-const line_h = 20;
+const font = @import("code_font.zig");
 const gap = 12;
 const bar = 12;
 const inline_limit = 4096;
@@ -43,15 +43,31 @@ pub fn metrics(ui: *c.cui_ctx) spatial.Metrics {
 }
 fn nativeWidth(raw: ?*anyopaque, source: []const u8) f64 {
     const ui: *c.cui_ctx = @ptrCast(@alignCast(raw.?));
-    return c.cui_measure_text(ui, c.CUI_FONT_MONO, 13, source.ptr, @intCast(source.len)).width;
+    return c.cui_measure_text(ui, c.CUI_FONT_MONO, font.size, source.ptr, @intCast(source.len)).width;
 }
-fn openMetrics(_: ?*anyopaque) ?*anyopaque {
-    return c.cui_create(&.{});
+/// A worker measures with its own context, at the size the job began with.
+const Worker = struct { ui: *c.cui_ctx, size: f32 };
+fn openMetrics(raw: ?*anyopaque) ?*anyopaque {
+    const worker = std.heap.smp_allocator.create(Worker) catch return null;
+    worker.* = .{ .ui = c.cui_create(&.{}) orelse {
+        std.heap.smp_allocator.destroy(worker);
+        return null;
+    }, .size = @floatFromInt(@intFromPtr(raw)) };
+    return worker;
+}
+fn workerWidth(raw: ?*anyopaque, source: []const u8) f64 {
+    const worker: *Worker = @ptrCast(@alignCast(raw.?));
+    return c.cui_measure_text(worker.ui, c.CUI_FONT_MONO, worker.size, source.ptr, @intCast(source.len)).width;
 }
 fn closeMetrics(raw: *anyopaque) void {
-    c.cui_destroy(@ptrCast(@alignCast(raw)));
+    const worker: *Worker = @ptrCast(@alignCast(raw));
+    c.cui_destroy(worker.ui);
+    std.heap.smp_allocator.destroy(worker);
 }
-const factory: spatial.Factory = .{ .open = openMetrics, .width = nativeWidth, .close = closeMetrics };
+/// The size travels in the context pointer; sizes are small whole numbers.
+fn factory() spatial.Factory {
+    return .{ .ctx = @ptrFromInt(@as(usize, @intFromFloat(font.size))), .open = openMetrics, .width = workerWidth, .close = closeMetrics };
+}
 fn wake(raw: *anyopaque) void {
     const app: *App = @ptrCast(@alignCast(raw));
     app.wake();
@@ -63,7 +79,7 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, id: [*:0]const u8, s: *State, so
     const previous = c.cui_get_rect(ui, identity);
     const char_w = editor.cellWidth(ui);
     const gutter = editor.gutterWidth(ui, if (s.index.count() > 0) s.index.lineNumber(s.index.count() - 1) else 1);
-    const config: spatial.Config = .{ .char_width = char_w, .wrap_width = if (t.response.wrap_response) @max(char_w, previous.w - gutter - gap - bar - 8) else 0, .lang = lang };
+    const config: spatial.Config = .{ .char_width = char_w, .font_size = font.size, .wrap_width = if (t.response.wrap_response) @max(char_w, previous.w - gutter - gap - bar - 8) else 0, .lang = lang };
     if (s.layout_ptr != @intFromPtr(source.ptr) or s.layout_len != source.len) {
         s.clearLayout();
         s.layout_ptr = @intFromPtr(source.ptr);
@@ -104,7 +120,7 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, id: [*:0]const u8, s: *State, so
                 s.layout_failure = true;
             }
         } else {
-            s.layout_job = app.response_preparation.layout(t.shown.?, source, owner, config, factory, .{ .ctx = app, .call = wake }) catch |err| blk: {
+            s.layout_job = app.response_preparation.layout(t.shown.?, source, owner, config, factory(), .{ .ctx = app, .call = wake }) catch |err| blk: {
                 if (err != error.Busy) s.layout_failure = true;
                 break :blk null;
             };
@@ -124,8 +140,9 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, id: [*:0]const u8, s: *State, so
     if (c.kest_right_pressed(ui, identity) and previous.w > 0) editor.rightClick(ui, id, s, hit(ui, s, source, previous, gutter));
     var menu_ctx: MenuContext = .{ .app = app, .t = t };
     _ = editor.contextMenu(ui, id, s, source, true, .{ .ctx = &menu_ctx, .items = menuItems });
-    const wheel = c.kest_editor_scroll_axes(ui, identity);
-    s.glide.push(s.scroll_y, -wheel.y * line_h * 3);
+    var wheel = c.kest_editor_scroll_axes(ui, identity);
+    if (font.ctrlWheel(c.cui_key_mods(ui) & c.CUI_MOD_PRIMARY != 0, wheel.y)) wheel = .{};
+    s.glide.push(s.scroll_y, -wheel.y * font.line() * 3);
     var x: f32 = @floatCast(s.precise_x);
     s.glide_x.push(x, -wheel.x * char_w * 3);
     if (previous.w > 0 and (s.glide.target != null or s.glide_x.target != null)) {
@@ -182,16 +199,16 @@ fn fallbackView(ui: *c.cui_ctx, app: *App, id: [*:0]const u8, s: *State, source:
 
 fn adopt(ui: *c.cui_ctx, s: *State, source: []const u8, value: spatial.Layout) void {
     var anchor: usize = 0;
-    var old_y = @mod(s.scroll_y, line_h);
+    var old_y = @mod(s.scroll_y, font.line());
     const had_geometry = s.geometry != null;
     const fallback = s.layout_fallback;
     if (!had_geometry) if (fallback) |prefix| if (prefix.index.count() > 0) {
-        const row = @min(prefix.index.count() - 1, @as(usize, @intFromFloat(@max(0, prefix.scroll_y / line_h))));
+        const row = @min(prefix.index.count() - 1, @as(usize, @intFromFloat(@max(0, prefix.scroll_y / font.line()))));
         anchor = s.layout_fallback_offset + prefix.index.starts.items[row];
-        old_y = @mod(prefix.scroll_y, line_h);
+        old_y = @mod(prefix.scroll_y, font.line());
     };
     if (s.geometry) |*old| {
-        const row = @min(s.index.count() - 1, @as(usize, @intFromFloat(@max(0, s.scroll_y / line_h))));
+        const row = @min(s.index.count() - 1, @as(usize, @intFromFloat(@max(0, s.scroll_y / font.line()))));
         anchor = old.byteAt(&s.index, source, row, s.precise_x, metrics(ui));
         old.deinit(s.gpa);
     }
@@ -204,7 +221,7 @@ fn adopt(ui: *c.cui_ctx, s: *State, source: []const u8, value: spatial.Layout) v
     s.indexed_version = s.version;
     s.index_generation +%= 1;
     s.precise_goal = null;
-    s.scroll_y = @as(f32, @floatFromInt(s.index.rowOf(anchor) * line_h)) + old_y;
+    s.scroll_y = @as(f32, @floatFromInt(s.index.rowOf(anchor))) * font.line() + old_y;
     s.precise_x = if (value.config.wrap_width > 0 or !had_geometry) 0 else value.position(&s.index, source, s.index.rowOf(anchor), anchor, metrics(ui));
     if (!had_geometry) {
         s.reveal = fallback == null;
@@ -246,7 +263,7 @@ fn keys(ui: *c.cui_ctx, s: *State, source: []const u8, height: f32) void {
     if (up or down or pgup or pgdown) {
         const geometry = &s.geometry.?;
         const aim = s.precise_goal orelse geometry.position(&s.index, source, row, s.caret, metrics(ui));
-        const rows: usize = if (pgup or pgdown) @intFromFloat(@max(1, @floor((height - 16 - bar) / line_h))) else 1;
+        const rows: usize = if (pgup or pgdown) @intFromFloat(@max(1, @floor((height - 16 - bar) / font.line()))) else 1;
         const target = if (up or pgup) row -| rows else @min(row + rows, s.index.count() - 1);
         s.moveTo(geometry.byteAt(&s.index, source, target, aim, metrics(ui)), shift);
         s.precise_goal = aim;
@@ -266,7 +283,7 @@ const Scrollbars = struct {
 fn scrollbars(s: *State, rect: c.cui_rect, gutter: f32) Scrollbars {
     const width = @max(1, rect.w - gutter - gap - bar - 8);
     const height = @max(1, rect.h - 16 - bar);
-    const total: f32 = @floatFromInt(s.index.count() * line_h);
+    const total: f32 = @as(f32, @floatFromInt(s.index.count())) * font.line();
     const max_x = if (s.geometry.?.config.wrap_width > 0) 0 else @max(0, s.geometry.?.widest - width);
     const max_y = @max(0, total - height);
     s.precise_x = std.math.clamp(s.precise_x, 0, max_x);
@@ -283,7 +300,7 @@ fn hit(ui: *c.cui_ctx, s: *State, source: []const u8, rect: c.cui_rect, gutter: 
     const mouse = c.cui_mouse_pos(ui);
     const bars = scrollbars(s, rect, gutter);
     if ((bars.max_x > 0 and inside(bars.horizontal, mouse)) or (bars.max_y > 0 and inside(bars.vertical, mouse))) return null;
-    const row = @min(s.index.count() - 1, @as(usize, @intFromFloat(@max(0, @floor((mouse.y - rect.y - 8 + s.scroll_y) / line_h)))));
+    const row = @min(s.index.count() - 1, @as(usize, @intFromFloat(@max(0, @floor((mouse.y - rect.y - 8 + s.scroll_y) / font.line())))));
     return s.geometry.?.byteAt(&s.index, source, row, @max(0, mouse.x - rect.x - gutter - gap + s.precise_x), metrics(ui));
 }
 
@@ -322,7 +339,7 @@ fn pointer(ui: *c.cui_ctx, s: *State, source: []const u8, rect: c.cui_rect, gutt
             s.drag_offset = if (inside(bars.vthumb, mouse)) mouse.y - bars.vthumb.y else bars.vthumb.h / 2;
         } else if (inside(rect, mouse)) {
             s.selecting = true;
-            const row = @min(s.index.count() - 1, @as(usize, @intFromFloat(@max(0, @floor((mouse.y - rect.y - 8 + s.scroll_y) / line_h)))));
+            const row = @min(s.index.count() - 1, @as(usize, @intFromFloat(@max(0, @floor((mouse.y - rect.y - 8 + s.scroll_y) / font.line())))));
             s.pressAt(source, s.geometry.?.byteAt(&s.index, source, row, @max(0, mouse.x - rect.x - gutter - gap + s.precise_x), metrics(ui)), c.kest_click_count(ui), c.cui_key_mods(ui) & c.CUI_MOD_SHIFT != 0);
             s.precise_goal = null;
             return;
@@ -334,11 +351,11 @@ fn pointer(ui: *c.cui_ctx, s: *State, source: []const u8, rect: c.cui_rect, gutt
         .horizontal => s.precise_x = std.math.clamp((mouse.x - bars.horizontal.x - s.drag_offset) / @max(1, bars.horizontal.w - bars.hthumb.w), 0, 1) * bars.max_x,
         .vertical => s.scroll_y = std.math.clamp((mouse.y - bars.vertical.y - s.drag_offset) / @max(1, bars.vertical.h - bars.vthumb.h), 0, 1) * bars.max_y,
         .none => if (s.selecting) {
-            if (mouse.y < rect.y + 8) s.scroll_y = @max(0, s.scroll_y - line_h);
-            if (mouse.y > rect.y + rect.h - bar) s.scroll_y += line_h;
+            if (mouse.y < rect.y + 8) s.scroll_y = @max(0, s.scroll_y - font.line());
+            if (mouse.y > rect.y + rect.h - bar) s.scroll_y += font.line();
             if (mouse.x < rect.x + gutter + gap) s.precise_x = @max(0, s.precise_x - 24);
             if (mouse.x > rect.x + rect.w - bar) s.precise_x += 24;
-            const row = @min(s.index.count() - 1, @as(usize, @intFromFloat(@max(0, @floor((mouse.y - rect.y - 8 + s.scroll_y) / line_h)))));
+            const row = @min(s.index.count() - 1, @as(usize, @intFromFloat(@max(0, @floor((mouse.y - rect.y - 8 + s.scroll_y) / font.line())))));
             s.dragTo(source, s.geometry.?.byteAt(&s.index, source, row, @max(0, mouse.x - rect.x - gutter - gap + s.precise_x), metrics(ui)));
             s.precise_goal = null;
         },
@@ -355,9 +372,9 @@ fn draw(raw_ui: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         s.glide.stop();
         s.glide_x.stop();
         const row = s.index.rowOf(s.caret);
-        const y: f32 = @floatFromInt(row * line_h);
+        const y: f32 = @as(f32, @floatFromInt(row)) * font.line();
         if (y < s.scroll_y) s.scroll_y = y;
-        if (y + line_h > s.scroll_y + bars.height) s.scroll_y = y + line_h - bars.height;
+        if (y + font.line() > s.scroll_y + bars.height) s.scroll_y = y + font.line() - bars.height;
         const x = geometry.position(&s.index, p.source, row, s.caret, metrics(ui));
         if (x < s.precise_x) s.precise_x = x;
         if (x > s.precise_x + bars.width) s.precise_x = x - bars.width;
@@ -371,22 +388,22 @@ fn draw(raw_ui: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     c.cui_draw_rect(ui, .{ .x = rect.x, .y = rect.y, .w = p.gutter, .h = rect.h }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
     c.cui_draw_line(ui, .{ .x = rect.x + p.gutter, .y = rect.y }, .{ .x = rect.x + p.gutter, .y = rect.y + rect.h }, 1 / @max(1, c.cui_dpi_scale(ui)), w.color(c.CUI_TOKEN_BORDER_SUBTLE));
     if (p.focused) c.cui_draw_line(ui, .{ .x = rect.x, .y = rect.y + 0.5 }, .{ .x = rect.x + rect.w, .y = rect.y + 0.5 }, 1 / @max(1, c.cui_dpi_scale(ui)), w.color(c.CUI_TOKEN_FOCUS_RING));
-    const first: usize = @intFromFloat(@floor(s.scroll_y / line_h));
-    const last = @min(s.index.count(), first + @as(usize, @intFromFloat(@ceil(bars.height / line_h))) + 1);
+    const first: usize = @intFromFloat(@floor(s.scroll_y / font.line()));
+    const last = @min(s.index.count(), first + @as(usize, @intFromFloat(@ceil(bars.height / font.line()))) + 1);
     const active = s.index.rowOf(s.caret);
     const selection = s.selection();
     var dense = false;
     for (first..last) |row| {
         const bounds = s.index.bounds(p.source, row);
-        const y = rect.y + 8 + @as(f32, @floatFromInt(row * line_h)) - s.scroll_y;
+        const y = rect.y + 8 + @as(f32, @floatFromInt(row)) * font.line() - s.scroll_y;
         const origin: f64 = rect.x + p.gutter + gap;
         c.cui_push_clip(ui, .{ .x = @floatCast(origin), .y = rect.y + 8, .w = @floatCast(bars.width + 1), .h = bars.height });
-        if (p.focused and row == active) c.cui_draw_rect(ui, .{ .x = @floatCast(origin), .y = y, .w = @floatCast(bars.width), .h = line_h }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
+        if (p.focused and row == active) c.cui_draw_rect(ui, .{ .x = @floatCast(origin), .y = y, .w = @floatCast(bars.width), .h = font.line() }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
         dense = highlight(ui, s, p.source, row, origin, y, bars.width) or dense;
         if (selection[1] > bounds[0] and selection[0] < bounds[1]) {
             const left = @max(0, geometry.position(&s.index, p.source, row, @max(bounds[0], selection[0]), metrics(ui)) - s.precise_x);
             const right = @min(bars.width, geometry.position(&s.index, p.source, row, @min(bounds[1], selection[1]), metrics(ui)) - s.precise_x);
-            if (right > left) c.cui_draw_rect(ui, .{ .x = @floatCast(origin + left), .y = y, .w = @floatCast(right - left), .h = line_h }, .{}, w.color(c.CUI_TOKEN_ACCENT_SUBTLE));
+            if (right > left) c.cui_draw_rect(ui, .{ .x = @floatCast(origin + left), .y = y, .w = @floatCast(right - left), .h = font.line() }, .{}, w.color(c.CUI_TOKEN_ACCENT_SUBTLE));
         }
         const cps = geometry.checkpoints(row);
         const begin = geometry.atX(row, @max(0, s.precise_x - geometry.config.char_width));
@@ -420,14 +437,14 @@ fn draw(raw_ui: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         }
         if (p.focused and row == active) {
             const x: f32 = @floatCast(origin + geometry.position(&s.index, p.source, row, s.caret, metrics(ui)) - s.precise_x);
-            c.cui_draw_line(ui, .{ .x = x, .y = y }, .{ .x = x, .y = y + 17 }, 1.5, w.color(c.CUI_TOKEN_ACCENT));
+            c.cui_draw_line(ui, .{ .x = x, .y = y }, .{ .x = x, .y = y + font.caret() }, 1.5, w.color(c.CUI_TOKEN_ACCENT));
         }
         c.cui_pop_clip(ui);
         var number: [16]u8 = undefined;
         const label = if (s.index.isContinued(row)) "" else std.fmt.bufPrint(&number, "{d}", .{s.index.lineNumber(row)}) catch "";
-        const width = c.cui_measure_text(ui, c.CUI_FONT_MONO, 12, label.ptr, @intCast(label.len)).width;
+        const width = c.cui_measure_text(ui, c.CUI_FONT_MONO, font.small(), label.ptr, @intCast(label.len)).width;
         c.cui_push_clip(ui, .{ .x = rect.x, .y = rect.y + 8, .w = p.gutter, .h = bars.height });
-        c.cui_draw_text(ui, c.CUI_FONT_MONO, 12, .{ .x = rect.x + p.gutter - 10 - width, .y = y + 1 }, w.color(c.CUI_TOKEN_TEXT_MUTED), label.ptr, @intCast(label.len));
+        c.cui_draw_text(ui, c.CUI_FONT_MONO, font.small(), .{ .x = rect.x + p.gutter - 10 - width, .y = y + 1 }, w.color(c.CUI_TOKEN_TEXT_MUTED), label.ptr, @intCast(label.len));
         c.cui_pop_clip(ui);
     }
     if (dense) c.cui_draw_text(ui, c.CUI_FONT_BODY, c.KEST_TEXT_CAPTION, .{ .x = rect.x + p.gutter + gap, .y = rect.y + rect.h - 26 }, w.color(c.CUI_TOKEN_TEXT_SECONDARY), "Preview limited", -1);
@@ -456,7 +473,7 @@ fn highlight(ui: *c.cui_ctx, s: *State, source: []const u8, row: usize, origin: 
         hi = @intCast(@min(hi, bounds[1]));
         const x0 = @max(0, geometry.position(&s.index, source, row, lo, metrics(ui)) - s.precise_x);
         const x1 = @min(width, geometry.position(&s.index, source, row, hi, metrics(ui)) - s.precise_x);
-        if (x1 > x0) c.cui_draw_rect(ui, .{ .x = @floatCast(origin + x0), .y = y, .w = @floatCast(x1 - x0), .h = line_h }, .{}, w.tinted(ui, c.CUI_TOKEN_WARNING, 0.18));
+        if (x1 > x0) c.cui_draw_rect(ui, .{ .x = @floatCast(origin + x0), .y = y, .w = @floatCast(x1 - x0), .h = font.line() }, .{}, w.tinted(ui, c.CUI_TOKEN_WARNING, 0.18));
     }
     return limited;
 }
@@ -469,7 +486,7 @@ fn segment(ui: *c.cui_ctx, s: *State, source: []const u8, row: usize, origin: f6
         }
         const stop = at + (std.mem.indexOfAny(u8, source[at..hi], "\t\r") orelse (hi - at));
         const x: f32 = @floatCast(origin + s.geometry.?.position(&s.index, source, row, at, metrics(ui)) - s.precise_x);
-        c.cui_draw_text(ui, c.CUI_FONT_MONO, 13, .{ .x = x, .y = y }, tint, source[at..stop].ptr, @intCast(stop - at));
+        c.cui_draw_text(ui, c.CUI_FONT_MONO, font.size, .{ .x = x, .y = y }, tint, source[at..stop].ptr, @intCast(stop - at));
         at = stop;
     }
 }
