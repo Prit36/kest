@@ -75,7 +75,7 @@ pub const Result = struct {
 };
 
 pub const validHeader = check.validHeader;
-pub const user_agent = "kest/0.0.1";
+pub const user_agent = "kest/0.0.2";
 pub const default_headers = [_]Header{
     .{ .name = "User-Agent", .value = user_agent },
     .{ .name = "Accept", .value = "*/*" },

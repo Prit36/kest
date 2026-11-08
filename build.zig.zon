@@ -1,6 +1,6 @@
 .{
     .name = .kest_cui,
-    .version = "0.1.0",
+    .version = "0.0.2",
     .fingerprint = 0x0f100764558b273f,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
