@@ -14,6 +14,9 @@
 typedef struct kest_font kest_font;
 kest_font *kest_font_create(const void *bytes, size_t size);
 void kest_font_destroy(kest_font *font);
+/* A read-only mapping of a whole file, or NULL; release with kest_file_unmap. */
+const void *kest_file_map(const char *path, size_t *size);
+void kest_file_unmap(const void *view);
 /* RGBA coverage, 4 bytes a pixel, w*h pixels (free with free()). */
 int kest_font_bitmap(kest_font *font, unsigned glyph, float size, float shift,
                      int *x, int *y, int *w, int *h, uint8_t **pixels);

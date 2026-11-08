@@ -2,6 +2,7 @@
  * Workers post a message; only the UI thread ever touches a CUI context. */
 #include "host.h"
 #include "cui_internal.h"
+#include "platform/cui_platform.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <dwmapi.h>
@@ -14,6 +15,19 @@ static BOOL caption_dark;
 static bool caption_valid;
 static kest_window_geometry normal_geometry;
 static bool normal_valid, last_maximized;
+/* Shown but cloaked until its first frame is presented, so the window never
+ * appears empty (white in a dark theme) for the first frame. */
+static bool cloaked;
+static void cloak_for_first_frame(void) {
+    BOOL on = TRUE;
+    cloaked = SUCCEEDED(DwmSetWindowAttribute(window, 13 /* DWMWA_CLOAK */, &on, sizeof on));
+}
+void kest_host_reveal(cui_app *app) {
+    if (!cloaked || !window || !app->presented_once) return;
+    BOOL off = FALSE;
+    DwmSetWindowAttribute(window, 13 /* DWMWA_CLOAK */, &off, sizeof off);
+    cloaked = false;
+}
 
 static unsigned window_dpi(void) {
     typedef UINT (WINAPI *get_dpi_fn)(HWND);
@@ -173,6 +187,7 @@ static LRESULT CALLBACK dispatch(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_WINDOWPOSCHANGED || msg == WM_EXITSIZEMOVE || msg == WM_DPICHANGED) {
         remember_normal_geometry();
         if (!IsIconic(h)) last_maximized = IsZoomed(h) != 0;
+        events |= 8;   /* the saved placement may need updating */
     }
     return result;
 }
@@ -211,7 +226,7 @@ void kest_host_restore_geometry(const kest_window_geometry *saved, bool show) {
     RECT target = positioned ? (RECT){saved->x, saved->y, saved->x + saved->width, saved->y + saved->height} : original;
     MONITORINFO monitor = { .cbSize = sizeof monitor };
     if (!GetMonitorInfoW(MonitorFromRect(&target, MONITOR_DEFAULTTONEAREST), &monitor)) {
-        if (show) ShowWindow(window, SW_SHOWNORMAL);
+        if (show) { cloak_for_first_frame(); ShowWindow(window, SW_SHOWNORMAL); }
         return;
     }
     RECT work = monitor.rcWork;
@@ -240,7 +255,10 @@ void kest_host_restore_geometry(const kest_window_geometry *saved, bool show) {
     y = CUI_MAX(work.top, CUI_MIN(y, work.bottom - height));
     SetWindowPos(window, NULL, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
     remember_normal_geometry();
-    if (show) ShowWindow(window, saved->maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
+    if (show) {
+        cloak_for_first_frame();
+        ShowWindow(window, saved->maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
+    }
     last_maximized = show && saved->maximized;
 }
 static cui_color over(cui_color base, cui_color scrim) {
@@ -287,6 +305,13 @@ void kest_host_sync_chrome(cui_ctx *ui) {
 void kest_host_wake(void) { if (window) PostMessageW(window, KEST_WAKE, 0, 0); }
 void kest_host_schedule(unsigned ms) { if (window) SetTimer(window, KEST_FLUSH, ms, NULL); }
 int kest_host_events(void) { int result = events; events = 0; return result; }
+void kest_host_wait_if_minimized(void) {
+    /* With vsync, SwapBuffers on a minimized window returns at once, so an
+     * animation (a running request's progress) would redraw as fast as the
+     * CPU allows. Minimized, a frame runs only once a message arrives:
+     * input, a finished request, a timer or the window being restored. */
+    if (window && IsIconic(window)) MsgWaitForMultipleObjectsEx(0, NULL, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+}
 const char *kest_clipboard(cui_ctx *ui) {
     return ui->platform.get_clipboard ? ui->platform.get_clipboard(ui->platform.user) : "";
 }

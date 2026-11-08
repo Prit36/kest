@@ -110,6 +110,7 @@ struct cui_font_data {
     stbtt_fontinfo info;
     unsigned char *data;
     bool owned;
+    bool mapped;                       /* data is a file view (kest_file_map) */
     kest_font *native;
 #ifdef CUI_TEXT_SHAPING
     size_t data_size;
@@ -251,7 +252,14 @@ static cui_font cui__windows_font(cui_ctx *ui, const char *file) {
     if (!windir) windir = "C:/Windows";
     char path[512];
     snprintf(path, sizeof path, "%s/Fonts/%s", windir, file);
-    return cui_font_load_file(ui, path);
+    /* Mapped, not read: the file cache serves the few tables in use. */
+    size_t size;
+    const void *view = kest_file_map(path, &size);
+    if (!view) return -1;
+    cui_font id = cui_font_load_memory(ui, view, size, false);
+    if (id < 0) { kest_file_unmap(view); return -1; }
+    ui->fonts[id - CUI__USER_FONT_BASE].mapped = true;
+    return id;
 }
 static void cui__system_fonts(cui_ctx *ui) {
     const char *choice = getenv("KEST_FONT");
@@ -314,7 +322,8 @@ void cui__fonts_shutdown(cui_ctx *ui) {
 #endif
     for (int i = 0; i < ui->font_count; i++) {
         kest_font_destroy(ui->fonts[i].native);
-        if (ui->fonts[i].owned) cui__free(ui, ui->fonts[i].data);
+        if (ui->fonts[i].mapped) kest_file_unmap(ui->fonts[i].data);
+        else if (ui->fonts[i].owned) cui__free(ui, ui->fonts[i].data);
         cui__free(ui, ui->fonts[i].kern_ascii);
     }
     cui__free(ui, ui->fonts);

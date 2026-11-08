@@ -38,6 +38,7 @@ pub fn build(b: *std.Build) void {
     cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_render_sw.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/text_win32.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/host.c"), .flags = c_flags });
+    cui.addCSourceFile(.{ .file = b.path("src/gpu.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/a11y.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/controls.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/image.c"), .flags = c_flags });

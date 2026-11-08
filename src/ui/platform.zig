@@ -3,6 +3,8 @@ const c = @import("c.zig").c;
 pub var window: ?*c.cui_app = null;
 pub var context: ?*c.cui_ctx = null;
 pub var headless = false;
+/// False while the window paints in software and OpenGL is still loading.
+pub var renderer_final = true;
 pub const dialog = struct {
     pub fn open(gpa: std.mem.Allocator, opts: struct { title: []const u8, extensions: []const []const u8 = &.{} }) !?[][]u8 {
         if (headless) return null;

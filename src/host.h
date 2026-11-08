@@ -13,13 +13,24 @@ typedef struct kest_window_geometry {
 bool kest_host_get_geometry(kest_window_geometry *geometry);
 void kest_host_restore_geometry(const kest_window_geometry *geometry, bool show);
 void kest_host_sync_chrome(cui_ctx *ui);
+/* gpu.c: the window opens on the software renderer and OpenGL is prepared on
+ * a worker after the first frame. adopt: at the start of each frame until it
+ * returns nonzero (zero: still loading; the window is woken when it is ready).
+ * release: after cui_app_destroy. */
+int kest_gpu_adopt(cui_app *app);
+void kest_gpu_release(void);
 void kest_host_wake(void);
 /* Windows settings, cached and refreshed on WM_SETTINGCHANGE.
  * kest_system_dark: -1 unknown, 0 light apps, 1 dark apps. */
 int kest_system_dark(void);
 bool kest_system_reduced_motion(void);
 void kest_host_schedule(unsigned ms);
+/* 1: flush timer, 2: activated, 4: deactivated, 8: moved, resized or rescaled. */
 int kest_host_events(void);
+void kest_host_wait_if_minimized(void);
+/* The window is cloaked from being shown until its first frame is presented;
+ * call at the start of each frame. */
+void kest_host_reveal(cui_app *app);
 const char *kest_clipboard(cui_ctx *ui);
 void kest_copy(cui_ctx *ui, const char *text);
 const char *kest_editor_text(cui_ctx *ui);

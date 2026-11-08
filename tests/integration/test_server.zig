@@ -111,6 +111,19 @@ pub const Server = struct {
             try respond(w, 200, "OK", "application/json", is_head, @embedFile("demo_orders.json"), null);
             return true;
         }
+        if (std.mem.eql(u8, target, "/demo/large")) {
+            // About 4 MiB of minified records, for the frame benchmark.
+            const count = 24000;
+            var out: Io.Writer.Allocating = .init(std.heap.page_allocator);
+            defer out.deinit();
+            try out.writer.writeAll("[");
+            for (0..count) |i| {
+                try out.writer.print("{s}{{\"id\":{d},\"name\":\"Person {d}\",\"email\":\"person{d}@example.test\",\"team\":\"team-{d}\",\"active\":{},\"score\":{d}.{d},\"tags\":[\"a{d}\",\"b{d}\"],\"address\":{{\"city\":\"City {d}\",\"zip\":\"{d:0>5}\"}}}}", .{ if (i == 0) "" else ",", i, i, i, i % 17, i % 3 == 0, i % 100, i % 10, i % 7, i % 11, i % 50, i });
+            }
+            try out.writer.writeAll("]");
+            try respond(w, 200, "OK", "application/json", is_head, out.written(), null);
+            return true;
+        }
         if (std.mem.eql(u8, target, "/markdown")) {
             try respond(w, 200, "OK", "text/markdown; charset=utf-8", is_head, "# Loopback Markdown\n\n**Formatted response** with a [link](https://example.test).\n\n- [ ] Read-only task\n\n```json\n{\"answer\":42}\n```\n", null);
             return true;

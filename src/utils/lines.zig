@@ -23,6 +23,14 @@ pub const Index = struct {
         x.lines.deinit(a);
     }
 
+    /// Releases growth slack once the index is final. For indexes built off
+    /// the UI thread for a response, which then live as long as it is shown;
+    /// an editor's index is rebuilt as it types and keeps its capacity.
+    pub fn trim(x: *Index, a: Allocator) void {
+        @import("fit.zig").list(u32, a, &x.starts);
+        @import("fit.zig").list(u32, a, &x.lines);
+    }
+
     pub fn build(x: *Index, a: Allocator, text: []const u8) !void {
         return x.buildLimited(a, text, std.math.maxInt(usize));
     }

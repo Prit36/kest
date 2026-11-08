@@ -196,7 +196,35 @@ It writes test collections into the supplied
 scratch workspace; never point that command at your real data.
 It also captures related views beside the requested image, with suffixes such
 as `-body.png`, `-light.png`, `-minimum.png` and `-focus.png`.
+
+`--demo --bench` measures the UI on the demo workspace: the frame cost of idle
+redraws, pointer movement, tab, pane, layout, sidebar and theme switches and
+window resizes, then a 4 MiB JSON response (preparation, scrolling, switching,
+and the process memory it holds while shown and after its tab closes).
+
+```powershell
+$env:KEST_DATA = "$PWD/test-output/bench"
+./test-output/diagnostics/bin/kest.exe --demo --bench
+```
+
 These flags require `-Ddiagnostics=true`; normal distribution builds omit them.
+
+### Startup and memory
+
+The window opens on CUI's software renderer and paints its first frame with it
+while OpenGL loads on a worker thread (`src/gpu.c`); the UI thread then adopts
+the prepared context and switches renderers between frames. Loading the GPU
+driver is most of a cold start, so the first frame no longer waits for it. The
+window is cloaked until that first frame is presented. `CUI_RENDERER=software`
+keeps the software renderer throughout.
+
+Zig's Windows threads commit their whole stack up front; `main` lowers the I/O
+pool's commit to 256 KiB (the 16 MiB reservation, and so the maximum depth, is
+unchanged), which otherwise pins 16 MiB for every request and preparation
+worker. Fonts share one DirectWrite factory, Windows' font files are mapped
+rather than copied, and large response buffers built on workers (the body, its
+line index, text geometry and JSON tree) give back their growth slack once
+final (`src/utils/fit.zig`).
 
 See [verified coverage](supported_features.md). The [CUI 1.1 update](cui-1.1-update.md)
 records component choices, compatibility work and validation.

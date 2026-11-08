@@ -105,6 +105,8 @@ pub const Tree = struct {
                 },
             }
         }
+        // The capacity was a guess from the text size; the tree is final now.
+        @import("../utils/fit.zig").list(Node, a, &t.nodes);
         t.collapsed = try .initEmpty(a, t.nodes.items.len);
         t.hit_set = try .initEmpty(a, t.nodes.items.len);
         t.around = try .initEmpty(a, t.nodes.items.len);

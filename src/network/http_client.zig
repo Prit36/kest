@@ -161,6 +161,9 @@ fn finish(j: *Job, result: transport.Result) void {
     // Publish classification with the completed response, never parse a large
     // body in the UI's class()/navigation lookups. Include final stop state.
     defer r.inspectContent();
+    // The body is complete: release its growth slack (up to half again its
+    // size) here on the worker. The UI reads it only after finish.
+    @import("../utils/fit.zig").list(u8, r.gpa, &r.preview);
     r.closeSpill();
     r.reused_connection = result.reused_connection;
     r.time_ms = @intCast(std.math.clamp(j.elapsedMs(), 0, std.math.maxInt(u32)));

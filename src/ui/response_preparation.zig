@@ -41,6 +41,9 @@ pub fn ensure(ui: *c.cui_ctx, app: *App, t: *tab.Tab, kind: prep.Kind) Status {
     const mode: tab.PrettyMode = if (kind == .minified) .minified else .text;
     if (cached(v, kind)) return .ready;
     if (v.preparation) |job| {
+        // A decoded image becomes a texture of the renderer in use; while
+        // startup still paints in software, keep it until OpenGL takes over.
+        if (kind == .image and !@import("platform.zig").renderer_final) return .waiting;
         var result = job.take() orelse return .waiting;
         defer result.deinit(app.gpa);
         job.release();

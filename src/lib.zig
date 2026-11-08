@@ -25,6 +25,7 @@ pub const metrics = @import("utils/metrics.zig");
 pub const store = @import("storage/store.zig");
 pub const workspace_store = @import("storage/workspace_store.zig");
 pub const lines = @import("utils/lines.zig");
+pub const fit = @import("utils/fit.zig");
 pub const text_layout = @import("core/text_layout.zig");
 pub const response_search = @import("core/response_search.zig");
 pub const brackets = @import("utils/brackets.zig");

@@ -46,12 +46,26 @@ fn syncWindowGeometry(app: *App) void {
     }
 }
 
+/// On Windows, std.Thread passes its stack size to the kernel as the size to
+/// commit up front, so every I/O worker (the store writer, each request and
+/// each response preparation) would pin 16 MiB of private memory for its
+/// lifetime, and the pool keeps idle workers. Commit a small initial stack
+/// instead: the executable's 16 MiB reservation is unchanged, so a thread
+/// still grows on demand to the same maximum depth.
+fn limitThreadStacks(io: std.Io) void {
+    if (@import("builtin").os.tag != .windows) return;
+    const threaded: *std.Io.Threaded = @ptrCast(@alignCast(io.userdata orelse return));
+    threaded.stack_size = 256 * 1024;
+}
+
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
+    limitThreadStacks(io);
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     var test_mode = false;
     var demo_mode = false;
+    var bench = false;
     var show_sidebar = false;
     var light = false;
     var snapshot: ?[]const u8 = null;
@@ -61,6 +75,7 @@ pub fn main(init: std.process.Init) !void {
     for (args) |arg| {
         if (std.mem.eql(u8, arg, "--self-test")) test_mode = true;
         if (std.mem.eql(u8, arg, "--demo")) demo_mode = true;
+        if (std.mem.eql(u8, arg, "--bench")) bench = true;
         if (std.mem.eql(u8, arg, "--sidebar")) show_sidebar = true;
         if (std.mem.eql(u8, arg, "--light")) light = true;
         if (std.mem.startsWith(u8, arg, "--snapshot=")) snapshot = arg[11..];
@@ -68,7 +83,8 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.startsWith(u8, arg, "--height=")) height = std.fmt.parseFloat(f32, arg[9..]) catch 800;
         if (std.mem.startsWith(u8, arg, "--scale=")) scale = std.fmt.parseFloat(f32, arg[8..]) catch return error.InvalidSnapshotScale;
     }
-    platform.headless = test_mode or snapshot != null;
+    platform.headless = test_mode or bench or snapshot != null;
+    if (bench and !demo_mode) return error.BenchNeedsDemo;
     if (!@import("build_options").diagnostics and platform.headless) return error.DiagnosticsNotEnabled;
     if (!std.math.isFinite(width) or !std.math.isFinite(height) or width < 640 or height < 420 or width > 8192 or height > 8192) return error.InvalidSnapshotDimensions;
     if (!std.math.isFinite(scale) or scale < 1 or scale > 4 or width * scale > 8192 or height * scale > 8192) return error.InvalidSnapshotScale;
@@ -122,6 +138,7 @@ pub fn main(init: std.process.Init) !void {
                 app.prefs.follow_system = false;
             }
             if (!test_mode) shell.narrow_open = show_sidebar;
+            if (bench) return @import("bench.zig").run(&app, demo_server.port);
             try @import("headless.zig").run(&app, test_mode, snapshot, width, height, scale);
         }
         return;
@@ -129,7 +146,7 @@ pub fn main(init: std.process.Init) !void {
     shell.followSystemAppearance(&app);
     // Restore and clamp before showing. Avoid allocating an enormous initial
     // surface for stale preferences from a monitor that is no longer attached.
-    const window = c.cui_app_create(&.{ .title = if (demo_mode) "Kest (Demo)" else "Kest", .width = @intFromFloat(@min(1280, app.prefs.window_width)), .height = @intFromFloat(@min(800, app.prefs.window_height)), .hidden = true, .min_width = 640, .min_height = 420, .theme = if (app.prefs.dark) c.CUI_THEME_DARK else c.CUI_THEME_LIGHT, .accent = c.CUI_ACCENT_BLUE }) orelse return error.WindowCreationFailed;
+    const window = c.cui_app_create(&.{ .title = if (demo_mode) "Kest (Demo)" else "Kest", .width = @intFromFloat(@min(1280, app.prefs.window_width)), .height = @intFromFloat(@min(800, app.prefs.window_height)), .hidden = true, .min_width = 640, .min_height = 420, .theme = if (app.prefs.dark) c.CUI_THEME_DARK else c.CUI_THEME_LIGHT, .accent = c.CUI_ACCENT_BLUE, .renderer = c.CUI_RENDERER_SOFTWARE }) orelse return error.WindowCreationFailed;
     platform.window = window;
     platform.context = c.cui_app_ui(window);
     defer {
@@ -139,6 +156,7 @@ pub fn main(init: std.process.Init) !void {
         platform.context = null;
         platform.window = null;
         c.cui_app_destroy(window);
+        c.kest_gpu_release();
     }
     c.kest_host_attach(window);
     @import("window_icon.zig").apply(c.cui_app_native_window(window));
@@ -155,14 +173,18 @@ pub fn main(init: std.process.Init) !void {
         geometry.positioned = true;
     }
     c.kest_host_restore_geometry(&geometry, true);
+    platform.renderer_final = false;
     while (c.cui_app_frame(window)) {
+        c.kest_host_reveal(window);
+        if (!platform.renderer_final) platform.renderer_final = c.kest_gpu_adopt(window) != 0;
         const events = c.kest_host_events();
         if (events & 1 != 0 or events & 4 != 0) persist.flush(&app);
         if (events & 2 != 0) persist.refreshFromDisk(&app);
-        syncWindowGeometry(&app);
+        if (events & 8 != 0) syncWindowGeometry(&app);
         shell.view(platform.context.?, &app);
         c.kest_end_frame(platform.context);
         c.kest_host_sync_chrome(platform.context);
         c.kest_quiet_caret(platform.context);
+        c.kest_host_wait_if_minimized();
     }
 }

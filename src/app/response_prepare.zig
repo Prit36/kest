@@ -262,6 +262,9 @@ fn prepare(a: Allocator, source: []const u8, kind: Kind, decoder: ?Decoder) Resu
                 result.deinit(a);
                 return .{ .failure = .unavailable };
             };
+            // The text is shown for as long as the response is: keep no growth slack.
+            result.index.trim(a);
+            @import("../utils/fit.zig").list(highlight.CrossRowString, a, &result.strings);
             return .{ .text = result };
         },
     }

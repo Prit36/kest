@@ -100,6 +100,13 @@ pub const Layout = struct {
             line += 1;
         }
         if (config.lang == .json) try hl.jsonContinuations(a, source, out.starts.items, &out.strings);
+        // Built on a worker and kept while its text is shown: drop growth slack.
+        out.index.trim(a);
+        @import("../utils/fit.zig").list(f64, a, &out.widths);
+        @import("../utils/fit.zig").list(u32, a, &out.row_checkpoints);
+        @import("../utils/fit.zig").list(u32, a, &out.starts);
+        @import("../utils/fit.zig").list(f64, a, &out.xs);
+        @import("../utils/fit.zig").list(hl.CrossRowString, a, &out.strings);
         return out;
     }
 

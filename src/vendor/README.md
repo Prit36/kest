@@ -12,7 +12,9 @@ native font handle per loaded font, destruction before font bytes are freed,
 DirectWrite coverage in the glyph atlas, an RGBA atlas (one coverage value per
 ClearType subpixel), and the Windows UI fonts (Segoe UI, Segoe UI Semibold,
 Cascadia Mono or Consolas) in the body, medium, display and mono roles, with
-CUI's bundled fonts as their fallbacks. Font metrics, kerning, layout, icons and
+CUI's bundled fonts as their fallbacks. The Windows font files are mapped
+read-only (`kest_file_map`) rather than read into memory, and unmapped when the
+context's fonts are destroyed. Font metrics, kerning, layout, icons and
 cache keys remain CUI's. If a native face or glyph cannot be rendered, the
 original stb rasterization is used.
 
