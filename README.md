@@ -33,7 +33,7 @@ headless UI tests. The bundled loopback fixture server starts only in demo mode.
 
 ### Repeatable demo workspace
 
-Double-click `Demo.cmd`, or run `kest.exe --demo` (from source:
+Run `kest.exe --demo` (from source:
 `zig build run -Doptimize=ReleaseFast -- --demo`). Every launch creates a fresh,
 separate workspace under `%APPDATA%\kest-demo\<session-id>`; when `KEST_DATA`
 is set, demo sessions go under that folder's `kest-demo` subdirectory. Your normal
@@ -147,7 +147,6 @@ tab and collection location.
 ```powershell
 zig build test
 zig build test -Doptimize=ReleaseFast
-zig build bench -Doptimize=ReleaseFast
 ```
 
 Tests use loopback HTTP and scratch folders. CUI UI tests run directly in a
@@ -177,26 +176,14 @@ It also captures related views beside the requested image, with suffixes such
 as `-body.png`, `-light.png`, `-minimum.png` and `-focus.png`.
 These flags require `-Ddiagnostics=true`; normal distribution builds omit them.
 
-The existing `tests/performance/startup.ps1` runs the native window on a private
-Windows desktop. `tests/integration/os_input.ps1` does the same and drives the
-real window procedure with Windows mouse, keyboard and text messages (tree
-dragging, Escape, typing Unicode, IME placement), then checks the files the app saved.
-`-Dpi 144` repeats everything after a simulated move to a 150% monitor:
-
-```bash
-powershell -File tests/integration/os_input.ps1 -Exe zig-out/bin/kest.exe -Data <empty folder>
-```
-
-See [verified coverage](docs/supported_features.md),
-and [measurements](docs/performance.md). The [CUI 1.1 update](docs/cui-1.1-update.md)
+See [verified coverage](docs/supported_features.md). The [CUI 1.1 update](docs/cui-1.1-update.md)
 records component choices, compatibility work and validation.
 
 ## Icon
 
 The angular K mark is shared by the app header and Windows icon. Its source is
-`assets/kest.svg`; `tools/build-icon.ps1` regenerates the PNG, multi-size ICO and
-native vector geometry using Windows System.Drawing. The app needs none of
-these development tools at runtime. Windows metadata and the title use Kest.
+`assets/kest.svg`, with the PNG, multi-size ICO and native vector geometry
+generated from it. Windows metadata and the title use Kest.
 Native exports use `.kest.json` / `.kest-env.json`.
 
 ## Licenses

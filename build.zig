@@ -124,13 +124,6 @@ pub fn build(b: *std.Build) void {
     demo_check.addArgs(&.{ "--demo", "--snapshot=test-output/demo-test.png" });
     demo_check.setEnvironmentVariable("KEST_DATA", "test-output/demo-test-workspaces");
     test_step.dependOn(&demo_check.step);
-    const bench = b.addExecutable(.{ .name = "bench", .root_module = b.createModule(.{
-        .root_source_file = b.path("tests/performance/bench.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{ .{ .name = "kest", .module = lib }, .{ .name = "test_server", .module = server } },
-    }) });
-    b.step("bench", "Measure engine and storage").dependOn(&b.addRunArtifact(bench).step);
     const smoke = b.addExecutable(.{ .name = "smoke", .root_module = b.createModule(.{
         .root_source_file = b.path("tests/integration/smoke.zig"),
         .target = target,

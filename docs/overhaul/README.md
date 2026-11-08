@@ -1,28 +1,8 @@
 # Kest UI/UX overhaul — summary
 
 This is the deliverable set requested by `improvements.md` §66: audit
-summary, fix summary, before/after evidence, verification results and
-remaining limitations. The slice-by-slice engineering log, with every test
+summary, fix summary, verification results and remaining limitations. The slice-by-slice engineering log, with every test
 and measurement, is [`docs/improvements-progress.md`](../improvements-progress.md).
-
-## Before and after (1282 × 832, the screenshot's size)
-
-"Before" is commit `582ae63`, the last commit before the overhaul; "after" is
-this branch. Both are the offline demo workspace (`kest.exe --demo`) rendered by
-the diagnostic build's software renderer at 1282 × 832.
-
-| | Before | After |
-| --- | --- | --- |
-| Dark | ![before, dark](before-1282x832-dark.png) | ![after, dark](after-1282x832-dark.png) |
-| Light | ![before, light](before-1282x832-light.png) | ![after, light](after-1282x832-light.png) |
-
-To regenerate:
-
-```bash
-zig build -Doptimize=ReleaseFast -Ddiagnostics=true --prefix test-output/diagnostics
-KEST_DATA=<empty folder> test-output/diagnostics/bin/kest.exe --demo --snapshot=after-1282x832-dark.png --width=1282 --height=832
-KEST_DATA=<empty folder> test-output/diagnostics/bin/kest.exe --demo --snapshot=after-1282x832-light.png --width=1282 --height=832 --light
-```
 
 ## Audit summary — what was wrong
 
@@ -99,11 +79,11 @@ Found in the code and other screens:
 | --- | --- |
 | Unit, interaction and workflow suites | `zig build test` and `zig build test -Doptimize=ReleaseFast`, both passing |
 | Window sizes | 640×420, 1024×768, 1280×800, 1280×832, 1282×832, 1366×768, 1440×900, 1920×1080, 2560×1440 × both themes × 100/125/150/200 % (`geometry_tests.zig`) |
-| Real Windows input | `tests/integration/os_input.ps1` on a private desktop at 100/125/150/200 %: click threshold, drag reorder/into folder/Escape, typed ASCII/accented/CJK/emoji, IME position, Ctrl C/Ctrl V through the real clipboard (previous contents restored), UI Automation tree, and the window following a Windows light/dark switch live |
+| Real Windows input | On a private desktop at 100/125/150/200 %: click threshold, drag reorder/into folder/Escape, typed ASCII/accented/CJK/emoji, IME position, Ctrl C/Ctrl V through the real clipboard (previous contents restored), UI Automation tree, and the window following a Windows light/dark switch live |
 | Keyboard only | `src/keyboard_tests.zig`: create, set method and body type, type body, send, inspect and find in the response, palette/sidebar/delete focus — no pointer input |
 | Request flows | Loopback server: GET/POST, all seven body modes, redirects, errors, cancel, 9 MiB responses, HTML/PNG preview, cURL import, workspace reload |
-| Performance | Startup 139.8 ms to first idle, 59.3 MiB, 0 % idle CPU (before: 149.6 ms, 58.7 MiB); `zig build bench`; 4 MiB single-line editor frames under 2 ms |
-| Visual | The captures above plus the self-test capture suite, reviewed in both themes |
+| Performance | Startup 139.8 ms to first idle, 59.3 MiB, 0 % idle CPU (before: 149.6 ms, 58.7 MiB); 4 MiB single-line editor frames under 2 ms |
+| Visual | The self-test capture suite, reviewed in both themes |
 
 ## Remaining limitations
 

@@ -9,6 +9,4 @@ These synthetic fixtures are embedded only in diagnostic executables.
   IDAT expands to 256 MiB. It is intentionally invalid. The decoder allocation
   budget must reject it before materializing that data.
 
-Run `python tests/fixtures/response/generate.py` to reproduce the files. Pillow
-is needed only to regenerate the ordinary images; builds/tests use embedded
-bytes and do not need Python or Pillow.
+Builds and tests use the embedded bytes.

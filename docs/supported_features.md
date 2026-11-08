@@ -26,7 +26,7 @@ does not establish coverage for this interface.
 
 | Feature | Verification |
 | --- | --- |
-| Kest executable/title/Windows icon | ReleaseFast built; 16-256px ICO frames verified; metadata and private-desktop check documented in performance.md |
+| Kest executable/title/Windows icon | ReleaseFast built; 16-256px ICO frames verified; metadata verified |
 | Headless snapshots and UI self-tests | Separate test executable; snapshots require a build with `-Ddiagnostics=true` |
 | T3 Code neutral dark/light palettes, blue actions and monochrome K identity | Both S; instant theme changes U; control geometry retained |
 | Inset pane tabs and document/collection selection markers | Dark/light S; existing pointer/keyboard interaction checks U |
@@ -37,11 +37,11 @@ does not establish coverage for this interface.
 | Hide/restore request details to focus on response | Layout focus state and response height U; restoring through a section tab U; focused response S |
 | Narrow workspace sheet at 640×420 | Toggle U; compact and unobstructed workspace images S |
 | Request Params/Body/Headers and settings control | Actual pane/body-type clicks U; params/body/settings S |
-| Collection tree drag reordering and drop into folders | Threshold, insertion line, into-folder outline, Escape cancel, edge autoscroll and invalid targets U; both indicators S; reorder, drop into folder, Escape and click threshold through real Win32 messages (`tests/integration/os_input.ps1`) |
-| Real Windows input path | Mouse, keys and committed text (accented, CJK, surrogate-pair emoji) through the real window procedure, saved files checked, IME composition window at the caret, and all of it again after simulated 125%/150% `WM_DPICHANGED` (`tests/integration/os_input.ps1`) |
+| Collection tree drag reordering and drop into folders | Threshold, insertion line, into-folder outline, Escape cancel, edge autoscroll and invalid targets U; both indicators S; reorder, drop into folder, Escape and click threshold through real Win32 messages |
+| Real Windows input path | Mouse, keys and committed text (accented, CJK, surrogate-pair emoji) through the real window procedure, saved files checked, IME composition window at the caret, and all of it again after simulated 125%/150% `WM_DPICHANGED` |
 | Keyboard-only workflow | Create, edit (method, URL, body type, body), send and inspect a response without a pointer; focus returns after the palette and dialogs, moves to the sidebar toggle when the sidebar hides, stays in the tree after a delete (`src/keyboard_tests.zig`) |
 | System appearance | Follows the Windows app theme until an appearance is chosen; honours Windows "Show animations" |
-| Screen readers (UI Automation) | `src/a11y.c` publishes named controls with roles (buttons, fields, tabs, tree and tree items, menu buttons), focus and focus events, help text and field values; checked by a UIA client in `tests/integration/os_input.ps1`. Read-only: no Invoke/ExpandCollapse patterns |
+| Screen readers (UI Automation) | `src/a11y.c` publishes named controls with roles (buttons, fields, tabs, tree and tree items, menu buttons), focus and focus events, help text and field values. Read-only: no Invoke/ExpandCollapse patterns |
 | Direct-entry tables, empty insertion row and URL sync | Actual key/value typing, continued focus and Tab to value U; populated table S; unused insertion row excluded from request data |
 | Minimum-size row visibility and response space | Populated row AND insertion row fully visible U; JSON viewport at least 60 px with empty request details U/S |
 | Joined method/URL composer and standard/custom method menu | Actual GET/POST/custom selection and custom typing U; dark/light S |
@@ -89,7 +89,7 @@ does not establish coverage for this interface.
   searched. Case-insensitive matching folds ASCII A-Z; other UTF-8 characters
   match exactly. Full Unicode case folding and regular expressions are absent.
 - Screen readers are checked through the UIA tree they read, not real
-  speech output. The real clipboard is tested by `os_input.ps1`. No complex-script validation. UTF-8 advances align codepoint carets/hit testing; grapheme behavior
+  speech output. No complex-script validation. UTF-8 advances align codepoint carets/hit testing; grapheme behavior
   retain their native audit. Response wrap uses native font advances; editable
   request bodies still use conservative byte-budget wrap sizing.
 - `zig build test` reports the current engine/HTTP test counts and also runs

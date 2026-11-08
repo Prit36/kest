@@ -2,3 +2,12 @@
 zig-out/
 test-output/
 zig-pkg/
+
+# Local captures, scripts and benchmarks
+docs/overhaul/*.png
+*.ps1
+*.py
+*.cmd
+*.log
+tests/performance/
+docs/performance.md
