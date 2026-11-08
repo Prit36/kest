@@ -211,35 +211,72 @@ fn moveFiles(app: *App, n: *const Node, from: *const Node, to: *const Node) void
             app.store.delete(src);
         }
         if (tabOf(app, n)) |t| t.link = .{ .collection = to.id, .request = n.id };
+        for (app.closed_tabs.items) |t| if (t.link) |link| {
+            if (std.mem.eql(u8, &link.request, &n.id)) t.link = .{ .collection = to.id, .request = n.id };
+        };
     }
     for (n.children.items) |c| moveFiles(app, c, from, to);
 }
 
+pub fn finishDelete(app: *App) void {
+    for (app.deleted.items) |d| {
+        if (d.node.kind == .collection) cs.deleteCollection(app.store, &d.root) else cs.deleteRequests(app.store, &d.root, d.node);
+        col.destroy(app.gpa, d.node);
+    }
+    app.deleted.clearRetainingCapacity();
+    for (app.deleted_envs.items) |d| state.App.freeEnv(app.gpa, d.env);
+    app.deleted_envs.clearRetainingCapacity();
+}
 pub fn deleteNode(app: *App, n: *Node) void {
-    // Tabs of what's going lose their home but keep their text.
+    if (app.deleted.items.len > 0 and app.nowMs() >= app.undo_until) finishDelete(app);
+    const root = n.root().id;
+    const index = if (n.parent != null) n.indexInParent().? else std.mem.indexOfScalar(*Node, app.collections.items, n).?;
+    app.deleted.append(app.gpa, .{ .node = n, .parent = n.parent, .root = root, .index = index }) catch return;
     closeTabsOf(app, n);
     if (app.selected) |s| if (n.contains(s)) {
-        // The keyboard stays in the tree on a neighbour: the next item,
-        // else the previous one, else the parent.
         app.selected = neighbour(app, n);
-        app.focus_tree = true;
-        app.rows_dirty = true;
     };
+    app.selection.clearRetainingCapacity();
+    app.selection_anchor = null;
+    app.rename_action = null;
     app.tree_menu_node = null;
     app.save_target = null;
-    if (n.kind == .collection) {
-        cs.deleteCollection(app.store, &n.id);
-        if (std.mem.indexOfScalar(*Node, app.collections.items, n)) |i| _ = app.collections.orderedRemove(i);
-        _ = app.tree_hashes.remove(n.id);
-        col.destroy(app.gpa, n);
-        app.rows_dirty = true;
-        return;
+    if (n.parent) |parent| {
+        col.detach(n);
+        persist.saveTree(app, parent.root());
+    } else {
+        _ = app.collections.orderedRemove(index);
+        // Hide the tree on disk immediately; request files remain for Undo.
+        var buf: [cs.path_len]u8 = undefined;
+        app.store.delete(cs.treePath(&buf, &root));
+        _ = app.tree_hashes.remove(root);
     }
-    const c = n.root();
-    cs.deleteRequests(app.store, &c.id, n);
-    col.detach(n);
-    col.destroy(app.gpa, n);
-    persist.saveTree(app, c);
+    app.rows_dirty = true;
+    app.focus_tree = true;
+    app.undo_until = app.nowMs() + 8000;
+}
+pub fn undoDelete(app: *App) void {
+    var i = app.deleted.items.len;
+    while (i > 0) {
+        i -= 1;
+        const d = app.deleted.items[i];
+        if (d.parent) |parent| {
+            parent.children.insert(app.gpa, @min(d.index, parent.children.items.len), d.node) catch return;
+            d.node.parent = parent;
+        } else app.collections.insert(app.gpa, @min(d.index, app.collections.items.len), d.node) catch return;
+        persist.saveTree(app, d.node.root());
+        app.selected = d.node;
+        _ = app.deleted.pop();
+    }
+    app.rows_dirty = true;
+    while (app.deleted_envs.items.len > 0) {
+        const d = app.deleted_envs.items[app.deleted_envs.items.len - 1];
+        app.envs.insert(app.gpa, @min(d.index, app.envs.items.len), d.env) catch return;
+        persist.saveEnv(app, d.env);
+        if (d.active) commands.setActiveEnv(app, d.env);
+        _ = app.deleted_envs.pop();
+    }
+    app.undo_until = 0;
 }
 
 fn neighbour(app: *App, n: *Node) ?*Node {
@@ -251,6 +288,9 @@ fn neighbour(app: *App, n: *Node) ?*Node {
 }
 
 fn closeTabsOf(app: *App, n: *const Node) void {
+    for (app.closed_tabs.items) |t| if (t.link) |link| {
+        if (std.mem.eql(u8, &link.request, &n.id)) t.link = null;
+    };
     if (n.kind == .request) if (tabOf(app, n)) |t| {
         t.link = null;
         persist.touchTab(app, t);
@@ -265,13 +305,19 @@ pub fn addEnvironment(app: *App, name: []const u8) ?*state.Env {
 }
 
 pub fn deleteEnv(app: *App, e: *state.Env) void {
+    if (app.nowMs() >= app.undo_until) finishDelete(app);
+    const index = std.mem.indexOfScalar(*state.Env, app.envs.items, e) orelse return;
+    app.deleted_envs.append(app.gpa, .{ .env = e, .index = index, .active = app.active_env == e }) catch return;
+    app.undo_until = app.nowMs() + 8000;
+    if (app.rename_action) |action| if (action == .rename_env and action.rename_env == e) {
+        app.rename_action = null;
+    };
     var buf: [ws.path_len]u8 = undefined;
     app.store.delete(ws.envPath(&buf, &e.id));
     if (app.active_env == e) commands.setActiveEnv(app, null);
     if (app.editing_env == e) app.editing_env = null;
     app.env_menu_env = null;
     if (std.mem.indexOfScalar(*state.Env, app.envs.items, e)) |i| _ = app.envs.orderedRemove(i);
-    state.App.freeEnv(app.gpa, e);
 }
 
 pub fn renameEnv(app: *App, e: *state.Env, name: []const u8) void {

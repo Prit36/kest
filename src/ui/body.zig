@@ -9,6 +9,8 @@ const persist = @import("../app/persist.zig");
 const editor = @import("editor.zig");
 
 pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
+    w.column(ui, .{ .id = "request-body-drop", .width = w.fill, .height = w.fill });
+    defer w.end(ui);
     const raw = t.body_kind == .json or t.body_kind == .text or t.body_kind == .xml;
     w.row(ui, .{ .id = "body-toolbar", .gap = 4, .pad_left = 2, .pad_right = 12, .height = w.px(36), .width = w.fill });
     const kinds = [_][]const u8{ "No body", "JSON", "Text", "XML", "Form", "Multipart", "File" };

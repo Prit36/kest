@@ -147,6 +147,7 @@ fn restoreTab(app: *App, a: Allocator, o: ws.OpenTab) !?*Tab {
     const id = o.draft orelse col.newId(app.io);
     const t = try Tab.create(app.gpa, id, app.next_tab_uid);
     app.next_tab_uid += 1;
+    t.pinned = o.pinned;
     errdefer t.destroy();
     // Apply after both saved and draft loads, including fallback returns.
     defer if (o.request_pane) |pane| {
@@ -310,7 +311,7 @@ pub fn savePrefs(app: *App) void {
     var open: std.ArrayList(ws.OpenTab) = .empty;
     var active: usize = 0;
     for (app.tabs.items, 0..) |t, i| {
-        var o: ws.OpenTab = .{ .request_pane = t.pane };
+        var o: ws.OpenTab = .{ .request_pane = t.pane, .pinned = t.pinned };
         if (t.link) |l| {
             o.collection = l.collection;
             o.request = l.request;
@@ -366,6 +367,11 @@ fn refreshTrees(app: *App, a: Allocator) void {
         if (app.selected) |s| if (c.contains(s)) {
             app.selected = null;
         };
+        app.selection.clearRetainingCapacity();
+        app.selection_anchor = null;
+        app.rename_action = null;
+        // Undo records can reference parents in the tree being replaced.
+        @import("tree_ops.zig").finishDelete(app);
         col.destroy(app.gpa, c);
         app.tree_hashes.put(app.gpa, fresh.id, h) catch {};
         app.rows_dirty = true;

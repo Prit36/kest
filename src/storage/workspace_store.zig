@@ -18,6 +18,7 @@ pub const OpenTab = struct {
     /// autosave is off and they have unsaved edits.
     draft: ?col.Id = null,
     request_pane: ?RequestPane = null,
+    pinned: bool = false,
 };
 
 /// Plain data; `open_tabs` and `active_env` live in an arena or the app.
@@ -91,6 +92,7 @@ pub fn parsePrefs(a: Allocator, text: []const u8) !Prefs {
     var tabs: std.ArrayList(OpenTab) = .empty;
     for (json.array(v, "openTabs")) |row| {
         const tab: OpenTab = .{
+            .pinned = json.boolean(row, "pinned") orelse false,
             .collection = id(json.str(row, "collection")),
             .request = id(json.str(row, "request")),
             .draft = id(json.str(row, "draft")),
@@ -148,6 +150,7 @@ fn writePrefs(s: *std.json.Stringify, p: Prefs) !void {
         if (tab.collection) |c| try json.field(s, "collection", &c);
         if (tab.request) |r| try json.field(s, "request", &r);
         if (tab.draft) |d| try json.field(s, "draft", &d);
+        try json.field(s, "pinned", tab.pinned);
         if (tab.request_pane) |pane| try json.field(s, "requestPane", @tagName(pane));
         try s.endObject();
     }
@@ -300,4 +303,15 @@ test "reading a folder of ids skips everything else" {
     try t.expectEqual(@as(usize, 1), files.items.len);
     try t.expectEqualStrings(&env_id, &files.items[0].id);
     try t.expectEqual(@as(usize, 0), try readAllIn(&s, a, "missing-folder", &files));
+}
+
+test "pinned tab metadata survives preferences round trip" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const parsed = try parsePrefs(a, "{\"openTabs\":[{\"draft\":\"0123456789abcdef\",\"pinned\":true},{\"draft\":\"fedcba9876543210\"}]}");
+    try t.expect(parsed.open_tabs[0].pinned);
+    try t.expect(!parsed.open_tabs[1].pinned);
+    const restored = try parsePrefs(a, try prefsJson(a, parsed));
+    try t.expect(restored.open_tabs[0].pinned and !restored.open_tabs[1].pinned);
 }

@@ -96,3 +96,14 @@ does not establish coverage for this interface.
   the executable CUI harness and native control/geometry/font checks.
 - Current limitations include: no HTTP/2, cookie persistence, proxies or
   browser HTML rendering. These features are outside the current scope.
+
+
+### Sidebar and workspace interactions
+
+- Rename collection items, environments, and request tabs inline from their menus. F2 renames the focused collection item or current request tab; The current name starts selected; typing replaces it. Enter or clicking away commits, and Escape cancels and returns focus to the item. Empty Enter marks the field invalid; leaving an empty editor keeps the original name. Tab editors expand while editing, and collection rows scroll fully into view.
+- Ctrl-click toggles collection rows; Shift-click selects a visible range. Selected rows expose bulk move, Postman/Kest export, and delete actions. Bulk operations visit selected ancestors once. Collections cannot be moved into other collections.
+- Deleting collection items or environments offers an eight-second Undo toast. Repeated deletes within that interval are restored together, including the original order and request files.
+- Drop one collection/environment/cURL file onto the window to open the existing import preview. Drop one file into the visible Body area to attach it as a binary body. Multiple-file drops are rejected explicitly; open dialogs keep ownership of input.
+- Pin/unpin tabs from their context menu. Pins stay at the start of the strip, survive workspace reloads, and are protected from bulk close. Explicit close still works.
+- Recently closed lists the last ten closed requests for this session. Ctrl+Shift+T reopens the most recent, retaining request edits. Response data and background work are released when closing.
+- The tab strip supports wheel/trackpad scrolling, left/right scroll buttons, active-tab reveal, and the existing Tabs menu.

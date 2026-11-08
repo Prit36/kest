@@ -413,7 +413,9 @@ cui_doc_tabs_result kest_doc_tabs_ex(cui_ctx *ui, const char *key, const kest_do
     for (int k = 0; k < count; k++) native[k] = (cui_doc_tab){ .title = tabs[k].title, .icon = tabs[k].method, .tooltip = tabs[k].tooltip && strlen(tabs[k].tooltip) < 256 ? tabs[k].tooltip : NULL, .dirty = tabs[k].dirty };
     int first = ui->node_count;
     int drawn_selected = *selected;
-    cui_doc_tabs_result result = cui_doc_tabs_ex(ui, key, native, count, selected, NULL);
+    cui_doc_tabs_opts options = {0};
+    for (int k = 0; k < count; k++) if (tabs[k].editing) options.no_reorder = true;
+    cui_doc_tabs_result result = cui_doc_tabs_ex(ui, key, native, count, selected, &options);
     cui_id strip = cui_make_id(ui, key) ^ 0xD0C7u;
     cui_rect viewport = cui__prev_rect(ui, strip);
     float max_width = viewport.w > 0 ? CUI_MAX(KEST_DOCUMENT_TAB_MIN, CUI_MIN(KEST_DOCUMENT_TAB_MAX, viewport.w - 2 * KEST_SPACE_COMPACT)) : KEST_DOCUMENT_TAB_MAX;
@@ -432,6 +434,10 @@ cui_doc_tabs_result kest_doc_tabs_ex(cui_ctx *ui, const char *key, const kest_do
             cui_node *n = &ui->nodes[i];
             n->h = CUI_PX(KEST_CONTENT_TAB_HEIGHT);
             n->min_w = KEST_DOCUMENT_TAB_MIN; n->max_w = max_width; n->gap = KEST_SPACE_COMPACT;
+            if (tabs[k].editing) {
+                float width = viewport.w > 0 ? CUI_MIN(300, CUI_MAX(140, viewport.w - 8)) : 300;
+                n->w = CUI_PX(width); n->min_w = width; n->max_w = width;
+            }
             n->border = 0; n->radius = CUI_CORNERS(0);
             if (k == drawn_selected) {
                 kest_control_paint *p = CUI_PAINT_DATA(ui, kest_control_paint);
@@ -1112,3 +1118,81 @@ bool kest_pointer_over(cui_ctx *ui, cui_id id) {
     return ui->hot_layer == ui->current_layer && cui__rect_contains(cui__prev_rect(ui, id), ui->mx, ui->my);
 }
 bool kest_left_pressed(cui_ctx *ui) { return ui->mpressed[CUI_MOUSE_LEFT]; }
+
+void kest_documents_scroll(cui_ctx *ui, cui_id strip, float delta) {
+    cui_scroll_state *ss = cui_state(ui, strip, sizeof *ss);
+    ss->tx = CUI_CLAMP(ss->tx + delta, 0, CUI_MAX(0, ss->content_w - ss->view_w));
+    cui_request_redraw(ui);
+}
+
+/* Replace the actual name slot. Do not leave an empty label plus a second
+ * growable field competing for the same row's width. */
+static void replace_name(cui_ctx *ui, int parent, int label) {
+    if (parent < 0 || label < 0) return;
+    cui_node *p = &ui->nodes[parent];
+    int input = p->last, before_input = -1, before_label = -1;
+    for (int ch = p->first; ch >= 0; ch = ui->nodes[ch].next) {
+        if (ui->nodes[ch].next == input) before_input = ch;
+        if (ui->nodes[ch].next == label) before_label = ch;
+    }
+    if (input == label || before_input < 0) return;
+    ui->nodes[before_input].next = -1;
+    p->last = before_input;
+    int next = ui->nodes[label].next;
+    if (before_label >= 0) ui->nodes[before_label].next = input;
+    else p->first = input;
+    ui->nodes[input].next = next;
+    if (p->last == label) p->last = input;
+}
+void kest_collection_replace_name(cui_ctx *ui) {
+    replace_name(ui, cui__current(ui), collection_match_label);
+}
+void kest_rename_select_all(cui_ctx *ui, cui_id id, int length) {
+    if (ui->focus != id) return;
+    cui_edit_state *e = cui_state(ui, id, sizeof *e);
+    e->anchor = 0; e->cursor = length; e->scroll_x = 0;
+    e->selecting = false;
+    cui_request_redraw(ui);
+}
+int kest_rename_input(cui_ctx *ui, const char *key, char *buf, size_t cap, bool start, bool invalid) {
+    cui_id id = cui_make_id(ui, key);
+    if (start) { ui->focus = id; ui->tf_select_all = id; }
+    int first = ui->node_count;
+    cui_input_opts opts = {0};
+    opts.width = CUI_FILL;
+    opts.size = CUI_SIZE_SM;
+    ui->tf_override = true; ui->tf_font = CUI_FONT_BODY; ui->tf_size = KEST_TEXT_SECONDARY;
+    int result = cui__text_field(ui, id, buf, cap, &opts, false, 1, NULL);
+    cui_node *n = &ui->nodes[first];
+    n->h = CUI_PX(24); n->min_w = 24;
+    n->pad[1] = n->pad[3] = 4;
+    n->radius = CUI_CORNERS(3);
+    n->border = 1; n->border_color = invalid ? CUI_C(ui, DANGER) : CUI_C(ui, ACCENT);
+    n->bg = CUI_C(ui, SURFACE_RAISED);
+    if (start) kest_rename_select_all(ui, id, (int)strlen(buf));
+    kest_a11y_label_id(ui, id, KEST_A11Y_EDIT, "Rename. Enter to save, Escape to cancel", buf);
+    return result;
+}
+
+cui_vec2 kest_file_drop_position(cui_ctx *ui) { return (cui_vec2){ui->drop_x, ui->drop_y}; }
+
+static int rename_label = -1;
+bool kest_document_rename_begin(cui_ctx *ui, cui_id tab) {
+    rename_label = -1;
+    for (int i = 0; i < ui->node_count; i++) if (ui->nodes[i].id == tab) {
+        for (int ch = ui->nodes[i].first; ch >= 0; ch = ui->nodes[ch].next) {
+            cui_node *n = &ui->nodes[ch];
+            if (n->text && n->font != CUI_FONT_MONO && n->font != CUI_FONT_ICONS) rename_label = ch;
+        }
+        if (rename_label < 0) return false;
+        cui__open(ui, i);
+        return true;
+    }
+    return false;
+}
+void kest_document_rename_end(cui_ctx *ui) {
+    replace_name(ui, cui__current(ui), rename_label);
+    cui__close(ui);
+}
+
+void kest_consume_key(cui_ctx *ui, cui_key key) { ui->kpressed[key] = 0; }

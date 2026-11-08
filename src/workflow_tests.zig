@@ -135,9 +135,19 @@ fn dragChecks(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]co
         try check(@src(), t.link != null and std.mem.eql(u8, &t.link.?.request, &first.id));
     }
 
-    // Holding a drag near an edge scrolls a long tree (the shared self-test
-    // workspace holds over a thousand rows), and stops away from the edge.
+    // Build a long tree explicitly: scrolling must not depend on fixtures
+    // left on disk by previous self-test runs.
     {
+        const scrolling = tree.newCollection(app, "Autoscroll checks") orelse return error.AllocationFailed;
+        defer {
+            tree.deleteNode(app, scrolling);
+            tree.finishDelete(app);
+        }
+        for (0..100) |i| {
+            const n = try col.create(app.gpa, col.newId(app.io), .request, w.fmt("Scroll {d}", .{i}), "GET");
+            try col.append(app.gpa, scrolling, n);
+        }
+        app.rows_dirty = true;
         c.cui_set_viewport(ui, 1282, 520, 1);
         for (0..4) |_| frame(ui, app);
         const before = sidebar.treeScroll();

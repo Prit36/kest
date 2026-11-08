@@ -93,12 +93,26 @@ pub fn rowActionsShown(n: *const col.Node) bool {
 
 pub fn reveal(app: *App, node: *col.Node) void {
     app.filter.clear();
+    app.selection.clearRetainingCapacity();
+    app.selection_anchor = node;
     app.selected = node;
     var ancestor: ?*col.Node = node;
     while (ancestor) |n| : (ancestor = n.parent) n.expanded = true;
     app.rows_dirty = true;
     revealed_link = node.id;
     revealed_request = if (app.current()) |t| t.uid else 0;
+    reveal_pending = true;
+    scroll_pending = true;
+}
+
+/// Rename keeps the current search, but exposes the whole editing row.
+pub fn revealRename(app: *App, node: *col.Node) void {
+    app.selected = node;
+    app.selection.clearRetainingCapacity();
+    var ancestor = node.parent;
+    while (ancestor) |parent| : (ancestor = parent.parent) parent.expanded = true;
+    app.rows_dirty = true;
+    revealed_link = node.id;
     reveal_pending = true;
     scroll_pending = true;
 }
@@ -192,7 +206,7 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
         nodes[i] = .{ .parent = parent, .first_child = -1, .next_sibling = -1, .flags = 0 };
         if (r.node.children.items.len > 0) nodes[i].flags |= c.CUI_TREE_HAS_CHILDREN;
         if (r.node.expanded or app.filter.len > 0) nodes[i].flags |= c.CUI_TREE_OPEN;
-        if (app.selected == r.node) {
+        if (isSelected(app, r.node)) {
             nodes[i].flags |= c.CUI_TREE_SELECTED;
             cursor = @intCast(i);
         }
@@ -243,7 +257,7 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
     const down = c.cui_mouse_down(ui, c.CUI_MOUSE_LEFT);
     const pressed = down and !was_down;
     was_down = down;
-    const can_drag = app.filter.len == 0 and !app.modal_open and !app.palette_open and menu_owner == null;
+    const can_drag = app.filter.len == 0 and !app.modal_open and !app.palette_open and menu_owner == null and app.rename_action == null;
     // A drop is applied after the tree has synced its open/closed state for
     // this frame; moving earlier would let that sync close the target folder
     // the move just opened.
@@ -258,7 +272,7 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
         if (!dragging and !drag_cancelled) if (press) |p| {
             const near = @abs(mouse.x - p.x) <= drag_threshold and @abs(mouse.y - p.y) <= drag_threshold;
             const open = if (app.current()) |t| if (t.link) |link| std.mem.eql(u8, &link.request, &p.node.id) else false else false;
-            if (near and p.node.kind == .request and !open) {
+            if (near and c.cui_key_mods(ui) & (c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT) == 0 and p.node.kind == .request and !open) {
                 app.selected = p.node;
                 commands.openRequest(app, p.node);
             }
@@ -279,6 +293,8 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
     }
     drop = null;
     c.kest_collection_drop_clear();
+    const tree_id = c.cui_make_id(ui, "collection-rows");
+    var clicked: ?*col.Node = null;
     var shown_count: usize = 0;
     while (true) {
         const index = c.cui_tree_table_row(ui);
@@ -290,9 +306,14 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
         const match: ?usize = if (query.len > 0) std.ascii.findIgnoreCase(n.name, query) else null;
         c.kest_collection_name(ui, w.z(n.name), if (n.kind == .request) w.z(n.method) else null, icon, w.methodColor(n.method), if (match) |m| @intCast(m) else -1, if (match != null) @intCast(query.len) else 0);
         if (match != null and c.kest_collection_name_marked(ui)) highlighted += 1;
-        if (app.selected == n) c.kest_collection_row_selected(ui);
+        if (isSelected(app, n)) c.kest_collection_row_selected(ui);
+        if (app.rename_action) |action| if (action == .rename_node and action.rename_node == n) {
+            @import("rename.zig").field(ui, app, tree_id);
+            c.kest_collection_replace_name(ui);
+        };
         const rect = c.kest_collection_row_rect(ui);
         const over = rect.h > 0 and mouse.x >= rect.x and mouse.x < rect.x + rect.w and mouse.y >= rect.y and mouse.y < rect.y + rect.h;
+        if (over and pressed and app.rename_action == null and mouse.x < rect.x + rect.w - 34) clicked = n;
         // A press on the actions button opens its menu instead of dragging.
         if (over and pressed and can_drag and n.kind != .collection and mouse.x < rect.x + rect.w - 34)
             press = .{ .node = n, .x = mouse.x, .y = mouse.y };
@@ -341,13 +362,16 @@ fn collections(ui: *c.cui_ctx, app: *App) void {
             app.rows_dirty = true;
         }
     }
-    if (events.selection_changed and cursor >= 0) {
+    const modifiers = c.cui_key_mods(ui);
+    if (clicked) |n| select(app, n, modifiers & c.CUI_MOD_PRIMARY != 0, modifiers & c.CUI_MOD_SHIFT != 0);
+    if (app.rename_action == null and events.selection_changed and cursor >= 0 and clicked == null and modifiers & (c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT) == 0) {
+        select(app, rows[@intCast(cursor)].node, false, false);
         app.selected = rows[@intCast(cursor)].node;
         if (app.selected.?.kind == .request) commands.openRequest(app, app.selected.?);
     }
-    if (events.activated >= 0) commands.openRequest(app, rows[@intCast(events.activated)].node);
+    if (app.rename_action == null and events.activated >= 0 and modifiers & (c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT) == 0) commands.openRequest(app, rows[@intCast(events.activated)].node);
     if (pending_move) |m| {
-        tree.moveAt(app, m.node, m.drop.target, m.drop.index);
+        if (app.selection.items.len > 1 and isSelected(app, m.node)) moveSelection(app, m.drop.target) else tree.moveAt(app, m.node, m.drop.target, m.drop.index);
         app.rows_dirty = true;
     }
     if (app.rows_dirty) c.cui_request_redraw(ui);
@@ -359,9 +383,22 @@ fn collectionLabel(raw: ?*anyopaque, index: c_int) callconv(.c) [*c]const u8 {
 }
 
 fn nodeMenu(ui: *c.cui_ctx, app: *App, n: *col.Node) void {
+    if (app.selection.items.len > 1 and isSelected(app, n)) {
+        if (w.menuItem(ui, "Move selected to...")) {
+            app.move_node = n;
+            tree.collectTargets(app, n);
+            app.save_target = null;
+            app.modal = .move_to;
+            app.modal_open = true;
+        }
+        if (w.menuItem(ui, "Export selected Postman")) imports.exportSelection(app, .postman);
+        if (w.menuItem(ui, "Export selected Kest")) imports.exportSelection(app, .native);
+        if (c.cui_menu_item_ex(ui, "Delete selected", &.{ .danger = true })) deleteSelection(app);
+        return;
+    }
     if (w.menuItem(ui, "New request")) dialogs.askName(app, .{ .new_request = tree.containerOf(n) }, "");
     if (w.menuItem(ui, "New folder")) dialogs.askName(app, .{ .new_folder = tree.containerOf(n) }, "");
-    if (w.menuItem(ui, "Rename")) dialogs.askName(app, .{ .rename_node = n }, n.name);
+    if (w.menuItem(ui, "Rename")) @import("rename.zig").begin(app, .{ .rename_node = n }, n.name);
     if (w.menuItem(ui, "Description")) dialogs.askName(app, .{ .describe_node = n }, n.description);
     if (w.menuItem(ui, "Duplicate")) tree.duplicate(app, n);
     if (n.kind != .collection) {
@@ -377,7 +414,7 @@ fn nodeMenu(ui: *c.cui_ctx, app: *App, n: *col.Node) void {
     c.cui_menu_separator(ui);
     if (w.menuItem(ui, "Export Postman")) imports.exportCollection(app, n, .postman);
     if (w.menuItem(ui, "Export Kest")) imports.exportCollection(app, n, .native);
-    if (c.cui_menu_item_ex(ui, "Delete", &.{ .danger = true })) commands.confirm(app, .{ .delete_node = n }, "Delete permanently?", n.name, "Delete");
+    if (c.cui_menu_item_ex(ui, "Delete", &.{ .danger = true })) tree.deleteNode(app, n);
 }
 
 fn history(ui: *c.cui_ctx, app: *App) void {
@@ -475,22 +512,23 @@ fn environments(ui: *c.cui_ctx, app: *App) void {
         const clicked = c.kest_control_begin(ui, "environment-entry", e == app.active_env, -1, 44, 0);
         c.cui_icon(ui, c.CUI_ICON_DATABASE, 15, w.color(if (e == app.active_env) c.CUI_TOKEN_ACCENT else c.CUI_TOKEN_TEXT_MUTED));
         w.column(ui, .{ .width = w.fill, .gap = 2 });
-        w.text(ui, e.name, .{ .size = c.KEST_TEXT_SECONDARY, .font = if (e == app.active_env) c.CUI_FONT_MEDIUM else c.CUI_FONT_BODY, .nowrap = true, .width = w.fill });
+        const renaming = if (app.rename_action) |action| action == .rename_env and action.rename_env == e else false;
+        if (renaming) @import("rename.zig").field(ui, app, c.cui_make_id(ui, "environment-entry")) else w.text(ui, e.name, .{ .size = c.KEST_TEXT_SECONDARY, .font = if (e == app.active_env) c.CUI_FONT_MEDIUM else c.CUI_FONT_BODY, .nowrap = true, .width = w.fill });
         w.text(ui, w.fmt("{d} variable{s}", .{ e.table.rows.items.len, if (e.table.rows.items.len == 1) "" else "s" }), .{ .size = c.KEST_TEXT_CAPTION, .color = w.color(c.CUI_TOKEN_TEXT_MUTED) });
         w.end(ui);
         if (e == app.active_env) w.text(ui, "Active", .{ .size = c.KEST_TEXT_CAPTION, .font = c.CUI_FONT_MEDIUM, .nowrap = true, .color = w.color(c.CUI_TOKEN_SUCCESS) });
         c.kest_item_end(ui);
-        if (clicked) {
+        if (clicked and !renaming) {
             app.editing_env = e;
             app.modal = .environment;
             app.modal_open = true;
         }
         if (c.cui_context_menu_begin(ui, "environment-menu")) {
             if (w.menuItem(ui, "Use environment")) commands.setActiveEnv(app, e);
-            if (w.menuItem(ui, "Rename")) dialogs.askName(app, .{ .rename_env = e }, e.name);
+            if (w.menuItem(ui, "Rename")) @import("rename.zig").begin(app, .{ .rename_env = e }, e.name);
             if (w.menuItem(ui, "Export Postman")) imports.exportEnvironment(app, e, .postman);
             if (w.menuItem(ui, "Export Kest")) imports.exportEnvironment(app, e, .native);
-            if (w.menuItem(ui, "Delete")) commands.confirm(app, .{ .delete_env = e }, "Delete environment?", e.name, "Delete");
+            if (w.menuItem(ui, "Delete")) tree.deleteEnv(app, e);
             c.cui_context_menu_end(ui);
         }
         c.cui_pop_id(ui);
@@ -516,4 +554,58 @@ fn emptyState(ui: *c.cui_ctx, id: [*:0]const u8, title: []const u8) void {
 fn emptyEnd(ui: *c.cui_ctx) void {
     w.end(ui);
     c.cui_scroll_end(ui);
+}
+
+pub fn isSelected(app: *App, n: *col.Node) bool {
+    return std.mem.indexOfScalar(*col.Node, app.selection.items, n) != null or (app.selection.items.len == 0 and app.selected == n);
+}
+pub fn select(app: *App, n: *col.Node, ctrl: bool, shift: bool) void {
+    const rows = app.treeRows();
+    if (shift) {
+        var start: ?usize = null;
+        var end: ?usize = null;
+        for (rows, 0..) |r, i| {
+            if (r.node == app.selection_anchor) start = i;
+            if (r.node == n) end = i;
+        }
+        if (start != null and end != null) {
+            if (!ctrl) app.selection.clearRetainingCapacity();
+            for (rows[@min(start.?, end.?) .. @max(start.?, end.?) + 1]) |r| {
+                if (std.mem.indexOfScalar(*col.Node, app.selection.items, r.node) == null) app.selection.append(app.gpa, r.node) catch {};
+            }
+            app.selected = n;
+            return;
+        }
+    }
+    if (!ctrl) app.selection.clearRetainingCapacity();
+    if (std.mem.indexOfScalar(*col.Node, app.selection.items, n)) |i| {
+        _ = app.selection.orderedRemove(i);
+    } else app.selection.append(app.gpa, n) catch {};
+    app.selected = if (app.selection.items.len == 0) null else n;
+    app.selection_anchor = n;
+}
+/// Ancestors own their selected descendants, so bulk operations visit each once.
+pub fn selectionRoots(app: *App, a: std.mem.Allocator) []const *col.Node {
+    var list: std.ArrayList(*col.Node) = .empty;
+    for (app.selection.items) |n| {
+        var covered = false;
+        for (app.selection.items) |other| if (other != n and other.contains(n)) {
+            covered = true;
+            break;
+        };
+        if (!covered) list.append(a, n) catch {};
+    }
+    return list.items;
+}
+pub fn deleteSelection(app: *App) void {
+    const roots = selectionRoots(app, w.arena.allocator());
+    for (roots) |n| tree.deleteNode(app, n);
+}
+pub fn moveSelection(app: *App, target: *col.Node) void {
+    const roots = selectionRoots(app, w.arena.allocator());
+    for (roots) |n| if (n.kind == .collection or n.contains(target)) {
+        app.toast(.warning, "Can't move selection", "Choose a destination outside the selected folders; collections cannot be moved.");
+        return;
+    };
+    for (roots) |n| tree.moveTo(app, n, target);
 }

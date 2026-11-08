@@ -76,6 +76,7 @@ pub fn run(app: *App, test_mode: bool, snapshot: ?[]const u8, width: f32, height
         try @import("response_search_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
         try @import("workflow_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
         try @import("keyboard_tests.zig").run(ui, app, frame, chord, wait);
+        try @import("workspace_ux_tests.zig").run(ui, sw, app, frame, chord);
         try memoryLifecycle(app);
         try performance(ui, app);
     }

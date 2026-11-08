@@ -224,7 +224,9 @@ fn accept(app: *App, modal: state.Modal) void {
             }
         },
         .move_to => if (app.move_node) |n| {
-            if (app.save_target) |target| tree.moveTo(app, n, target);
+            if (app.save_target) |target| {
+                if (app.selection.items.len > 1) @import("sidebar.zig").moveSelection(app, target) else tree.moveTo(app, n, target);
+            }
         },
         else => {},
     }

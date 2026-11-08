@@ -48,6 +48,7 @@ pub fn activate(app: *App, i: usize) void {
 /// Move a document without changing which request owns the active state.
 pub fn moveTab(app: *App, from: usize, to: usize) void {
     if (from >= app.tabs.items.len or to >= app.tabs.items.len or from == to) return;
+    if (app.tabs.items[from].pinned != app.tabs.items[to].pinned) return;
     const active = app.current();
     const tab = app.tabs.orderedRemove(from);
     app.tabs.insertAssumeCapacity(to, tab);
@@ -68,6 +69,7 @@ fn unsaved(t: *const Tab) bool {
 /// Closes `t` unless closing would lose edits; returns false when it is kept.
 /// Bulk closes use this, so they never stack one confirmation per tab.
 pub fn closeIfSaved(app: *App, t: *Tab) bool {
+    if (t.pinned) return false;
     persist.flushTab(app, t, false);
     if (unsaved(t)) return false;
     closeNow(app, t);
@@ -118,8 +120,16 @@ pub fn closeNow(app: *App, t: *Tab) void {
         const ws = @import("../storage/workspace_store.zig");
         app.store.delete(ws.draftPath(&buf, &t.id));
     }
+    if (app.rename_action) |action| if (action == .rename_tab and action.rename_tab == t) {
+        app.rename_action = null;
+    };
+    t.response.deinit();
+    t.response = .init(app.gpa);
+    if (t.shown) |j| j.destroy();
+    t.shown = null;
     _ = app.tabs.orderedRemove(i);
-    t.destroy();
+    if (app.closed_tabs.items.len >= 10) app.closed_tabs.orderedRemove(0).destroy();
+    app.closed_tabs.append(app.gpa, t) catch t.destroy();
     if (app.active > i or app.active >= app.tabs.items.len) app.active -|= 1;
     persist.prefsChanged(app);
 }
@@ -492,4 +502,27 @@ pub fn formatBody(app: *App, t: *Tab, indent: usize) void {
             persist.touchTab(app, t);
         },
     }
+}
+
+/// Closed documents retain their edits for this session, bounded to ten tabs.
+pub fn reopenClosed(app: *App) void {
+    if (app.tabs.items.len >= tab_mod.max_open_tabs or app.closed_tabs.items.len == 0) return;
+    const t = app.closed_tabs.items[app.closed_tabs.items.len - 1];
+    app.tabs.append(app.gpa, t) catch return;
+    _ = app.closed_tabs.pop();
+    app.active = app.tabs.items.len - 1;
+    t.pinned = false;
+    if (t.link == null or t.dirty) persist.touchTab(app, t);
+    persist.prefsChanged(app);
+}
+pub fn togglePin(app: *App, t: *Tab) void {
+    const i = indexOfTab(app, t) orelse return;
+    const active = app.current();
+    _ = app.tabs.orderedRemove(i);
+    t.pinned = !t.pinned;
+    var at: usize = 0;
+    while (at < app.tabs.items.len and app.tabs.items[at].pinned) : (at += 1) {}
+    app.tabs.insertAssumeCapacity(at, t);
+    if (active) |a| app.active = indexOfTab(app, a).?;
+    persist.prefsChanged(app);
 }

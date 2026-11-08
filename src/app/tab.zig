@@ -259,6 +259,7 @@ pub const ResponseView = struct {
 };
 
 pub const Tab = struct {
+    pinned: bool = false,
     gpa: Allocator,
     /// Names its draft file, and its place in the UI's identity.
     id: col.Id,

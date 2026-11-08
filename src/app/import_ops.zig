@@ -29,13 +29,17 @@ pub fn chooseFile(app: *App) void {
         app.gpa.free(list);
     }
     if (list.len == 0) return;
-    const text = std.Io.Dir.cwd().readFileAlloc(app.io, list[0], app.gpa, .limited(max_import)) catch |e| {
+    importFile(app, list[0]);
+}
+
+pub fn importFile(app: *App, path: []const u8) void {
+    const text = std.Io.Dir.cwd().readFileAlloc(app.io, path, app.gpa, .limited(max_import)) catch |e| {
         var buf: [200]u8 = undefined;
         app.toast(.danger, "Couldn't read the file", std.fmt.bufPrint(&buf, "{s}", .{@errorName(e)}) catch "");
         return;
     };
     defer app.gpa.free(text);
-    previewText(app, text, std.fs.path.basename(list[0]));
+    previewText(app, text, std.fs.path.basename(path));
 }
 
 /// Works out what `text` is and opens the preview, or says why it can't.
@@ -253,4 +257,37 @@ fn safeName(a: Allocator, name: []const u8) []const u8 {
         b.* = '_';
     };
     return out;
+}
+
+pub fn exportSelection(app: *App, format: ExportFormat) void {
+    app.store.sync();
+    var ar = std.heap.ArenaAllocator.init(app.gpa);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var missing: std.ArrayList([]const u8) = .empty;
+    const d = selectionDocument(app, a, &missing) catch return;
+    const text = (switch (format) {
+        .postman => postman.exportCollection(a, d),
+        .native => native.write(a, d),
+    }) catch return;
+    if (saveToFile(app, "selection.json", text) and missing.items.len > 0) app.toast(.warning, "Incomplete export", "Some request files could not be read.");
+}
+
+/// A single export document for the selected forest, preserving folder names.
+pub fn selectionDocument(app: *App, a: Allocator, missing: *std.ArrayList([]const u8)) !doc.Doc {
+    var items: std.ArrayList(doc.Item) = .empty;
+    for (@import("../ui/sidebar.zig").selectionRoots(app, a)) |n| {
+        if (n.kind == .request) {
+            var request = cs.loadRequest(app.store, a, &n.root().id, &n.id) catch {
+                try missing.append(a, n.name);
+                continue;
+            };
+            request.name = n.name;
+            try items.append(a, .{ .name = n.name, .description = n.description, .request = request });
+        } else {
+            const children = try cs.toItems(app.store, a, &n.root().id, n, missing);
+            try items.append(a, .{ .name = n.name, .description = n.description, .children = children });
+        }
+    }
+    return .{ .name = "Selected requests", .items = items.items };
 }

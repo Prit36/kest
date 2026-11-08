@@ -71,7 +71,8 @@ fn documents(ui: *c.cui_ctx, app: *App) void {
     // on the following frame, and when the strip changes width.
     const strip = c.cui_make_id(ui, "request-documents") ^ 0xd0c7;
     const width = c.cui_get_rect(ui, strip).w;
-    if (app.current()) |t| {
+    const rename_tab = if (app.rename_action) |action| if (action == .rename_tab) action.rename_tab else null else null;
+    if (rename_tab orelse app.current()) |t| {
         c.cui_push_id(ui, "request-documents");
         const target = c.cui_make_id(ui, documentTitle(t));
         c.cui_pop_id(ui);
@@ -87,15 +88,18 @@ fn documents(ui: *c.cui_ctx, app: *App) void {
     var tabs: [@import("../app/tab.zig").max_open_tabs]c.kest_doc_tab = undefined;
     for (app.tabs.items, 0..) |t, i| tabs[i] = .{
         .title = documentTitle(t),
-        .label = w.z(t.name),
+        .label = if (t.pinned) w.fmt("[Pinned] {s}", .{t.name}) else w.z(t.name),
         .method = w.z(t.method.text()),
         .method_color = w.methodColor(t.method.text()),
         .tooltip = w.fmt("{s} {s}", .{ t.method.text(), t.name }),
         .dirty = t.dirty,
+        .editing = rename_tab == t,
     };
     w.row(ui, .{ .id = "document-row", .height = w.px(w.design.control.document_strip), .width = w.fill, .bg = w.color(c.CUI_TOKEN_BACKGROUND), .gap = 0, .clip = true });
+    if (w.icon(ui, c.CUI_ICON_CHEVRON_LEFT, "Scroll tabs left")) c.kest_documents_scroll(ui, strip, -180);
     var selected: c_int = @intCast(app.active);
     const result = c.kest_doc_tabs_ex(ui, "request-documents", &tabs, @intCast(app.tabs.items.len), &selected);
+    if (w.icon(ui, c.CUI_ICON_CHEVRON_RIGHT, "Scroll tabs right")) c.kest_documents_scroll(ui, strip, 180);
     // Close refers to the submitted order; capture the pointer before moving.
     const close = if (result.close >= 0) app.tabs.items[@intCast(result.close)] else null;
     if (result.move_from >= 0 and result.move_to >= 0) {
@@ -122,6 +126,22 @@ fn documents(ui: *c.cui_ctx, app: *App) void {
         c.kest_focus(ui, documentTitle(app.tabs.items[i]));
         c.cui_pop_id(ui);
     }
+    if (c.kest_dropdown_begin(ui, "Recently closed", &.{ .icon = c.CUI_ICON_ROTATE_CCW, .icon_only = true })) {
+        if (c.cui_menu_item_ex(ui, "Reopen closed tab", &.{ .shortcut = "Ctrl Shift T", .disabled = app.closed_tabs.items.len == 0 })) commands.reopenClosed(app);
+        var k = app.closed_tabs.items.len;
+        while (k > 0) {
+            k -= 1;
+            c.cui_push_id_int(ui, @intCast(k));
+            if (w.menuItem(ui, app.closed_tabs.items[k].name)) {
+                // Move the chosen entry to the end of the history stack.
+                const chosen_tab = app.closed_tabs.orderedRemove(k);
+                app.closed_tabs.appendAssumeCapacity(chosen_tab);
+                commands.reopenClosed(app);
+            }
+            c.cui_pop_id(ui);
+        }
+        c.cui_menu_end(ui);
+    }
     if (w.menu(ui, "Layout###workspace-layout", 96, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
         layoutMenu(ui, app);
         c.cui_menu_end(ui);
@@ -132,6 +152,14 @@ fn documents(ui: *c.cui_ctx, app: *App) void {
     }
     w.end(ui);
     w.separator(ui, "document-boundary");
+    if (app.rename_action) |action| if (action == .rename_tab) {
+        c.cui_push_id(ui, "request-documents");
+        defer c.cui_pop_id(ui);
+        if (c.kest_document_rename_begin(ui, c.cui_make_id(ui, documentTitle(action.rename_tab)))) {
+            @import("rename.zig").field(ui, app, c.cui_make_id(ui, documentTitle(action.rename_tab)));
+            c.kest_document_rename_end(ui);
+        }
+    };
     if (close) |t| commands.requestClose(app, t) else tabMenu(ui, app);
 }
 
@@ -202,7 +230,7 @@ fn layoutMenu(ui: *c.cui_ctx, app: *App) void {
 }
 
 fn actions(ui: *c.cui_ctx, app: *App, t: *Tab) void {
-    if (w.menuItem(ui, "Rename")) dialogs.askName(app, .{ .rename_tab = t }, t.name);
+    if (w.menuItem(ui, "Rename")) @import("rename.zig").begin(app, .{ .rename_tab = t }, t.name);
     if (c.cui_menu_item_ex(ui, "Save", &.{ .icon = c.CUI_ICON_SAVE, .shortcut = "Ctrl S" })) commands.save(app, t);
     if (w.menuItem(ui, "Save as...")) commands.beginSaveAs(app, t);
     if (c.cui_menu_item_ex(ui, "Duplicate", &.{ .icon = c.CUI_ICON_COPY, .shortcut = "Ctrl D" })) commands.duplicateTab(app, t);
@@ -249,6 +277,7 @@ fn tabMenu(ui: *c.cui_ctx, app: *App) void {
     const t = app.tabs.items[i];
     if (!c.kest_context_menu_begin(ui, "tab-menu", c.cui_make_id(ui, documentTitle(t)))) return;
     const count = app.tabs.items.len;
+    if (w.menuItem(ui, if (t.pinned) "Unpin tab" else "Pin tab")) commands.togglePin(app, t);
     var close: enum { none, this, others, right } = .none;
     if (c.cui_menu_item_ex(ui, "Close", &.{ .shortcut = "Ctrl W" })) close = .this;
     if (c.cui_menu_item_ex(ui, "Close others", &.{ .disabled = count < 2 })) close = .others;
@@ -256,7 +285,7 @@ fn tabMenu(ui: *c.cui_ctx, app: *App) void {
     c.cui_menu_separator(ui);
     if (c.cui_menu_item_ex(ui, "Save", &.{ .icon = c.CUI_ICON_SAVE, .shortcut = "Ctrl S" })) commands.save(app, t);
     if (c.cui_menu_item_ex(ui, "Duplicate", &.{ .icon = c.CUI_ICON_COPY, .shortcut = "Ctrl D" })) commands.duplicateTab(app, t);
-    if (w.menuItem(ui, "Rename")) dialogs.askName(app, .{ .rename_tab = t }, t.name);
+    if (w.menuItem(ui, "Rename")) @import("rename.zig").begin(app, .{ .rename_tab = t }, t.name);
     if (w.menuItem(ui, "Copy as cURL")) {
         if (t.toRequest(w.arena.allocator()) catch null) |req| w.copy(ui, @import("../import_export/curl.zig").generate(w.arena.allocator(), req) catch "");
     }
@@ -274,7 +303,7 @@ fn tabMenu(ui: *c.cui_ctx, app: *App) void {
             while (k > 0) {
                 k -= 1;
                 const other = app.tabs.items[k];
-                if (other == t or (close == .right and k <= i)) continue;
+                if (other.pinned or other == t or (close == .right and k <= i)) continue;
                 if (!commands.closeIfSaved(app, other)) kept += 1;
             }
             if (kept > 0) app.toast(.info, "Unsaved tabs kept open", w.fmt("{d} tab{s} with unsaved changes stayed open. Close {s} to save or discard the changes.", .{ kept, if (kept == 1) "" else "s", if (kept == 1) "it" else "them" }));

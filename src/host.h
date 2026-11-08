@@ -39,7 +39,7 @@ typedef struct kest_doc_tab {
     const char *title; /* Stable native identity, independent of user text. */
     const char *label, *method, *tooltip;
     cui_color method_color;
-    bool dirty;
+    bool dirty, editing;
 } kest_doc_tab;
 cui_doc_tabs_result kest_doc_tabs_ex(cui_ctx *ui, const char *id, const kest_doc_tab *tabs, int count, int *selected);
 bool kest_document_menu_item(cui_ctx *ui, const char *identity, const char *label, bool checked, const char *scroll);
@@ -112,3 +112,16 @@ bool kest_a11y_get_object(void *window, uintptr_t wp, intptr_t lp, intptr_t *res
 /* failure: 0 success, 1 invalid/unsupported, 2 resource limit, 3 allocation. */
 unsigned char *kest_image_decode(const unsigned char *bytes, int length, int *out_width, int *out_height, int *source_width, int *source_height, int *failure);
 void kest_image_free(unsigned char *rgba);
+
+void kest_documents_scroll(cui_ctx *ui, cui_id strip, float delta);
+
+void kest_collection_replace_name(cui_ctx *ui);
+int kest_rename_input(cui_ctx *ui, const char *key, char *buf, size_t cap, bool start, bool invalid);
+void kest_rename_select_all(cui_ctx *ui, cui_id id, int length);
+
+cui_vec2 kest_file_drop_position(cui_ctx *ui);
+
+bool kest_document_rename_begin(cui_ctx *ui, cui_id tab);
+void kest_document_rename_end(cui_ctx *ui);
+
+void kest_consume_key(cui_ctx *ui, cui_key key);

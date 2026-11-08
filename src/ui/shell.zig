@@ -81,7 +81,9 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
         app.focus_tree = false;
     };
     @import("design.zig").apply(ui, app.prefs.dark);
-    shortcuts(ui, app);
+    const renaming = @import("rename.zig").process(ui, app);
+    if (!renaming) shortcuts(ui, app);
+    droppedFiles(ui, app);
     const size = c.cui_viewport_size(ui);
     w.column(ui, .{ .width = w.fill, .height = w.fill, .bg = w.color(c.CUI_TOKEN_BACKGROUND) });
     topbar(ui, app, size.x);
@@ -116,6 +118,7 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
     dialogs.view(ui, app);
     palette(ui, app);
     app.toaster.view(ui);
+    deletionToast(ui, app);
     c.kest_quiet_caret(ui);
 }
 
@@ -180,6 +183,12 @@ fn settings(app: *App) void {
 fn shortcuts(ui: *c.cui_ctx, app: *App) void {
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT, c.CUI_KEY_P)) app.palette_open = true;
     if (app.modal_open or app.palette_open) return;
+    if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT, c.CUI_KEY_T)) commands.reopenClosed(app);
+    if (c.cui_key_pressed(ui, c.CUI_KEY_F2)) {
+        if (app.mode == .collections and (c.kest_get_focus(ui) == c.cui_make_id(ui, "collection-rows") or c.kest_focus_within(ui, "collection-rows"))) {
+            if (app.selected) |n| @import("rename.zig").begin(app, .{ .rename_node = n }, n.name);
+        } else if (app.current()) |t| @import("rename.zig").begin(app, .{ .rename_tab = t }, t.name);
+    }
     const request_submit = c.kest_request_shortcut(ui);
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_N)) _ = commands.newTab(app);
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_B)) {
@@ -345,4 +354,48 @@ pub fn followSystemAppearance(app: *App) void {
         1 => app.prefs.dark = true,
         else => {},
     }
+}
+
+var undo_handle: c_int = 0;
+var undo_deadline: i64 = 0;
+fn deletionToast(ui: *c.cui_ctx, app: *App) void {
+    const tree = @import("../app/tree_ops.zig");
+    if (app.deleted.items.len == 0 and app.deleted_envs.items.len == 0) return;
+    if (undo_deadline != app.undo_until) {
+        if (undo_handle != 0) c.cui_toast_dismiss(ui, undo_handle);
+        undo_handle = c.cui_toast_ex(ui, "Deleted from sidebar", &.{ .action = "Undo", .duration = 8, .show_timer = true });
+        undo_deadline = app.undo_until;
+    }
+    if (c.cui_toast_action_clicked(ui, undo_handle)) {
+        tree.undoDelete(app);
+        c.cui_toast_dismiss(ui, undo_handle);
+    } else if (app.nowMs() >= app.undo_until) tree.finishDelete(app);
+}
+fn droppedFiles(ui: *c.cui_ctx, app: *App) void {
+    const count = c.cui_dropped_file_count(ui);
+    if (count <= 0) return;
+    if (app.modal_open or app.palette_open) {
+        app.toast(.info, "File wasn't opened", "Finish the current dialog, then drop the file again.");
+        return;
+    }
+    if (count > 1) {
+        app.toast(.warning, "Drop one file at a time", "Import a collection or attach a single body file.");
+        return;
+    }
+    const path = std.mem.span(c.cui_dropped_file(ui, 0));
+    if (app.current()) |t| {
+        c.cui_push_id_int(ui, @intCast(t.uid));
+        const area = c.cui_get_rect(ui, c.cui_make_id(ui, "request-body-drop"));
+        c.cui_pop_id(ui);
+        const mouse = c.kest_file_drop_position(ui);
+        if (area.h > 0 and mouse.x >= area.x and mouse.x < area.x + area.w and mouse.y >= area.y and mouse.y < area.y + area.h) {
+            if (!t.file_path.reserve(path.len)) return;
+            t.file_path.set(path);
+            t.body_kind = .file;
+            persist.touchTab(app, t);
+            app.toast(.success, "Body file attached", std.fs.path.basename(path));
+            return;
+        }
+    }
+    imports.importFile(app, path);
 }

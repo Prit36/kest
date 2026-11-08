@@ -78,6 +78,7 @@ pub const NameAction = union(enum) {
     describe_node: *col.Node,
 };
 
+pub const Deleted = struct { node: *col.Node, parent: ?*col.Node, root: col.Id, index: usize };
 pub const App = struct {
     gpa: Allocator,
     io: Io,
@@ -104,6 +105,18 @@ pub const App = struct {
     rows: std.ArrayList(col.Row) = .empty,
     rows_dirty: bool = true,
     selected: ?*col.Node = null,
+    selection: std.ArrayList(*col.Node) = .empty,
+    selection_anchor: ?*col.Node = null,
+    deleted: std.ArrayList(Deleted) = .empty,
+    deleted_envs: std.ArrayList(struct { env: *Env, index: usize, active: bool }) = .empty,
+    undo_until: i64 = 0,
+    rename_action: ?NameAction = null,
+    rename_text: ui.TextBuffer = .{},
+    rename_session: u64 = 0,
+    rename_field: u32 = 0,
+    rename_owner: u32 = 0,
+    rename_started: bool = false,
+    rename_invalid: bool = false,
     envs: std.ArrayList(*Env) = .empty,
     active_env: ?*Env = null,
     /// The active environment's variables. `vars_arena` holds their strings.
@@ -116,6 +129,7 @@ pub const App = struct {
     log: log_mod.Log,
     activity: @import("../ui/activity.zig").Activity = .{},
     tabs: std.ArrayList(*Tab) = .empty,
+    closed_tabs: std.ArrayList(*Tab) = .empty,
     active: usize = 0,
     next_tab_uid: u64 = 1,
     prefs_dirty: bool = false,
@@ -207,6 +221,13 @@ pub const App = struct {
         a.uploads.deinit();
         for (a.tabs.items) |t| t.destroy();
         a.tabs.deinit(a.gpa);
+        for (a.closed_tabs.items) |t| t.destroy();
+        a.closed_tabs.deinit(a.gpa);
+        @import("tree_ops.zig").finishDelete(a);
+        a.deleted.deinit(a.gpa);
+        a.deleted_envs.deinit(a.gpa);
+        a.selection.deinit(a.gpa);
+        a.rename_text.deinit();
         for (a.done.items) |j| j.destroy();
         a.done.deinit(a.gpa);
         for (a.collections.items) |n| col.destroy(a.gpa, n);
