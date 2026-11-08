@@ -71,10 +71,23 @@ fn content(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) voi
                 return;
             }
             if (cls == .json) {
-                if (t.response.pretty_mode == .tree) {
-                    tree(ui, app, t, resp);
-                    return;
+                if (t.response.pretty_mode == .tree and !t.response.tree_failed) {
+                    const status = preparation.ensure(ui, app, t, .tree);
+                    if (status == .ready) {
+                        preparation.cancelRaw(&t.response);
+                        @import("json_view.zig").view(ui, app, t, &t.response.tree.?);
+                        return;
+                    }
+                    // Too many nodes to fold: formatted text from now on.
+                    if (status == .failed and t.response.preparation_failure == .node_limit) {
+                        t.response.tree_failed = true;
+                    } else {
+                        contentNotice(ui, preparation.message(&t.response));
+                        original(ui, app, t, resp, "tree-fallback", false, .plain);
+                        return;
+                    }
                 }
+                if (t.response.tree_failed and t.response.pretty_mode == .tree) contentNotice(ui, "JSON has more than 200,000 values, too many to fold. Showing formatted text.");
                 const status = preparation.ensure(ui, app, t, if (t.response.pretty_mode == .minified) .minified else .pretty);
                 if (status != .ready) {
                     contentNotice(ui, preparation.message(&t.response));
@@ -136,62 +149,6 @@ fn empty(ui: *c.cui_ctx, running: bool) void {
 
 fn hex(ui: *c.cui_ctx, resp: *response.Response) void {
     _ = c.cui_hex_view_ex(ui, "binary", resp.preview.items.ptr, resp.preview.items.len, null, &.{ .height = -1 });
-}
-
-fn tree(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) void {
-    const v = &t.response;
-    if (preparation.ensure(ui, app, t, .tree) != .ready) {
-        contentNotice(ui, preparation.message(v));
-        original(ui, app, t, resp, "tree-fallback", false, .plain);
-        return;
-    }
-    preparation.cancelRaw(v);
-    const tr = &v.tree.?;
-    var first: c_int = 0;
-    var last: c_int = 0;
-    c.cui_virtual_list_begin(ui, "json-rows", @intCast(tr.rows.items.len), 26, w.fill, &first, &last);
-    var toggle: ?u32 = null;
-    var subtree: ?struct { index: u32, collapsed: bool } = null;
-    var all: ?bool = null;
-    for (@as(usize, @intCast(first))..@as(usize, @intCast(last))) |i| {
-        const index = tr.rows.items[i];
-        const n = tr.nodes.items[index];
-        c.cui_push_id_int(ui, @intCast(index));
-        w.row(ui, .{ .id = "json-row", .height = w.px(26), .width = w.fill, .pad_left = 16 + @as(f32, @floatFromInt(@min(n.depth, 24))) * 16, .gap = 6 });
-        if (tr.isContainer(index)) {
-            if (w.icon(ui, if (tr.isCollapsed(index)) c.CUI_ICON_CHEVRON_RIGHT else c.CUI_ICON_CHEVRON_DOWN, "Expand or collapse")) toggle = index;
-        } else {
-            w.column(ui, .{ .width = w.px(28) });
-            w.end(ui);
-        }
-        const key = tr.key(index);
-        const val = tr.value(index);
-        if (key.len > 0) w.text(ui, w.fmt("{s}:", .{short(key)}), .{ .font = c.CUI_FONT_MONO, .size = c.KEST_TEXT_SECONDARY, .nowrap = true, .color = @import("design.zig").syntax(ui, .key) });
-        w.text(ui, short(val), .{ .font = c.CUI_FONT_MONO, .size = c.KEST_TEXT_SECONDARY, .nowrap = true, .width = w.fill, .color = if (n.kind == .string) @import("design.zig").syntax(ui, .string) else if (n.kind == .number) @import("design.zig").syntax(ui, .number) else w.color(c.CUI_TOKEN_FOREGROUND) });
-        w.end(ui);
-        // The whole row answers a right-click, not only its text.
-        if (c.kest_context_menu_begin(ui, "json-menu", c.cui_make_id(ui, "json-row"))) {
-            const container = tr.isContainer(index);
-            if (w.menuItem(ui, "Copy value")) w.copy(ui, tr.sourceOf(index));
-            if (key.len >= 2 and w.menuItem(ui, "Copy key")) w.copy(ui, key[1 .. key.len - 1]);
-            if (w.menuItem(ui, "Copy path")) w.copy(ui, tr.path(w.arena.allocator(), index) catch "");
-            if (container) {
-                c.cui_menu_separator(ui);
-                if (w.menuItem(ui, "Expand children")) subtree = .{ .index = index, .collapsed = false };
-                if (w.menuItem(ui, "Collapse children")) subtree = .{ .index = index, .collapsed = true };
-            }
-            c.cui_menu_separator(ui);
-            if (w.menuItem(ui, "Expand all")) all = false;
-            if (w.menuItem(ui, "Collapse all")) all = true;
-            c.cui_context_menu_end(ui);
-        }
-        c.cui_pop_id(ui);
-    }
-    c.cui_virtual_list_end(ui);
-    // Rows change only after the list is built from them.
-    if (toggle) |index| tr.toggle(app.gpa, index) catch {};
-    if (subtree) |change| tr.setSubtree(app.gpa, change.index, change.collapsed) catch {};
-    if (all) |collapsed| tr.setAll(app.gpa, collapsed) catch {};
 }
 
 fn preview(ui: *c.cui_ctx, app: *App, t: *tab.Tab, resp: *response.Response) void {
@@ -256,7 +213,7 @@ pub fn wanted(t: *const tab.Tab, resp: *const response.Response) ?prep.Kind {
     const cls = resp.class();
     if (t.response.pane == .raw and cls != .binary and cls != .image and resp.preview.items.len > prep.inline_limit) return .raw;
     if (t.response.pane == .pretty and resp.class() == .json) return switch (t.response.pretty_mode) {
-        .tree => .tree,
+        .tree => if (t.response.tree_failed) .pretty else .tree,
         .text => .pretty,
         .minified => .minified,
     };
@@ -268,11 +225,6 @@ pub fn wanted(t: *const tab.Tab, resp: *const response.Response) ?prep.Kind {
     };
     if (t.response.pane == .pretty and cls != .binary and cls != .image and resp.preview.items.len > prep.inline_limit) return .raw;
     return null;
-}
-fn short(value: []const u8) []const u8 {
-    var end = @min(1000, value.len);
-    while (end > 0 and end < value.len and value[end] & 0xc0 == 0x80) end -= 1;
-    return value[0..end];
 }
 pub fn save(app: *App, resp: *response.Response) void {
     // Suggest an extension matching the received content; bytes are unchanged.

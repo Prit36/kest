@@ -275,7 +275,7 @@ pub fn run(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]const
     try settle(ui, app, frame);
     find.open(t);
     try settle(ui, app, frame);
-    try check(@src(), t.response.pane == .pretty and t.response.pretty_mode == .text and std.mem.eql(u8, pretty.query.text(), "needle"));
+    try check(@src(), t.response.pane == .pretty and t.response.pretty_mode == .tree and t.response.json.find_open);
     // Ctrl+F in an editable body stays scoped to that body, with a response shown.
     pretty.search_open = false;
     t.pane = .body;

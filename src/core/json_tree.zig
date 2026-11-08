@@ -13,7 +13,8 @@ pub const Node = struct {
     key_len: u32 = 0,
     val_off: u32 = 0,
     val_len: u32 = 0,
-    /// Nodes inside this container, its closing node included.
+    /// Nodes inside this container, its closing node included. A closing
+    /// node keeps its container's number of children in `key_len`.
     skip: u32 = 0,
     depth: u16 = 0,
     kind: Kind = .null_,
@@ -34,6 +35,16 @@ pub const Tree = struct {
     collapsed: std.DynamicBitSetUnmanaged = .{},
     /// Node indices shown, in order; `refresh` rebuilds it.
     rows: std.ArrayList(u32) = .empty,
+    /// The deepest container's depth.
+    max_depth: u16 = 0,
+    /// The nodes a search found, in document order.
+    hits: std.ArrayList(u32) = .empty,
+    /// One bit per node: a search found it.
+    hit_set: std.DynamicBitSetUnmanaged = .{},
+    /// One bit per node: a container holding a hit.
+    around: std.DynamicBitSetUnmanaged = .{},
+    /// Rows are only the hits and the containers around them, held open.
+    filtered: bool = false,
 
     /// Fails with `TooLarge` past `max_nodes`: the caller shows plain text.
     pub fn build(a: Allocator, text: []const u8, max_nodes: usize) Error!Tree {
@@ -45,6 +56,8 @@ pub const Tree = struct {
         try t.nodes.ensureTotalCapacity(a, @min(max_nodes, text.len / 12 + 16));
         var open: std.ArrayList(u32) = .empty;
         defer open.deinit(a);
+        var children: std.ArrayList(u32) = .empty;
+        defer children.deinit(a);
         var i: usize = 0;
         var pending: ?json.Token = null;
         while (true) {
@@ -65,13 +78,17 @@ pub const Tree = struct {
             }
             if (t.nodes.items.len >= max_nodes) return error.TooLarge;
             const depth: u16 = @intCast(open.items.len);
+            const closing = tok.kind == .rbrace or tok.kind == .rbracket;
+            if (!closing and children.items.len > 0) children.items[children.items.len - 1] += 1;
             switch (tok.kind) {
                 .rbrace, .rbracket => {
                     const start = open.pop().?;
                     t.nodes.items[start].skip = @intCast(t.nodes.items.len - start);
-                    try t.nodes.append(a, .{ .kind = .close, .depth = depth - 1, .val_off = @intCast(tok.start), .val_len = 1 });
+                    try t.nodes.append(a, .{ .kind = .close, .depth = depth - 1, .val_off = @intCast(tok.start), .val_len = 1, .key_len = children.pop().? });
                 },
                 .lbrace, .lbracket => {
+                    t.max_depth = @max(t.max_depth, depth);
+                    try children.append(a, 0);
                     try open.append(a, @intCast(t.nodes.items.len));
                     try t.nodes.append(a, withKey(.{ .kind = if (tok.kind == .lbrace) .object else .array, .depth = depth, .val_off = @intCast(tok.start), .val_len = 1 }, pending));
                     pending = null;
@@ -89,6 +106,8 @@ pub const Tree = struct {
             }
         }
         t.collapsed = try .initEmpty(a, t.nodes.items.len);
+        t.hit_set = try .initEmpty(a, t.nodes.items.len);
+        t.around = try .initEmpty(a, t.nodes.items.len);
         try t.refresh(a);
         return t;
     }
@@ -106,6 +125,9 @@ pub const Tree = struct {
         t.nodes.deinit(a);
         t.collapsed.deinit(a);
         t.rows.deinit(a);
+        t.hits.deinit(a);
+        t.hit_set.deinit(a);
+        t.around.deinit(a);
     }
 
     pub fn isContainer(t: *const Tree, i: u32) bool {
@@ -117,20 +139,50 @@ pub const Tree = struct {
         return t.collapsed.isSet(i);
     }
 
+    /// Container `i` shows its children: it's open, or a filter holds it.
+    pub fn isOpen(t: *const Tree, i: u32) bool {
+        return t.isContainer(i) and (t.isHeld(i) or !t.collapsed.isSet(i));
+    }
+
+    /// A filter holds container `i` open, around a hit.
+    pub fn isHeld(t: *const Tree, i: u32) bool {
+        return t.filtered and t.around.isSet(i);
+    }
+
     pub fn refresh(t: *Tree, a: Allocator) !void {
         t.rows.clearRetainingCapacity();
         var i: u32 = 0;
         const n: u32 = @intCast(t.nodes.items.len);
+        // Inside a hit, rows follow the usual rules up to its closing node.
+        var plain_to: ?u32 = null;
         while (i < n) {
-            try t.rows.append(a, i);
-            // Past a collapsed container and its closing node.
-            if (t.isContainer(i) and t.collapsed.isSet(i)) i += t.nodes.items[i].skip;
+            if (plain_to) |end| if (i > end) {
+                plain_to = null;
+            };
+            const node = t.nodes.items[i];
+            if (!t.filtered or plain_to != null) {
+                try t.rows.append(a, i);
+                // Past a collapsed container and its closing node.
+                if (t.isContainer(i) and t.collapsed.isSet(i)) i += node.skip;
+            } else if (node.kind == .close or t.around.isSet(i)) {
+                // Held open, showing only what leads to hits.
+                try t.rows.append(a, i);
+            } else if (t.hit_set.isSet(i)) {
+                try t.rows.append(a, i);
+                if (t.isContainer(i)) {
+                    if (t.collapsed.isSet(i)) i += node.skip else plain_to = i + node.skip;
+                }
+            } else if (t.isContainer(i)) i += node.skip;
             i += 1;
         }
     }
 
     pub fn toggle(t: *Tree, a: Allocator, i: u32) !void {
-        if (!t.isContainer(i)) return;
+        if (!t.isContainer(i) or t.isHeld(i)) return;
+        if (t.filtered) {
+            t.collapsed.toggle(i);
+            return t.refresh(a);
+        }
         const row = t.rowOf(i) orelse {
             t.collapsed.toggle(i);
             return;
@@ -167,11 +219,106 @@ pub const Tree = struct {
 
     /// Collapses everything below the root, or opens everything.
     pub fn setAll(t: *Tree, a: Allocator, collapsed: bool) !void {
-        t.collapsed.unsetAll();
-        if (collapsed) for (t.nodes.items, 0..) |n, i| {
-            if ((n.kind == .object or n.kind == .array) and n.depth >= 1) t.collapsed.set(i);
-        };
+        try t.setLevel(a, if (collapsed) 1 else std.math.maxInt(u16));
+    }
+
+    /// Opens containers less than `level` deep and collapses the rest: at
+    /// level 1 only the root's children show.
+    pub fn setLevel(t: *Tree, a: Allocator, level: u16) !void {
+        for (t.nodes.items, 0..) |n, i| {
+            if (n.kind == .object or n.kind == .array) t.collapsed.setValue(i, n.depth >= level);
+        }
         try t.refresh(a);
+    }
+
+    /// Shows only the hits and the containers around them, or everything.
+    pub fn setFiltered(t: *Tree, a: Allocator, on: bool) !void {
+        t.filtered = on;
+        try t.refresh(a);
+    }
+
+    /// Replaces the hits (any order, repeats allowed), and the rows when
+    /// filtering.
+    pub fn setHits(t: *Tree, a: Allocator, found: []const u32) !void {
+        t.hit_set.unsetAll();
+        t.around.unsetAll();
+        for (found) |i| t.hit_set.set(i);
+        t.hits.clearRetainingCapacity();
+        var it = t.hit_set.iterator(.{});
+        while (it.next()) |i| try t.hits.append(a, @intCast(i));
+        // One walk: the containers open on the way to a hit hold it.
+        var open: std.ArrayList(u32) = .empty;
+        defer open.deinit(a);
+        var i: u32 = 0;
+        const n: u32 = @intCast(t.nodes.items.len);
+        while (i < n) : (i += 1) {
+            if (t.nodes.items[i].kind == .close) {
+                _ = open.pop();
+                continue;
+            }
+            if (t.hit_set.isSet(i)) {
+                var k = open.items.len;
+                while (k > 0) {
+                    k -= 1;
+                    if (t.around.isSet(open.items[k])) break;
+                    t.around.set(open.items[k]);
+                }
+            }
+            if (t.isContainer(i)) try open.append(a, i);
+        }
+        if (t.filtered) try t.refresh(a);
+    }
+
+    /// Nodes with `query` in their key or value: inside the quotes for
+    /// strings, as written for numbers, booleans and null.
+    pub fn findText(t: *const Tree, a: Allocator, query: []const u8, case_sensitive: bool) ![]u32 {
+        var found: std.ArrayList(u32) = .empty;
+        errdefer found.deinit(a);
+        if (query.len == 0) return found.toOwnedSlice(a);
+        for (t.nodes.items, 0..) |n, at| {
+            const i: u32 = @intCast(at);
+            if (n.kind == .close) continue;
+            if (locate(t.innerKey(i), query, case_sensitive) != null or locate(t.innerValue(i), query, case_sensitive) != null) try found.append(a, i);
+        }
+        return found.toOwnedSlice(a);
+    }
+
+    /// A key without its quotes.
+    pub fn innerKey(t: *const Tree, i: u32) []const u8 {
+        const k = t.key(i);
+        return if (k.len >= 2) k[1 .. k.len - 1] else k;
+    }
+
+    /// A scalar as written, without a string's quotes; empty for containers.
+    pub fn innerValue(t: *const Tree, i: u32) []const u8 {
+        if (t.isContainer(i) or t.nodes.items[i].kind == .close) return "";
+        const v = t.value(i);
+        return if (t.nodes.items[i].kind == .string and v.len >= 2) v[1 .. v.len - 1] else v;
+    }
+
+    /// The container node `i` is in, or null for the root.
+    pub fn parentOf(t: *const Tree, i: u32) ?u32 {
+        const depth = t.nodes.items[i].depth;
+        if (depth == 0) return null;
+        var j = i;
+        while (j > 0) {
+            j -= 1;
+            const n = t.nodes.items[j];
+            if (n.depth == depth - 1 and n.kind != .close) return j;
+        }
+        return null;
+    }
+
+    /// The first child of container `i`; then `nextSibling` gives each
+    /// next one, and null after the last.
+    pub fn firstChild(t: *const Tree, i: u32) ?u32 {
+        if (!t.isContainer(i) or t.nodes.items[i + 1].kind == .close) return null;
+        return i + 1;
+    }
+    pub fn nextSibling(t: *const Tree, i: u32) ?u32 {
+        const next = i + (if (t.isContainer(i)) t.nodes.items[i].skip else 0) + 1;
+        if (next >= t.nodes.items.len or t.nodes.items[next].kind == .close) return null;
+        return next;
     }
 
     /// Opens the containers around node `i`, so it's shown.
@@ -204,6 +351,7 @@ pub const Tree = struct {
 
     pub fn key(t: *const Tree, i: u32) []const u8 {
         const n = t.nodes.items[i];
+        if (n.kind == .close) return "";
         return t.text[n.key_off..][0..n.key_len];
     }
 
@@ -268,18 +416,73 @@ pub const Tree = struct {
 
     /// How many direct children a container has.
     pub fn childCount(t: *const Tree, i: u32) usize {
-        const n = t.nodes.items[i];
-        var j = i + 1;
-        const end = i + n.skip;
-        var count: usize = 0;
-        while (j < end) {
-            count += 1;
-            if (t.isContainer(j)) j += t.nodes.items[j].skip;
-            j += 1;
-        }
-        return count;
+        return t.nodes.items[i + t.nodes.items[i].skip].key_len;
+    }
+
+    /// A string's text without quotes or escapes; anything else as written,
+    /// a container as its whole source.
+    pub fn plainValue(t: *const Tree, a: Allocator, i: u32) ![]const u8 {
+        if (t.nodes.items[i].kind != .string) return t.sourceOf(i);
+        return unescape(a, t.value(i));
     }
 };
+
+/// A JSON string literal's text: quotes removed, escapes decoded. A lone
+/// surrogate becomes U+FFFD.
+pub fn unescape(a: Allocator, literal: []const u8) ![]const u8 {
+    const inner = if (literal.len >= 2 and literal[0] == '"') literal[1 .. literal.len - 1] else literal;
+    if (std.mem.indexOfScalar(u8, inner, '\\') == null) return inner;
+    var out: std.ArrayList(u8) = try .initCapacity(a, inner.len);
+    errdefer out.deinit(a);
+    var i: usize = 0;
+    while (i < inner.len) {
+        const ch = inner[i];
+        if (ch != '\\' or i + 1 >= inner.len) {
+            try out.append(a, ch);
+            i += 1;
+            continue;
+        }
+        const e = inner[i + 1];
+        i += 2;
+        switch (e) {
+            'n' => try out.append(a, '\n'),
+            't' => try out.append(a, '\t'),
+            'r' => try out.append(a, '\r'),
+            'b' => try out.append(a, 8),
+            'f' => try out.append(a, 12),
+            'u' => {
+                var cp: u21 = hex4(inner, i) orelse {
+                    try out.appendSlice(a, "\\u");
+                    continue;
+                };
+                i += 4;
+                if (cp >= 0xD800 and cp < 0xDC00 and i + 6 <= inner.len and inner[i] == '\\' and inner[i + 1] == 'u') {
+                    if (hex4(inner, i + 2)) |low| if (low >= 0xDC00 and low < 0xE000) {
+                        cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                        i += 6;
+                    };
+                }
+                if (cp >= 0xD800 and cp < 0xE000) cp = 0xFFFD;
+                var buf: [4]u8 = undefined;
+                const len = std.unicode.utf8Encode(cp, &buf) catch 0;
+                try out.appendSlice(a, buf[0..len]);
+            },
+            else => try out.append(a, e),
+        }
+    }
+    return out.toOwnedSlice(a);
+}
+
+fn hex4(s: []const u8, at: usize) ?u21 {
+    if (at + 4 > s.len) return null;
+    return std.fmt.parseInt(u21, s[at..][0..4], 16) catch null;
+}
+
+/// Where `query` is in `text`, if it is.
+pub fn locate(text: []const u8, query: []const u8, case_sensitive: bool) ?usize {
+    if (query.len == 0) return null;
+    return if (case_sensitive) std.mem.indexOf(u8, text, query) else std.ascii.findIgnoreCase(text, query);
+}
 
 const testing = std.testing;
 const doc = "{\"a\":1,\"b\":[true,{\"c\":null}],\"d\":\"x\",\"e\":{}}";
@@ -348,6 +551,63 @@ test "subtree expand and collapse leave the rest alone" {
     try t.setSubtree(a, 2, true);
     try testing.expect(!t.isCollapsed(2) and t.isCollapsed(4));
     try testing.expectEqual(@as(usize, 9), t.rows.items.len);
+}
+
+test "child counts, depth and levels" {
+    const a = testing.allocator;
+    var t = try Tree.build(a, doc, 1000);
+    defer t.deinit(a);
+    try testing.expectEqual(@as(usize, 4), t.childCount(0));
+    try testing.expectEqual(@as(usize, 1), t.childCount(4));
+    try testing.expectEqual(@as(usize, 0), t.childCount(9));
+    try testing.expectEqual(@as(u16, 2), t.max_depth);
+    try testing.expectEqualStrings("", t.key(7));
+    try t.setLevel(a, 2);
+    try testing.expect(!t.isCollapsed(0) and !t.isCollapsed(2) and t.isCollapsed(4));
+    try t.setLevel(a, 0);
+    try testing.expectEqual(@as(usize, 1), t.rows.items.len);
+    try testing.expectEqual(@as(?u32, 2), t.parentOf(4));
+    try testing.expectEqual(@as(?u32, null), t.parentOf(0));
+    try testing.expectEqual(@as(?u32, 2), t.nextSibling(1));
+    try testing.expectEqual(@as(?u32, null), t.nextSibling(9));
+    try testing.expectEqual(@as(?u32, null), t.firstChild(9));
+}
+
+test "search finds keys and values, and filtering shows them with their containers" {
+    const a = testing.allocator;
+    var t = try Tree.build(a, doc, 1000);
+    defer t.deinit(a);
+    const found = try t.findText(a, "C", false);
+    defer a.free(found);
+    // The key "c" and nothing else; quotes don't match.
+    try testing.expectEqualSlices(u32, &.{5}, found);
+    const none = try t.findText(a, "\"", false);
+    defer a.free(none);
+    try testing.expectEqual(@as(usize, 0), none.len);
+    try t.setAll(a, true);
+    try t.setHits(a, found);
+    try t.setFiltered(a, true);
+    // { b [ { c } ] }: the containers around the hit are held open.
+    try testing.expectEqualSlices(u32, &.{ 0, 2, 4, 5, 6, 7, 11 }, t.rows.items);
+    try testing.expect(t.isOpen(4) and t.isHeld(4));
+    // A hit container shows as usual inside.
+    try t.setHits(a, &.{2});
+    try testing.expectEqualSlices(u32, &.{ 0, 2, 11 }, t.rows.items);
+    try t.toggle(a, 2);
+    try testing.expectEqualSlices(u32, &.{ 0, 2, 3, 4, 7, 11 }, t.rows.items);
+    try t.setFiltered(a, false);
+    try testing.expectEqual(@as(usize, 9), t.rows.items.len);
+}
+
+test "plain values unescape strings" {
+    const a = testing.allocator;
+    var t = try Tree.build(a, "[\"a\\n\\u00e9\\ud83d\\ude00\\\"\",1,{}]", 100);
+    defer t.deinit(a);
+    const text = try t.plainValue(a, 1);
+    defer a.free(text);
+    try testing.expectEqualStrings("a\n\u{e9}\u{1f600}\"", text);
+    try testing.expectEqualStrings("1", try t.plainValue(a, 2));
+    try testing.expectEqualStrings("{}", try t.plainValue(a, 3));
 }
 
 test "limits and bad input" {

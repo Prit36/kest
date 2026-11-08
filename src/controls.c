@@ -1099,3 +1099,16 @@ bool kest_right_pressed(cui_ctx *ui, cui_id id) {
     if (ui->hot == id) return true;
     return ui->hot_layer == ui->current_layer && cui__rect_contains(cui__prev_rect(ui, id), ui->mx, ui->my);
 }
+
+/* How many clicks the latest press continues: 2 for a double-click. */
+int kest_click_count(cui_ctx *ui) { return ui->click_count; }
+/* Another frame after `seconds`, for a delayed hover card. */
+void kest_wake_after(cui_ctx *ui, float seconds) { cui__wakeup_after(ui, seconds); }
+/* The pointer is over `id` (the control, or its last rect in the layer
+ * under the mouse) and the left button went down this frame. */
+bool kest_pointer_over(cui_ctx *ui, cui_id id) {
+    if (!id) return false;
+    if (ui->hot == id) return true;
+    return ui->hot_layer == ui->current_layer && cui__rect_contains(cui__prev_rect(ui, id), ui->mx, ui->my);
+}
+bool kest_left_pressed(cui_ctx *ui) { return ui->mpressed[CUI_MOUSE_LEFT]; }

@@ -207,7 +207,7 @@ pub fn run(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]const
     try fixture(app, t, "application/json", nodes);
     t.response.pretty_mode = .tree;
     try settle(ui, app, frame);
-    try check(@src(), t.response.preparation_failure == .node_limit and t.response.tree == null);
+    try check(@src(), t.response.tree_failed and t.response.tree == null and t.response.formatted != null);
     try capture(ui, app, sw, snapshot, "tree-limit");
     try app.response_preparation.group.await(app.io);
     const many_rows = try app.gpa.alloc(u8, (prep.max_rows + 1) * 2);

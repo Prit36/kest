@@ -525,10 +525,10 @@ fn memoryLifecycle(app: *App) !void {
     view.code_raw.research(text);
     try expect(@src(), view.code_raw.matches.items.len == 1);
     view.code_raw.scroll_y = 100;
-    try view.tree_hits.append(app.gpa, 1);
+    view.json.toggleString(app.gpa, 1, 8);
     view.reset();
     try expect(@src(), view.code_raw.index.starts.capacity == 0 and view.code_raw.index.lines.capacity == 0);
-    try expect(@src(), view.code_raw.matches.capacity == 0 and view.tree_hits.capacity == 0);
+    try expect(@src(), view.code_raw.matches.capacity == 0 and view.json.open_strings.capacity == 0);
     try expect(@src(), view.code_raw.scroll_y == 0);
     // Search caching tracks its own source rather than the rendered index.
     var source = [_]u8{ 'a', 'b', 'a' };

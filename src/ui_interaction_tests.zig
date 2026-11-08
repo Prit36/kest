@@ -230,9 +230,31 @@ pub fn response(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime cli
     try expect(@src(), t.response.pane == .headers);
     try tap(@src(), ui, app, rect(ui, t.uid, "response-body"), click);
     try tap(@src(), ui, app, rect(ui, t.uid, "###response-format"), click);
-    try tap(@src(), ui, app, menuRect(ui, t.uid, "###response-format", "JSON tree"), click);
+    try tap(@src(), ui, app, menuRect(ui, t.uid, "###response-format", "Formatted JSON"), click);
     try @import("response_test_support.zig").settle(ui, app, frame);
     try expect(@src(), t.response.pretty_mode == .tree and t.response.tree != null);
+    const canvas = rect(ui, t.uid, "json-rows");
+    try tap(@src(), ui, app, canvas, click);
+    jsonKey(ui, app, frame, c.CUI_KEY_HOME);
+    try expect(@src(), t.response.json.selected == 0);
+    jsonKey(ui, app, frame, c.CUI_KEY_LEFT);
+    try expect(@src(), !t.response.tree.?.isOpen(0));
+    jsonKey(ui, app, frame, c.CUI_KEY_ENTER);
+    try expect(@src(), t.response.tree.?.isOpen(0));
+    jsonKey(ui, app, frame, c.CUI_KEY_DOWN);
+    try expect(@src(), t.response.json.selected != 0);
+    jsonKey(ui, app, frame, c.CUI_KEY_UP);
+    try expect(@src(), t.response.json.selected == 0);
+    @import("ui/json_view.zig").openFind(&t.response.json);
+    frame(ui, app);
+    c.cui_input_text(ui, "$");
+    frame(ui, app);
+    try expect(@src(), t.response.tree.?.hits.items.len == 1);
+    try tap(@src(), ui, app, rect(ui, t.uid, "json-find-filter"), click);
+    try expect(@src(), t.response.tree.?.filtered);
+    try tap(@src(), ui, app, rect(ui, t.uid, "json-find-close"), click);
+    try expect(@src(), !t.response.json.find_open and !t.response.tree.?.filtered);
+
     try tap(@src(), ui, app, rect(ui, t.uid, "###response-format"), click);
     try tap(@src(), ui, app, menuRect(ui, t.uid, "###response-format", "Minified JSON"), click);
     try @import("response_test_support.zig").settle(ui, app, frame);
@@ -242,7 +264,7 @@ pub fn response(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime cli
     try expect(@src(), t.response.pane == .raw and rect(ui, t.uid, "raw-view").h > 50);
     try tap(@src(), ui, app, rect(ui, t.uid, "###response-format"), click);
     try tap(@src(), ui, app, menuRect(ui, t.uid, "###response-format", "Formatted JSON"), click);
-    try expect(@src(), t.response.pane == .pretty and t.response.pretty_mode == .text);
+    try expect(@src(), t.response.pane == .pretty and t.response.pretty_mode == .tree);
     std.debug.print("CUI response controls: header table, JSON tree/minified/raw/formatted menu selections passed\n", .{});
 }
 
@@ -283,4 +305,11 @@ fn activity(ui: *c.cui_ctx, app: *App, comptime frame: anytype, comptime click: 
     frame(ui, app);
     try expect(@src(), app.activity.buffer.count == 1);
     std.debug.print("CUI activity: bounded ring, redacted adapter, search, clear and hidden/reopen passed\n", .{});
+}
+
+fn jsonKey(ui: *c.cui_ctx, app: *App, comptime frame: anytype, key: c.cui_key) void {
+    c.cui_input_key(ui, key, true, 0);
+    frame(ui, app);
+    c.cui_input_key(ui, key, false, 0);
+    frame(ui, app);
 }

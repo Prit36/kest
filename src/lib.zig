@@ -7,6 +7,7 @@ pub const key_value_text = @import("core/key_value_text.zig");
 pub const environment = @import("core/environment.zig");
 pub const variables = @import("core/variables.zig");
 pub const json_tree = @import("core/json_tree.zig");
+pub const json_path = @import("core/json_path.zig");
 pub const collection = @import("core/collection.zig");
 pub const history = @import("core/history.zig");
 pub const json = @import("utils/json.zig");

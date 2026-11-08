@@ -116,6 +116,14 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
                 app.history_dirty = true;
                 persist.prefsChanged(app);
             }
+            w.column(ui, .{ .width = w.fill, .gap = 4 });
+            w.text(ui, "Open JSON responses", .{ .size = c.KEST_TEXT_SECONDARY, .font = c.CUI_FONT_MEDIUM });
+            var depth: c_int = @min(app.prefs.json_depth, 3);
+            if (w.select(ui, "json-depth", &.{ "Fully expanded", "To level 1", "To level 2", "To level 3" }, &depth, w.fill)) {
+                app.prefs.json_depth = @intCast(depth);
+                persist.prefsChanged(app);
+            }
+            w.end(ui);
         },
         .none => {},
     }

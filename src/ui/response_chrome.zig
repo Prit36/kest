@@ -72,9 +72,9 @@ fn previewSupported(r: *const Response) bool {
 fn formatLabel(t: *const tab.Tab, r: *const Response) []const u8 {
     if (t.response.pane == .raw) return if (r.class() == .binary or r.class() == .image) "Hex" else "Raw";
     if (r.class() == .json) return switch (t.response.pretty_mode) {
-        .tree => "Tree",
+        .tree => "JSON",
         .minified => "Minified",
-        .text => "JSON",
+        .text => "Text",
     };
     return if (r.class() == .binary or r.class() == .image) "Hex" else if (r.class() == .html) "HTML" else if (r.class() == .xml) "XML" else "Text";
 }
@@ -83,7 +83,7 @@ fn item(ui: *c.cui_ctx, label: [*:0]const u8, opts: c.cui_menu_item_opts, scroll
 }
 fn formatItems(ui: *c.cui_ctx, t: *tab.Tab, r: *const Response, scrolling: bool) void {
     if (r.class() == .json) {
-        inline for (.{ .{ "Formatted JSON", tab.PrettyMode.text }, .{ "JSON tree", tab.PrettyMode.tree }, .{ "Minified JSON", tab.PrettyMode.minified } }) |choice| {
+        inline for (.{ .{ "Formatted JSON", tab.PrettyMode.tree }, .{ "Formatted text", tab.PrettyMode.text }, .{ "Minified JSON", tab.PrettyMode.minified } }) |choice| {
             if (item(ui, choice[0], .{ .checked = t.response.pane == .pretty and t.response.pretty_mode == choice[1] }, scrolling)) {
                 body(t, .pretty);
                 t.response.pretty_mode = choice[1];
@@ -188,10 +188,13 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
                 }
                 if (resp.headers.items.len > 0 and item(ui, if (@import("../core/header_text.zig").clipboardSafe(resp.raw_headers)) "Copy response headers" else "Copy escaped response headers", .{}, true)) @import("response_headers.zig").copyAll(ui, resp);
                 if (item(ui, if (resp.spill_failed) "Save available response..." else "Save response...", .{}, true)) @import("response.zig").save(app, resp);
-                if (resp.class() == .json and t.response.pane == .pretty and t.response.pretty_mode == .tree and t.response.tree != null) {
-                    if (item(ui, "Expand all", .{}, true)) if (t.response.tree) |*tr| tr.setAll(app.gpa, false) catch {};
-                    if (item(ui, "Collapse all", .{}, true)) if (t.response.tree) |*tr| tr.setAll(app.gpa, true) catch {};
-                }
+                if (resp.class() == .json and t.response.pane == .pretty and t.response.pretty_mode == .tree) if (t.response.tree) |*tr| {
+                    c.cui_menu_separator(ui);
+                    if (item(ui, "Expand all", .{ .shortcut = "Alt 0" }, true)) tr.setAll(app.gpa, false) catch {};
+                    if (item(ui, "Collapse all", .{ .shortcut = "Alt 1" }, true)) tr.setAll(app.gpa, true) catch {};
+                    if (tr.max_depth >= 2 and item(ui, "Expand to level 2", .{ .shortcut = "Alt 2" }, true)) tr.setLevel(app.gpa, 2) catch {};
+                    if (tr.max_depth >= 3 and item(ui, "Expand to level 3", .{ .shortcut = "Alt 3" }, true)) tr.setLevel(app.gpa, 3) catch {};
+                };
             };
             c.cui_menu_separator(ui);
             if (item(ui, if (t.running()) "Clear previous response" else "Clear response", .{}, true)) clear = true;

@@ -16,7 +16,14 @@ pub fn open(t: *Tab) void {
     const v = &t.response;
     if (v.pane == .headers) v.pane = v.body_pane;
     if (v.pane == .preview and cls != .html) v.pane = .raw;
-    if (v.pane == .pretty and cls == .json and v.pretty_mode == .tree) v.pretty_mode = .text;
+    if (v.pane == .pretty and cls == .json and v.pretty_mode == .tree) {
+        // The JSON viewer has its own search, unless it couldn't be built.
+        if (!v.tree_failed and v.preparation_failure == null) {
+            @import("json_view.zig").openFind(&v.json);
+            return;
+        }
+        v.pretty_mode = .text;
+    }
     if (v.pane == .raw or v.pane == .pretty) v.body_pane = v.pane;
     const s = if (v.pane == .raw) &v.code_raw else &v.code_pretty;
     s.search_open = true;

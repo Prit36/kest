@@ -102,7 +102,7 @@ file. Cancelling a picker preserves the draft. Paths can use environment
 variables, and missing/unreadable files have actionable feedback.
 Wide windows put request and response side by side. Smaller windows stack them;
 the Layout menu also offers an explicit choice. Responses open as formatted code,
-with JSON tree/raw/minified modes in the format menu and headers in a table.
+with folding JSON, text/raw/minified modes in the format menu and headers in a table.
 The response header adapts to panel width; overflow keeps formats and utilities
 available. Click the status for duration, byte counts, URL and execution details.
 A new send keeps a useful previous response visible with a clear Previous
@@ -125,10 +125,19 @@ reading positions. Large wrap/resize work runs in the background and never edits
 response bytes.
 Find in response searches the current text view. Enter/F3 advances, Shift moves
 back, and Escape returns focus to the document. Aa toggles case matching. Find
-opens formatted text from a JSON tree and Raw text from a Markdown preview;
+searches the JSON tree directly and opens Raw text from a Markdown preview;
 HTML text previews search their displayed text. Counts include all available
 text, with navigation beyond the bounded match cache. Response and editable-body
 Find commands follow the focused editor.
+Formatted JSON folds in place, with key/item counts on collapsed containers.
+Click a value to select it; double-click a long string or use its ?more? chip to
+show the full value inline. Hover over a shortened string for a preview.
+Up/Down move between values, Left/Right collapse or expand, and Enter toggles.
+Ctrl+C copies the selected value; Ctrl+Shift+C copies its JSONPath. Alt+1 through
+Alt+9 expand to that level; Alt+0 expands all. Settings ? Responses controls the
+default depth. Ctrl+F accepts text or JSONPath (for example `$.users[?(@.active == true)]`);
+the filter button shows matching values with their containing objects.
+
 CUI's document tabs support dragging and Shift+Left/Right to reorder a focused tab;
 arrows and Home/End switch focused tabs, and Ctrl+Tab cycles requests. The Tabs
 menu lists complete request names in a scrolling list. Method labels, dirty dots

@@ -182,7 +182,7 @@ pub const ResponseView = struct {
     inspected_header: ?usize = null,
     header_name_offset: usize = 0,
     header_value_offset: usize = 0,
-    pretty_mode: PrettyMode = .text,
+    pretty_mode: PrettyMode = .tree,
     tree: ?json_tree.Tree = null,
     /// Tree couldn't be built (not JSON, or partial): says why.
     tree_failed: bool = false,
@@ -198,14 +198,8 @@ pub const ResponseView = struct {
     wrap_response: bool = false,
     code_pretty: code.State,
     code_raw: code.State,
-    query: ui.TextBuffer = .{},
-    /// The tree's matching nodes.
-    tree_hits: std.ArrayList(u32) = .empty,
-    tree_hit_at: usize = 0,
-    tree_scroll_to: ?usize = null,
-    menu_open: bool = false,
-    menu_anchor: ?ui.Rect = null,
-    menu_node: u32 = 0,
+    /// The JSON viewer's selection, scroll and search.
+    json: @import("../ui/json_state.zig").State = .{},
 
     pub fn init(gpa: Allocator) ResponseView {
         return .{ .gpa = gpa, .code_pretty = .init(gpa), .code_raw = .init(gpa) };
@@ -247,8 +241,7 @@ pub const ResponseView = struct {
         if (v.stripped_owner) |owner| owner.release() else if (v.stripped) |h| v.gpa.free(h);
         v.stripped_owner = null;
         v.stripped = null;
-        v.tree_hits.clearAndFree(v.gpa);
-        v.tree_hit_at = 0;
+        v.json.reset(v.gpa);
         // Row indexes and search results can dwarf the response itself. A
         // cleared response must also release these derived buffers and scroll.
         v.code_pretty.deinit();
@@ -261,8 +254,7 @@ pub const ResponseView = struct {
         v.reset();
         v.code_pretty.deinit();
         v.code_raw.deinit();
-        v.query.deinit();
-        v.tree_hits.deinit(v.gpa);
+        v.json.deinit(v.gpa);
     }
 };
 
