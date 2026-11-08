@@ -111,6 +111,11 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
     const wrap_at: usize = if (s.word_wrap and previous.w > 0) @intFromFloat(@max(4, @floor((previous.w - gutter0 - code_gap - 16) / char_w))) else @import("../utils/lines.zig").default_wrap;
     index(s, source, wrap_at);
     const focused = c.kest_editor_focus(ui, identity) != 0;
+    // Escape drops a text drag; the release that follows does nothing.
+    if (s.move_drag != .none and c.cui_key_pressed(ui, c.CUI_KEY_ESCAPE)) {
+        s.move_drag = .cancelled;
+        c.kest_consume_key(ui, c.CUI_KEY_ESCAPE);
+    }
     if (focused) {
         if (!read_only and c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_M)) s.tab_moves_focus = !s.tab_moves_focus;
         c.kest_editor_tabs(ui, identity, @intFromBool(!read_only and !s.tab_moves_focus));
@@ -141,7 +146,11 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
         s.marked = null;
         s.marked_version = 0;
     }
-    s.scroll_y = @max(0, s.scroll_y - c.kest_editor_scroll(ui, identity) * line_h * 3);
+    s.glide.push(s.scroll_y, -c.kest_editor_scroll(ui, identity) * line_h * 3);
+    if (s.glide.target != null) {
+        const total: f32 = @floatFromInt(s.index.count() * line_h);
+        s.glide.step(ui, &s.scroll_y, if (previous.h > 0) total - @max(1, previous.h - 16) else total);
+    }
     const gutter = gutterWidth(ui, if (s.index.count() > 0) s.index.lineNumber(s.index.count() - 1) else 1);
     const paint = Paint{ .state = s, .source = source, .lang = lang, .focused = focused, .char_w = char_w, .gutter = gutter };
     const result = c.cui_canvas(ui, id, w.fill, w.fill, draw, &paint, @sizeOf(Paint));
@@ -149,11 +158,52 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
     c.kest_editor_register(ui, identity);
     c.kest_editor_tabs(ui, identity, @intFromBool(!read_only and !s.tab_moves_focus));
     if (result.pressed and rect.w > 0) if (hit(ui, s, source, rect, gutter, char_w)) |pos| {
-        s.moveTo(pos, c.cui_key_mods(ui) & c.CUI_MOD_SHIFT != 0 or s.selecting);
-        s.selecting = true;
+        pointer(ui, s, source, pos, read_only);
     };
-    if (!c.cui_mouse_down(ui, c.CUI_MOUSE_LEFT)) s.selecting = false;
+    if (!c.cui_mouse_down(ui, c.CUI_MOUSE_LEFT)) {
+        switch (s.move_drag) {
+            .moving => s.moveSelection(s.drop_at, c.cui_key_mods(ui) & c.CUI_MOD_PRIMARY != 0),
+            // A click inside the selection that never moved places the caret.
+            .pending => s.moveTo(s.drop_at, false),
+            .none, .cancelled => {},
+        }
+        s.move_drag = .none;
+        s.selecting = false;
+    }
     return v0 != s.version;
+}
+
+/// The left button is down over the text at `pos`. A press starts a
+/// selection, by words or lines after a double or triple click; a press
+/// inside the selection may instead drag it somewhere else.
+fn pointer(ui: *c.cui_ctx, s: *State, source: []const u8, pos: usize, read_only: bool) void {
+    const mouse = c.cui_mouse_pos(ui);
+    if (!s.selecting and s.move_drag == .none) {
+        const range = s.selection();
+        const clicks = c.kest_click_count(ui);
+        const shift = c.cui_key_mods(ui) & c.CUI_MOD_SHIFT != 0;
+        if (!read_only and clicks <= 1 and !shift and range[1] > range[0] and pos >= range[0] and pos < range[1]) {
+            s.move_drag = .pending;
+            s.press_x = mouse.x;
+            s.press_y = mouse.y;
+            s.drop_at = pos;
+            return;
+        }
+        s.pressAt(source, pos, clicks, shift);
+        s.selecting = true;
+        return;
+    }
+    switch (s.move_drag) {
+        .pending => {
+            s.drop_at = pos;
+            const dx = mouse.x - s.press_x;
+            const dy = mouse.y - s.press_y;
+            if (dx * dx + dy * dy > 16) s.move_drag = .moving;
+        },
+        .moving => s.drop_at = pos,
+        .cancelled => {},
+        .none => s.dragTo(source, pos),
+    }
 }
 
 /// The byte under the mouse in the editor's rectangle.
@@ -253,6 +303,7 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     const total: f32 = @floatFromInt(s.index.count() * line_h);
     s.scroll_y = std.math.clamp(s.scroll_y, 0, @max(0, total - visible));
     if (s.reveal) {
+        s.glide.stop();
         const caret_row: f32 = @floatFromInt(s.index.rowOf(@min(s.caret, p.source.len)) * line_h);
         if (caret_row < s.scroll_y) s.scroll_y = caret_row;
         if (caret_row + line_h > s.scroll_y + visible) s.scroll_y = caret_row + line_h - visible;
@@ -319,6 +370,10 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
             at = token_end;
         }
         segment(ui, char_w, x, y, entire_row, at, col_hi, w.color(c.CUI_TOKEN_FOREGROUND));
+        if (s.move_drag == .moving and (s.drop_at < s.selection()[0] or s.drop_at > s.selection()[1]) and s.drop_at >= bounds[0] and s.drop_at <= bounds[1] and (s.drop_at < bounds[1] or i + 1 == s.index.count() or s.index.bounds(p.source, i + 1)[0] > s.drop_at)) {
+            const drop_x = x + advance(ui, entire_row[0..@min(s.drop_at - bounds[0], entire_row.len)], char_w);
+            c.cui_draw_line(ui, .{ .x = drop_x, .y = y }, .{ .x = drop_x, .y = y + 17 }, 2, w.color(c.CUI_TOKEN_TEXT_SECONDARY));
+        }
         if (p.focused and i == active_row) {
             const caret_x = x + advance(ui, entire_row[0..@min(s.caret -| bounds[0], entire_row.len)], char_w);
             c.cui_draw_line(ui, .{ .x = caret_x, .y = y }, .{ .x = caret_x, .y = y + 17 }, 1.5, w.color(c.CUI_TOKEN_ACCENT));

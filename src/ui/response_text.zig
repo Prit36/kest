@@ -125,8 +125,17 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, id: [*:0]const u8, s: *State, so
     var menu_ctx: MenuContext = .{ .app = app, .t = t };
     _ = editor.contextMenu(ui, id, s, source, true, .{ .ctx = &menu_ctx, .items = menuItems });
     const wheel = c.kest_editor_scroll_axes(ui, identity);
-    s.scroll_y = @max(0, s.scroll_y - wheel.y * line_h * 3);
-    s.precise_x = @max(0, s.precise_x - @as(f64, wheel.x) * char_w * 3);
+    s.glide.push(s.scroll_y, -wheel.y * line_h * 3);
+    var x: f32 = @floatCast(s.precise_x);
+    s.glide_x.push(x, -wheel.x * char_w * 3);
+    if (previous.w > 0 and (s.glide.target != null or s.glide_x.target != null)) {
+        const bars = scrollbars(s, previous, gutter);
+        s.glide.step(ui, &s.scroll_y, bars.max_y);
+        if (s.glide_x.target != null) {
+            s.glide_x.step(ui, &x, @floatCast(bars.max_x));
+            s.precise_x = x;
+        }
+    }
     const paint: Paint = .{ .state = s, .source = source, .lang = lang, .focused = focused, .gutter = gutter };
     const result = c.cui_canvas(ui, id, w.fill, w.fill, draw, &paint, @sizeOf(Paint));
     c.kest_editor_register(ui, identity);
@@ -314,9 +323,12 @@ fn pointer(ui: *c.cui_ctx, s: *State, source: []const u8, rect: c.cui_rect, gutt
         } else if (inside(rect, mouse)) {
             s.selecting = true;
             const row = @min(s.index.count() - 1, @as(usize, @intFromFloat(@max(0, @floor((mouse.y - rect.y - 8 + s.scroll_y) / line_h)))));
-            s.moveTo(s.geometry.?.byteAt(&s.index, source, row, @max(0, mouse.x - rect.x - gutter - gap + s.precise_x), metrics(ui)), c.cui_key_mods(ui) & c.CUI_MOD_SHIFT != 0);
+            s.pressAt(source, s.geometry.?.byteAt(&s.index, source, row, @max(0, mouse.x - rect.x - gutter - gap + s.precise_x), metrics(ui)), c.kest_click_count(ui), c.cui_key_mods(ui) & c.CUI_MOD_SHIFT != 0);
+            s.precise_goal = null;
             return;
         }
+        s.glide.stop();
+        s.glide_x.stop();
     }
     switch (s.scroll_drag) {
         .horizontal => s.precise_x = std.math.clamp((mouse.x - bars.horizontal.x - s.drag_offset) / @max(1, bars.horizontal.w - bars.hthumb.w), 0, 1) * bars.max_x,
@@ -327,7 +339,8 @@ fn pointer(ui: *c.cui_ctx, s: *State, source: []const u8, rect: c.cui_rect, gutt
             if (mouse.x < rect.x + gutter + gap) s.precise_x = @max(0, s.precise_x - 24);
             if (mouse.x > rect.x + rect.w - bar) s.precise_x += 24;
             const row = @min(s.index.count() - 1, @as(usize, @intFromFloat(@max(0, @floor((mouse.y - rect.y - 8 + s.scroll_y) / line_h)))));
-            s.moveTo(s.geometry.?.byteAt(&s.index, source, row, @max(0, mouse.x - rect.x - gutter - gap + s.precise_x), metrics(ui)), true);
+            s.dragTo(source, s.geometry.?.byteAt(&s.index, source, row, @max(0, mouse.x - rect.x - gutter - gap + s.precise_x), metrics(ui)));
+            s.precise_goal = null;
         },
     }
 }
@@ -339,6 +352,8 @@ fn draw(raw_ui: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     const geometry = &s.geometry.?;
     var bars = scrollbars(s, rect, p.gutter);
     if (s.reveal) {
+        s.glide.stop();
+        s.glide_x.stop();
         const row = s.index.rowOf(s.caret);
         const y: f32 = @floatFromInt(row * line_h);
         if (y < s.scroll_y) s.scroll_y = y;

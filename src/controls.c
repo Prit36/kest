@@ -1110,6 +1110,9 @@ bool kest_right_pressed(cui_ctx *ui, cui_id id) {
 int kest_click_count(cui_ctx *ui) { return ui->click_count; }
 /* Another frame after `seconds`, for a delayed hover card. */
 void kest_wake_after(cui_ctx *ui, float seconds) { cui__wakeup_after(ui, seconds); }
+/* Eases `x` toward `target` and keeps frames coming until it arrives;
+ * immediate when reduced motion is on. */
+float kest_tween(cui_ctx *ui, float *x, float target, float duration) { return cui__tween(ui, x, target, duration); }
 /* The pointer is over `id` (the control, or its last rect in the layer
  * under the mouse) and the left button went down this frame. */
 bool kest_pointer_over(cui_ctx *ui, cui_id id) {

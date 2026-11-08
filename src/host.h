@@ -61,6 +61,7 @@ bool kest_context_menu_begin(cui_ctx *ui, const char *key, cui_id anchor);
 bool kest_right_pressed(cui_ctx *ui, cui_id id);
 int kest_click_count(cui_ctx *ui);
 void kest_wake_after(cui_ctx *ui, float seconds);
+float kest_tween(cui_ctx *ui, float *x, float target, float duration);
 bool kest_pointer_over(cui_ctx *ui, cui_id id);
 bool kest_left_pressed(cui_ctx *ui);
 bool kest_table_details_begin(cui_ctx *ui, const char *id);

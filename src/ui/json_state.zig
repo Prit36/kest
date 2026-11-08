@@ -33,6 +33,8 @@ pub const State = struct {
     hover: ?u32 = null,
     hover_since: f64 = 0,
     dragging: bool = false,
+    /// Wheel scrolling on its way.
+    glide: @import("glide.zig").Glide = .{},
     drag_offset: f32 = 0,
 
     /// Forgets what belonged to the last response; the search text,
@@ -51,6 +53,7 @@ pub const State = struct {
         s.path.clearAndFree(gpa);
         s.hover = null;
         s.dragging = false;
+        s.glide.stop();
     }
 
     pub fn deinit(s: *State, gpa: Allocator) void {

@@ -536,7 +536,7 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, tr: *Tree) void {
     }
     if (focused and !s.dragging) keys(ui, app, tr, s, before, PartsOf{ .ui = ui, .g = before, .tr = tr, .s = s });
     const wheel = c.kest_editor_scroll_axes(ui, identity);
-    s.scroll_y -= wheel.y * line_h * 3;
+    s.glide.push(s.scroll_y, -wheel.y * line_h * 3);
     // A selection out of sight, maybe inside collapsed containers.
     if (s.reveal) if (s.selected) |node| if (tr.rowOf(node) == null and !tr.filtered) tr.reveal(app.gpa, node) catch {};
     var g = geometry(ui, tr, s, prev, cw);
@@ -548,7 +548,10 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, tr: *Tree) void {
             if (bottom + pad_y > s.scroll_y + prev.h and prev.h > 0) s.scroll_y = @min(top - pad_y, bottom + pad_y - prev.h);
         };
         s.reveal = false;
+        s.glide.stop();
     }
+    if (s.dragging) s.glide.stop();
+    s.glide.step(ui, &s.scroll_y, g.maxScroll());
     s.scroll_y = std.math.clamp(s.scroll_y, 0, g.maxScroll());
     g.scroll_y = s.scroll_y;
     const card = hoverCard(ui, tr, s, target, over, mouse);

@@ -65,6 +65,19 @@ pub const State = struct {
     /// Show this byte at the next frame (a search result).
     reveal_at: ?usize = null,
     selecting: bool = false,
+    /// What a drag selects by: characters, or whole words or lines after a
+    /// double or triple click. `unit_range` is what the click selected.
+    unit: Unit = .char,
+    unit_range: [2]usize = .{ 0, 0 },
+    /// Dragging the selection to move it: pressed inside it, then moved.
+    move_drag: enum { none, pending, moving, cancelled } = .none,
+    press_x: f32 = 0,
+    press_y: f32 = 0,
+    /// Where the dragged text would land.
+    drop_at: usize = 0,
+    /// Wheel scrolling on its way.
+    glide: @import("glide.zig").Glide = .{},
+    glide_x: @import("glide.zig").Glide = .{},
     /// Where Up and Down aim, as a byte column.
     goal_col: ?usize = null,
     /// Raw body editor preferences; these never change request bytes.
@@ -305,6 +318,73 @@ pub const State = struct {
         s.precise_goal = null;
     }
 
+    /// A press at `pos` after `clicks` clicks: one places the caret (Shift
+    /// extends), two select the word, three the line. Dragging afterwards
+    /// grows the selection by the same unit.
+    pub fn pressAt(s: *State, from: []const u8, pos: usize, clicks: c_int, extend: bool) void {
+        s.unit = switch (clicks) {
+            0, 1 => .char,
+            2 => .word,
+            else => .line,
+        };
+        if (s.unit == .char) {
+            s.moveTo(pos, extend);
+            return;
+        }
+        s.unit_range = unitRange(from, pos, s.unit);
+        s.moveTo(s.unit_range[1], false);
+        s.anchor = s.unit_range[0];
+    }
+
+    /// The pointer dragged to `pos` with the button held.
+    pub fn dragTo(s: *State, from: []const u8, pos: usize) void {
+        if (s.unit == .char) return s.moveTo(pos, true);
+        const r = unitRange(from, pos, s.unit);
+        if (r[0] < s.unit_range[0]) {
+            s.moveTo(r[0], false);
+            s.anchor = s.unit_range[1];
+        } else {
+            s.moveTo(@max(r[1], s.unit_range[1]), false);
+            s.anchor = s.unit_range[0];
+        }
+    }
+
+    /// Moves the selected text to `to`, or copies it there, as one edit
+    /// that undo takes back. The moved text stays selected.
+    pub fn moveSelection(s: *State, to_in: usize, copy: bool) void {
+        const from = s.text();
+        const r = s.selection();
+        const to = @min(to_in, from.len);
+        if (r[1] <= r[0] or (to >= r[0] and to <= r[1])) return;
+        const piece = from[r[0]..r[1]];
+        var out: std.ArrayList(u8) = .empty;
+        defer out.deinit(s.gpa);
+        const version = s.version;
+        var start: usize = undefined;
+        if (copy) {
+            start = to;
+            out.appendSlice(s.gpa, piece) catch return;
+            s.change(to, to, out.items, false);
+        } else if (to < r[0]) {
+            start = to;
+            out.appendSlice(s.gpa, piece) catch return;
+            out.appendSlice(s.gpa, from[to..r[0]]) catch return;
+            s.change(to, r[1], out.items, false);
+        } else {
+            start = to - piece.len;
+            out.appendSlice(s.gpa, from[r[1]..to]) catch return;
+            out.appendSlice(s.gpa, piece) catch return;
+            s.change(r[0], to, out.items, false);
+        }
+        if (version == s.version) return;
+        s.anchor = start;
+        s.caret = start + piece.len;
+        if (s.undo.items.len > 0) {
+            s.undo.items[s.undo.items.len - 1].caret_after = s.caret;
+            s.undo.items[s.undo.items.len - 1].anchor_after = s.anchor;
+        }
+    }
+
     /// Runs one editing command against `from`, which is the buffer unless
     /// read-only. Returns whether the text changed.
     pub fn command(s: *State, cmd: ui.Command, from: []const u8, read_only: bool) bool {
@@ -499,6 +579,24 @@ pub fn lineEnd(s: []const u8, i: usize) usize {
 
 fn lineEndRaw(s: []const u8, i: usize) usize {
     return std.mem.indexOfScalarPos(u8, s, @min(i, s.len), '\n') orelse s.len;
+}
+
+pub const Unit = enum { char, word, line };
+
+/// The word or line at `pos`; off a word, the character there.
+pub fn unitRange(s: []const u8, pos: usize, unit: Unit) [2]usize {
+    switch (unit) {
+        .char => return .{ pos, pos },
+        .word => {
+            const r = wordAt(s, pos);
+            if (r[1] > r[0]) return r;
+            return .{ @min(pos, s.len), nextChar(s, pos) };
+        },
+        .line => {
+            const end = lineEndRaw(s, pos);
+            return .{ lineStart(s, pos), if (end < s.len) end + 1 else end };
+        },
+    }
 }
 
 /// The word around `i`, for a double click.
