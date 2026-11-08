@@ -235,18 +235,27 @@ void kest_collection_name(cui_ctx *ui, const char *name, const char *method, con
     }
     int label = ui->last_node;
     if (method) {
-        /* The slot stays 40px so names align; long verbs such as PROPFIND
-         * shrink to fit instead of being cut to "PROPFI...". */
+        /* A narrow slot, the verb set flush right against the name: names
+         * still line up, and GET sits as close to its name as PATCH does.
+         * DELETE and OPTIONS shorten as Bruno and Postman show them; other
+         * long verbs such as PROPFIND shrink to fit. */
+        const float slot = 32;
+        const char *shown = method;
+        if (strcmp(method, "DELETE") == 0) shown = "DEL";
+        else if (strcmp(method, "OPTIONS") == 0) shown = "OPT";
         float size = 10;
-        size_t length = strlen(method);
-        float width = cui_measure_text(ui, CUI_FONT_MONO, size, method, (int)length).width;
-        if (width > 38 && width > 0) size = CUI_MAX(7.0f, floorf(size * 38 / width * 2) / 2);
+        size_t length = strlen(shown);
+        float width = cui_measure_text(ui, CUI_FONT_MONO, size, shown, (int)length).width;
+        if (width > slot && width > 0) size = CUI_MAX(6.5f, floorf(size * slot / width * 2) / 2);
+        ui->nodes[label].text = shown;
+        ui->nodes[label].text_len = (int)length;
         ui->nodes[label].text_color = cui_color_of(ui, color);
         ui->nodes[label].font = CUI_FONT_MONO;
         ui->nodes[label].font_size = size;
-        ui->nodes[label].w = CUI_PX(40);
+        ui->nodes[label].text_align = CUI_TEXT_RIGHT;
+        ui->nodes[label].w = CUI_PX(slot);
         ui->nodes[label].flags |= CUI_NF_KEEP_W;
-        cui__leaf(ui, 0, CUI_PX(4), CUI_PX(1));
+        cui__leaf(ui, 0, CUI_PX(7), CUI_PX(1));
         cui_text_opts opts = {0}; opts.nowrap = true; opts.size = KEST_TEXT_SECONDARY;
         cui_text_ex(ui, name, &opts);
         label = ui->last_node;
@@ -1038,8 +1047,27 @@ bool kest_menu_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts, 
     int first = ui->node_count;
     bool open = kest_dropdown_begin(ui, label, opts);
     /* cui_menu_begin constructs its trigger first, followed by its label/icon. */
+    /* A negative width fits the trigger to its label and chevron, up to
+       -width, so the chevron stays beside short labels like "JSON". */
+    bool fit = width < 0;
+    if (fit) width = -width;
     if (first < ui->node_count) {
         cui_node *n = &ui->nodes[first];
+        if (fit) {
+            float total = n->pad[1] + n->pad[3];
+            int count = 0;
+            for (int i = first + 1; i < ui->node_count; i++) {
+                cui_node *child = &ui->nodes[i];
+                if (child->parent != first) continue;
+                float size = child->font_size > 0 ? child->font_size : KEST_TEXT_BODY * ui->theme.font_scale;
+                if (child->w.kind == CUI_SIZE_FIXED) total += child->w.value;
+                else if (child->text && child->font == CUI_FONT_ICONS) total += size;
+                else if (child->text) total += ceilf(cui__text_width(ui, child->font, size, child->text, child->text_len, false));
+                count++;
+            }
+            if (count > 1) total += n->gap * (float)(count - 1);
+            width = CUI_MIN(width, ceilf(total) + 1);
+        }
         if (width > 0) n->w = CUI_PX(width);
         n->h = CUI_PX(height);
         n->border = 0; n->radius = CUI_CORNERS(KEST_RADIUS_CONTROL);
@@ -1320,6 +1348,44 @@ typedef struct {
     int count;
 } kest__marks_paint;
 
+/* Wraps CUI's field paint so Kest draws the caret itself. */
+typedef struct {
+    void (*paint)(cui_ctx *, cui_node *, void *);
+    void *data;
+} kest__field_paint;
+
+/* The caret of a single-line field, drawn after its text so glyphs never
+   cover it: a crisp one-point bar on whole device pixels (1 at 100%, 2 at 200%) in
+   the text colour, slightly taller than the glyphs, with CUI's blink. */
+static void draw_field_caret(cui_ctx *ui, cui_rect r, const kest__edit_paint *p) {
+    if (!p->focused || p->cursor != p->anchor || p->password || p->multiline) return;
+    float blink = 0.5f + 0.5f * cosf((float)p->caret_phase * 2.0f * CUI_PI / 1.06f);
+    if (!(blink > 0.35f || p->caret_phase < 0.5)) return;
+    bool unshaped = ui->text_unshaped;
+    ui->text_unshaped = true;
+    float fh = cui__font_line_height(ui, p->font, p->size);
+    float cx = r.x - p->scroll_x + cui__text_width(ui, p->font, p->size, p->buf, CUI_MIN(CUI_MAX(p->cursor, 0), p->len), false);
+    ui->text_unshaped = unshaped;
+    if (p->cursor == 0) cx -= 1.0f;
+    float s = ui->scale > 0 ? ui->scale : 1;
+    float device = CUI_MAX(1.0f, roundf(s));
+    float left = (roundf(cx * s) - floorf(device * 0.5f)) / s;
+    float h = CUI_MIN(r.h, fh + 2);
+    cui_push_clip(ui, (cui_rect){ r.x - 3, r.y, r.w + 6, r.h });
+    cui_draw_rect(ui, (cui_rect){ left, roundf((r.y + (r.h - h) * 0.5f) * s) / s, device / s, roundf(h * s) / s }, CUI_CORNERS(0), CUI_C(ui, FOREGROUND));
+    cui_pop_clip(ui);
+}
+
+static void paint_field(cui_ctx *ui, cui_node *n, void *data) {
+    kest__field_paint *f = data;
+    kest__edit_paint *p = f->data;
+    cui_color caret = p->caret;
+    p->caret.a = 0;
+    f->paint(ui, n, p);
+    p->caret = caret;
+    draw_field_caret(ui, n->rect, p);
+}
+
 #define KEST_FIELD_SIZE 0x51535A45u
 static void paint_marks(cui_ctx *ui, cui_node *n, void *data) {
     kest__marks_paint *m = data;
@@ -1340,10 +1406,12 @@ static void paint_marks(cui_ctx *ui, cui_node *n, void *data) {
     }
     cui_pop_clip(ui);
     /* CUI draws selection, caret and placeholder; the text comes in pieces after. */
-    cui_color text = p->text;
+    cui_color text = p->text, caret = p->caret;
     if (p->len > 0) p->text.a = 0;
+    p->caret.a = 0;
     m->paint(ui, n, p);
     p->text = text;
+    p->caret = caret;
     ui->text_unshaped = true;
     if (p->len > 0) {
         cui_push_clip(ui, r);
@@ -1364,15 +1432,23 @@ static void paint_marks(cui_ctx *ui, cui_node *n, void *data) {
         cui_pop_clip(ui);
     }
     ui->text_unshaped = unshaped;
+    draw_field_caret(ui, r, p);
 }
 
-/* Called by kest_flat_input after the field is built: remembers its text size. */
+/* Called by kest_flat_input after the field is built: remembers its text size
+   and has Kest draw the caret. */
 static void apply_marks(cui_ctx *ui, cui_id id, int first) {
     for (int i = first; i < ui->node_count; i++) {
         cui_node *n = &ui->nodes[i];
         if (n->id != (id ^ 0xED17u) || !n->paint_data) continue;
+        kest__edit_paint *p = n->paint_data;
         float *size = cui_state(ui, id ^ KEST_FIELD_SIZE, sizeof(float));
-        *size = ((kest__edit_paint *)n->paint_data)->size;
+        *size = p->size;
+        if (!p->multiline && !p->password && n->paint != paint_field) {
+            kest__field_paint *f = CUI_PAINT_DATA(ui, kest__field_paint);
+            f->paint = n->paint; f->data = p;
+            n->paint = paint_field; n->paint_data = f;
+        }
         return;
     }
 }
@@ -1383,6 +1459,10 @@ void kest_input_marks(cui_ctx *ui, const char *key, const kest_mark *marks, int 
     for (int i = ui->node_count - 1; i >= 0; i--) {
         cui_node *n = &ui->nodes[i];
         if (n->id != area || !n->paint_data || n->paint == paint_marks) continue;
+        if (n->paint == paint_field) {   /* the marks painter draws the caret itself */
+            kest__field_paint *f = n->paint_data;
+            n->paint = f->paint; n->paint_data = f->data;
+        }
         kest__edit_paint *p = n->paint_data;
         if (p->multiline || p->password) return;
         kest__marks_paint *m = CUI_PAINT_DATA(ui, kest__marks_paint);

@@ -117,7 +117,7 @@ fn documents(ui: *c.cui_ctx, app: *App) void {
     if (w.action(ui, "new-document", "", c.CUI_ICON_PLUS, false, 34, 34, 3)) _ = commands.newTab(app);
     c.kest_tooltip(ui, "New request (Ctrl N)");
     var chosen: ?usize = null;
-    if (app.tabs.items.len > 1 and c.kest_menu_begin(ui, w.fmt("Tabs ({d})###open-requests", .{app.tabs.items.len}), &.{ .width = @min(520, c.cui_viewport_size(ui).x - 32), .placement = c.CUI_PLACE_BOTTOM_END }, 108, w.design.control.normal, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
+    if (app.tabs.items.len > 1 and c.kest_menu_begin(ui, w.fmt("Tabs ({d})###open-requests", .{app.tabs.items.len}), &.{ .variant = c.CUI_BUTTON_GHOST, .width = @min(520, c.cui_viewport_size(ui).x - 32), .placement = c.CUI_PLACE_BOTTOM_END }, -120, w.design.control.normal, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
         c.kest_document_list_begin(ui, "open-requests-list", @min(320, c.cui_viewport_size(ui).y - 120));
         for (app.tabs.items, 0..) |t, i| {
             if (c.kest_document_menu_item(ui, documentTitle(t), w.fmt("{s}  {s}{s}", .{ t.method.text(), t.name, if (t.dirty) "  •" else "" }), app.active == i, "open-requests-list")) {
@@ -149,7 +149,7 @@ fn documents(ui: *c.cui_ctx, app: *App) void {
         }
         c.cui_menu_end(ui);
     }
-    if (w.menu(ui, "Layout###workspace-layout", 96, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
+    if (w.menu(ui, "Layout###workspace-layout", -120, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
         layoutMenu(ui, app);
         c.cui_menu_end(ui);
     }

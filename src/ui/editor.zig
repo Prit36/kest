@@ -699,7 +699,8 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     c.cui_draw_rect(ui, .{ .x = rect.x, .y = rect.y, .w = gutter, .h = rect.h }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
     c.cui_draw_line(ui, .{ .x = rect.x + gutter, .y = rect.y }, .{ .x = rect.x + gutter, .y = rect.y + rect.h }, 1 / @max(1, c.cui_dpi_scale(ui)), w.color(c.CUI_TOKEN_BORDER_SUBTLE));
     // Drawn after the content, inside the clip, so all four sides show.
-    defer if (p.focused) w.focusFrame(ui, rect);
+    // Focus shows as the caret and the current line, as in code editors;
+    // no frame around the whole view.
     const first: usize = @intFromFloat(@floor(s.scroll_y / font.line()));
     const count: usize = @intFromFloat(@ceil(visible / font.line()) + 2);
     const last = @min(shown, first + count);
@@ -777,7 +778,7 @@ fn draw(ui_opt: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         }
         if (p.focused and i == active_row) {
             const caret_x = x + advance(ui, entire_row[0..@min(s.caret -| bounds[0], entire_row.len)], char_w);
-            c.cui_draw_line(ui, .{ .x = caret_x, .y = y }, .{ .x = caret_x, .y = y + font.caret() }, 1.5, w.color(c.CUI_TOKEN_ACCENT));
+            w.caret(ui, caret_x, y, font.line());
         }
     }
     if (total > visible) {
@@ -805,7 +806,7 @@ fn drawExtras(ui: *c.cui_ctx, s: *const State, focused: bool, row: []const u8, b
         }
         if (focused and sel.caret >= bounds[0] and sel.caret <= bounds[1]) {
             const caret_x = x + advance(ui, row[0..@min(sel.caret - bounds[0], row.len)], char_w);
-            c.cui_draw_line(ui, .{ .x = caret_x, .y = y }, .{ .x = caret_x, .y = y + font.caret() }, 1.5, w.color(c.CUI_TOKEN_ACCENT));
+            w.caret(ui, caret_x, y, font.line());
         }
     }
 }

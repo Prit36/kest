@@ -138,5 +138,10 @@ pub fn run(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]const
     chord(ui, app, c.CUI_KEY_ESCAPE, 0);
     for (0..3) |_| frame(ui, app);
     try shot(ui, sw, app, snapshot, "response-bar");
+
+    // The URL caret is drawn by Kest after the coloured {{variable}} text.
+    app.want_url_focus = true;
+    for (0..3) |_| frame(ui, app);
+    try shot(ui, sw, app, snapshot, "url-caret");
     std.debug.print("CUI polish: JSON drag/all/folded selection, value double-click, More submenu, response bar actions passed\n", .{});
 }

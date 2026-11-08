@@ -400,7 +400,8 @@ fn draw(raw_ui: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     c.cui_draw_rect(ui, .{ .x = rect.x, .y = rect.y, .w = p.gutter, .h = rect.h }, .{}, w.color(c.CUI_TOKEN_SURFACE_MUTED));
     c.cui_draw_line(ui, .{ .x = rect.x + p.gutter, .y = rect.y }, .{ .x = rect.x + p.gutter, .y = rect.y + rect.h }, 1 / @max(1, c.cui_dpi_scale(ui)), w.color(c.CUI_TOKEN_BORDER_SUBTLE));
     // Drawn after the content, inside the clip, so all four sides show.
-    defer if (p.focused) w.focusFrame(ui, rect);
+    // Focus shows as the caret and the current line, as in code editors;
+    // no frame around the whole view.
     const first: usize = @intFromFloat(@floor(s.scroll_y / font.line()));
     const last = @min(s.index.count(), first + @as(usize, @intFromFloat(@ceil(bars.height / font.line()))) + 1);
     const active = s.index.rowOf(s.caret);
@@ -455,7 +456,7 @@ fn draw(raw_ui: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
         }
         if (p.focused and row == active) {
             const x: f32 = @floatCast(origin + geometry.position(&s.index, p.source, row, s.caret, metrics(ui)) - s.precise_x);
-            c.cui_draw_line(ui, .{ .x = x, .y = y }, .{ .x = x, .y = y + font.caret() }, 1.5, w.color(c.CUI_TOKEN_ACCENT));
+            w.caret(ui, x, y, font.line());
         }
         c.cui_pop_clip(ui);
         var number: [16]u8 = undefined;

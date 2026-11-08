@@ -231,7 +231,7 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
         w.end(ui);
     }
     if (inline_format) {
-        if (w.menu(ui, w.fmt("{s}###response-format", .{formatLabel(t, r.?)}), 96, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
+        if (w.menu(ui, w.fmt("{s}###response-format", .{formatLabel(t, r.?)}), -120, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
             formatItems(ui, t, r.?, false);
             c.cui_menu_end(ui);
         }

@@ -152,8 +152,12 @@ pub fn copy(ui: *c.cui_ctx, value: []const u8) void {
     // in-memory adapter. The host safely ignores a missing callback.
     c.kest_copy(ui, z(value));
 }
-/// The outline a focused editor area (body, JSON view, response text)
-/// shows: one device pixel on all four sides, inside `rect`.
-pub fn focusFrame(ui: *c.cui_ctx, rect: c.cui_rect) void {
-    c.cui_draw_rect_border(ui, rect, .{}, .{}, color(c.CUI_TOKEN_FOCUS_RING), 1 / @max(1, c.cui_dpi_scale(ui)));
+/// The text caret in code views: a thin bar in the text colour, centred on a
+/// line of height `line` that starts at `y`, like the caret of an editor.
+pub fn caret(ui: *c.cui_ctx, x: f32, y: f32, line: f32) void {
+    const inset = @max(2, @round(line * 0.15));
+    // One point wide on whole device pixels, like the text fields' caret.
+    const s = @max(1, c.cui_dpi_scale(ui));
+    const left = @round(x * s) / s;
+    c.cui_draw_rect(ui, .{ .x = left, .y = y + inset, .w = @max(1, @round(s)) / s, .h = line - 2 * inset }, .{}, color(c.CUI_TOKEN_FOREGROUND));
 }

@@ -1070,7 +1070,8 @@ fn draw(raw_ui: ?*c.cui_ctx, rect: c.cui_rect, raw: ?*anyopaque) callconv(.c) vo
     defer c.cui_pop_clip(ui);
     c.cui_draw_rect(ui, rect, .{}, w.color(c.CUI_TOKEN_SURFACE));
     // Drawn after the content, inside the clip, so all four sides show.
-    defer if (p.focused) w.focusFrame(ui, rect);
+    // Focus shows as the caret and the current line, as in code editors;
+    // no frame around the whole view.
     if (tr.rows.items.len == 0) {
         const label = "No matches";
         c.cui_draw_text(ui, c.CUI_FONT_BODY, c.KEST_TEXT_SECONDARY, .{ .x = rect.x + pad_x, .y = rect.y + pad_y + 2 }, w.color(c.CUI_TOKEN_TEXT_SECONDARY), label.ptr, @intCast(label.len));

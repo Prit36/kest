@@ -15,7 +15,7 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     w.row(ui, .{ .id = "body-toolbar", .gap = 4, .pad_left = 2, .pad_right = 12, .height = w.px(36), .width = w.fill });
     const kinds = [_][]const u8{ "No body", "JSON", "Text", "XML", "Form", "Multipart", "File" };
     const names = [_][]const u8{ "No body", "JSON", "Text", "XML", "Form URL encoded", "Multipart form", "Binary / file" };
-    if (w.menu(ui, w.fmt("{s}###body-kind", .{kinds[@intCast(@backingInt(t.body_kind))]}), 126, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
+    if (w.menu(ui, w.fmt("{s}###body-kind", .{kinds[@intCast(@backingInt(t.body_kind))]}), -140, w.color(c.CUI_TOKEN_TEXT_SECONDARY))) {
         for (names, 0..) |label, i| {
             if (c.cui_menu_item_ex(ui, w.z(label), &.{ .checked = @backingInt(t.body_kind) == i })) {
                 t.body_kind = @fromBackingInt(@intCast(i));
