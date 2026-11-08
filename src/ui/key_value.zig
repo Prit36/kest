@@ -5,11 +5,15 @@ const c = w.c;
 const tab = @import("../app/tab.zig");
 const validation = @import("table_validation.zig");
 const upload = @import("upload.zig");
+const suggest = @import("suggest.zig");
+const completion = @import("../core/completion.zig");
 pub const Kind = validation.Kind;
 pub const Options = struct {
     kind: Kind = .variables,
     vars: []const @import("../core/variables.zig").Var = &.{},
     request: ?*const tab.Tab = null,
+    /// The selected environment's name, for hovers over unset variables.
+    env_name: ?[]const u8 = null,
     app: ?*@import("../app/state.zig").App = null,
     /// Side inset; off where the container (a dialog) already provides it.
     inset: bool = true,
@@ -19,10 +23,11 @@ fn weighted(weight: f32) c.cui_size {
     return .{ .kind = c.CUI_SIZE_GROW, .value = weight };
 }
 
-fn field(ui: *c.cui_ctx, key: [*:0]const u8, buffer: *@import("model.zig").TextBuffer, placeholder: [*:0]const u8, weight: f32) bool {
+fn field(ui: *c.cui_ctx, key: [*:0]const u8, buffer: *@import("model.zig").TextBuffer, placeholder: [*:0]const u8, weight: f32, hints: suggest.Context) bool {
     if (!buffer.reserve(@min(32 * 1024 * 1024, @max(4096, buffer.len + 4096)))) return false;
     const flags = c.kest_table_input(ui, key, buffer.data.ptr, buffer.data.len, &.{ .width = weighted(weight), .placeholder = placeholder, .autofocus = buffer.want_focus });
     buffer.want_focus = false;
+    if (suggest.field(ui, key, buffer, flags, hints)) return true;
     if (flags & c.CUI_CHANGED == 0) return false;
     buffer.len = std.mem.indexOfScalar(u8, buffer.data, 0) orelse buffer.data.len - 1;
     return true;
@@ -94,8 +99,8 @@ pub fn view(ui: *c.cui_ctx, values: *tab.Table, files: bool, title: []const u8, 
             .headers => "Add header",
             .form => "Add field",
             .variables => "Add variable",
-        }, 2);
-        const value_changed = field(ui, "value", &row.value, if (files and row.is_file) "File path" else "", 3);
+        }, 2, .{ .vars = opts.vars, .env_name = opts.env_name, .fallback = if (opts.kind == .headers) .{ .choices = &completion.header_names } else .none });
+        const value_changed = field(ui, "value", &row.value, if (files and row.is_file) "File path" else "", 3, .{ .vars = opts.vars, .env_name = opts.env_name, .fallback = if (opts.kind == .headers) .{ .choices = completion.headerValues(row.key.text()) } else .none });
         if (value_changed) row.has_equals = true;
         if (insertion) commit = key_changed or value_changed else changed = changed or key_changed or value_changed;
         if (files) {

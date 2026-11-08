@@ -71,13 +71,15 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
                 w.end(ui);
             }
             var menu_ctx: MenuContext = .{ .app = app, .t = t };
+            editor.hints = .{ .vars = app.activeVars(), .env_name = if (app.active_env) |env| env.name else null };
+            defer editor.hints = null;
             if (editor.viewMenu(ui, "body-editor", &t.body, t.body.text(), false, if (t.body_kind == .json) .json else if (t.body_kind == .xml) .xml else .plain, .{ .ctx = &menu_ctx, .items = menuItems })) {
                 persist.touchTab(app, t);
                 commands.bodyProblem(app, t);
                 c.cui_request_redraw(ui);
             }
         },
-        .form_urlencoded, .multipart => if (@import("key_value.zig").view(ui, &t.form, t.body_kind == .multipart, "Form fields", .{ .kind = .form, .vars = app.activeVars(), .app = app })) persist.touchTab(app, t),
+        .form_urlencoded, .multipart => if (@import("key_value.zig").view(ui, &t.form, t.body_kind == .multipart, "Form fields", .{ .kind = .form, .vars = app.activeVars(), .env_name = if (app.active_env) |env| env.name else null, .app = app })) persist.touchTab(app, t),
         .file => if (@import("upload.zig").binary(ui, app, t)) persist.touchTab(app, t),
     }
 }

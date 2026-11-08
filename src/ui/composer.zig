@@ -7,6 +7,7 @@ const Tab = @import("../app/tab.zig").Tab;
 const commands = @import("../app/commands.zig");
 const persist = @import("../app/persist.zig");
 const variables = @import("../core/variables.zig");
+const suggest = @import("suggest.zig");
 const url = @import("../utils/url.zig");
 const methods = [_][]const u8{ "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS" };
 
@@ -81,7 +82,8 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab) void {
         t.url.focus();
         app.want_url_focus = false;
     }
-    const url_flags = w.flatFieldFlags(ui, "url", &t.url, .{ .placeholder = "Enter URL or paste a cURL request", .width = w.fill, .size = c.CUI_SIZE_LG }, false);
+    var url_flags = w.flatFieldFlags(ui, "url", &t.url, .{ .placeholder = "Enter URL or paste a cURL request", .width = w.fill, .size = c.CUI_SIZE_LG }, false);
+    if (suggest.field(ui, "url", &t.url, url_flags, .{ .vars = app.activeVars(), .env_name = if (app.active_env) |env| env.name else null, .fallback = .{ .urls = sentUrls(app) } })) url_flags |= c.CUI_CHANGED;
     if (url_flags & c.CUI_CHANGED != 0) {
         if (std.mem.startsWith(u8, std.mem.trimStart(u8, t.url.text(), " \t"), "curl ")) {
             if (@import("../import_export/curl.zig").parse(w.arena.allocator(), t.url.text()) catch null) |r| {
@@ -118,6 +120,14 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab) void {
         w.text(ui, message, .{ .size = w.design.text.secondary, .color = w.color(c.CUI_TOKEN_DANGER), .width = w.fill });
         w.end(ui);
     }
+}
+
+/// Past URLs for the URL field's suggestions, oldest first.
+fn sentUrls(app: *App) []const []const u8 {
+    const entries = app.history.entries.items;
+    const out = w.arena.allocator().alloc([]const u8, entries.len) catch return &.{};
+    for (entries, out) |e, *u| u.* = e.url;
+    return out;
 }
 
 fn details(ui: *c.cui_ctx, app: *App, inspection: Inspection, flagged: bool) void {

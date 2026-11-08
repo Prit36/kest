@@ -82,7 +82,7 @@ does not establish coverage for this interface.
 ## Deliberate gaps
 
 - Windows host only. Linux/macOS hosts have not been implemented.
-- SVG preview and header-name autocomplete are not supported.
+- SVG preview is not supported.
 - JSON tree Find opens formatted text; the tree itself is not filtered.
 - Response Find searches available text (up to 16 MiB, literal queries up to
   4096 bytes). Spilled bytes beyond the available response preview are not
@@ -132,3 +132,19 @@ clicks, scrolling, zoom and bracket outline.
   adds a caret on the row above or below. Typing, deleting, arrows, Home/End,
   Cut, Copy and Paste act at every caret as one undo step. A paste with as many
   lines as carets puts one line at each. Escape or a plain click returns to one caret.
+
+### Variables and autocomplete
+
+- Typing `{{` in the URL, any params/headers/form cell or the request body lists
+  the selected environment's variables with their values; more letters narrow
+  it. Up/Down choose, Enter or Tab inserts (adding `}}` when it is missing),
+  Escape closes, and a click inserts too. Ctrl+Space opens the list again.
+- `{{name}}` in the URL and table cells is coloured: accent for a variable with
+  a value, warning for one that has none.
+- Hovering a reference in the URL, a cell or the body shows its value, or says
+  it isn't set in the selected environment.
+- The header table suggests common header names and, once a name is set, common
+  values for it (Content-Type, Accept, Authorization, Cache-Control and more).
+- The URL field suggests URLs sent before that contain what was typed, newest
+  first.
+- A list never shows just because a field was focused; it waits for typing.

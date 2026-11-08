@@ -79,6 +79,7 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
     if (steps != 0) commands.zoomCode(app, steps);
     font.size = @floatFromInt(app.prefs.editor_font_size);
     keepFocus(ui, app);
+    @import("suggest.zig").capture(ui);
     // Requested last frame; dropped if no tree is drawn to take it.
     const tree_focus_requested = app.focus_tree;
     defer if (tree_focus_requested) {

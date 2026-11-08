@@ -96,7 +96,10 @@ Multipart rows show Text/File controls and a file picker; row actions also offer
 keyboard access to field type and file selection.
 The body editor has word and line clicks, drag-to-move, Find and Replace with
 regular expressions, JSON folding, multiple carets (Alt+click, Alt+drag for a
-column, Ctrl+Alt+Up/Down) and Ctrl+wheel zoom. Switching formats preserves
+column, Ctrl+Alt+Up/Down) and Ctrl+wheel zoom.
+Typing `{{` in the URL, a table cell or the body suggests environment variables;
+references are coloured, and hovering one shows its value. The header table
+suggests common names and values, and the URL field suggests URLs sent before. Switching formats preserves
 all text, form fields and the binary path. URL-encoded forms treat values as
 text while retaining multipart file flags for later. Binary mode shows the
 selected file name/size, with Change file, Remove and Refresh. Metadata checks

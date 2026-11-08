@@ -9,6 +9,7 @@ const State = code.State;
 const design = @import("design.zig");
 const Paint = struct { state: *State, source: []const u8, lang: hl.Lang, focused: bool, char_w: f32, gutter: f32, fold_w: f32 };
 const font = @import("code_font.zig");
+const suggest = @import("suggest.zig");
 // Use the same font advance for text, token origins, hit testing and caret.
 pub fn cellWidth(ui: *c.cui_ctx) f32 {
     return c.cui_measure_text(ui, c.CUI_FONT_MONO, font.size, "M", 1).width;
@@ -245,7 +246,34 @@ pub fn viewMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source_in: []const
         s.move_drag = .none;
         s.selecting = false;
     }
+    if (!read_only and rect.w > 0) if (hints) |h| variableHelp(ui, s, identity, focused, rect, gutter, char_w, v0 != s.version, h);
     return v0 != s.version;
+}
+
+/// Variables, set by the body before drawing its editor: hovering a
+/// `{{name}}` shows its value, and typing `{{` suggests names.
+pub var hints: ?suggest.Context = null;
+
+fn variableHelp(ui: *c.cui_ctx, s: *State, identity: c.cui_id, focused: bool, rect: c.cui_rect, gutter: f32, char_w: f32, changed: bool, h: suggest.Context) void {
+    const source = s.text();
+    const m = c.cui_mouse_pos(ui);
+    if (!c.cui_mouse_down(ui, c.CUI_MOUSE_LEFT) and m.x >= rect.x + gutter and m.x < rect.x + rect.w and m.y >= rect.y and m.y < rect.y + rect.h and std.mem.indexOf(u8, source, "{{") != null) {
+        if (hit(ui, s, source, rect, gutter, char_w)) |pos| if (suggest.hoverText(source, pos, h)) |tip| c.kest_tooltip_for(ui, identity, w.z(tip));
+    }
+    if (s.index.count() == 0) return;
+    const caret = @min(s.caret, source.len);
+    const row = s.index.rowOf(caret);
+    const bounds = s.index.bounds(source, row);
+    const x = rect.x + gutter + code_gap - s.scroll_x + advance(ui, source[bounds[0]..@max(bounds[0], @min(caret, bounds[1]))], char_w);
+    const y = rect.y + 8 + @as(f32, @floatFromInt(s.folds.visualOf(row) + 1)) * font.line() - s.scroll_y + 4;
+    const below: c.cui_vec2 = .{ .x = @max(rect.x, x - 10), .y = @min(y, rect.y + rect.h) };
+    if (suggest.editor(ui, identity, focused and !s.multi() and s.anchor == s.caret, source, caret, changed, below, h)) |e| {
+        s.anchor = e.start;
+        s.caret = e.end;
+        s.replaceSelection(e.insert, false);
+        s.moveTo(e.caret, false);
+        c.cui_request_redraw(ui);
+    }
 }
 
 /// The left button is down over the text at `pos`. A press starts a

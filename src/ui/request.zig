@@ -43,7 +43,7 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
             t.syncUrlFromParams();
             persist.touchTab(app, t);
         },
-        .headers => if (@import("key_value.zig").view(ui, &t.headers, false, "Configured request headers", .{ .kind = .headers, .vars = app.activeVars(), .request = t })) persist.touchTab(app, t),
+        .headers => if (@import("key_value.zig").view(ui, &t.headers, false, "Configured request headers", .{ .kind = .headers, .vars = app.activeVars(), .env_name = if (app.active_env) |env| env.name else null, .request = t })) persist.touchTab(app, t),
         .body => @import("body.zig").view(ui, app, t),
         .settings => settings(ui, app, t),
     }

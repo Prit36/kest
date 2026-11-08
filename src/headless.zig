@@ -69,6 +69,7 @@ pub fn run(app: *App, test_mode: bool, snapshot: ?[]const u8, width: f32, height
         try @import("body_editor_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
         try @import("context_menu_tests.zig").run(ui, app, frame, click);
         try @import("text_editing_tests.zig").run(ui, app, frame, chord);
+        try @import("variable_tests.zig").run(ui, app, sw, snapshot, frame, chord);
         try @import("upload_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
         try @import("response_state_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
         try @import("response_preparation_tests.zig").run(ui, app, sw, snapshot, frame, click);

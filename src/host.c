@@ -300,7 +300,7 @@ bool kest_has_node(cui_ctx *ui, cui_id id) {
 }
 int kest_editor_focus(cui_ctx *ui, cui_id id) {
     if (ui->focus != id || ui->prev_modal_layer) return 0;
-    for (int i = 0; i < ui->popup_count; ++i) if (ui->popups[i].open) return 0;
+    for (int i = 0; i < ui->popup_count; ++i) if (ui->popups[i].open && ui->popups[i].id != kest_suggest_popup) return 0;
     return 1;
 }
 void kest_editor_tabs(cui_ctx *ui, cui_id id, int capture) {

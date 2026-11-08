@@ -126,3 +126,22 @@ bool kest_document_rename_begin(cui_ctx *ui, cui_id tab);
 void kest_document_rename_end(cui_ctx *ui);
 
 void kest_consume_key(cui_ctx *ui, cui_key key);
+
+/* {{variable}} spans in a single-line field just built, painted in colour. */
+typedef struct kest_mark { int start, end, known; } kest_mark;
+void kest_input_marks(cui_ctx *ui, const char *key, const kest_mark *marks, int count);
+/* The focused field's caret: its byte offset, or -1, and where under it a list goes. */
+int kest_input_caret(cui_ctx *ui, const char *key, const char *buf, cui_vec2 *below);
+/* The byte under the pointer in a field, or -1 off its text. */
+int kest_input_offset_at(cui_ctx *ui, const char *key, const char *buf);
+void kest_input_set_caret(cui_ctx *ui, const char *key, int pos);
+/* A suggestion list at a point, not taking focus. */
+bool kest_suggest_begin(cui_ctx *ui, const char *key, cui_vec2 at, float width);
+void kest_suggest_end(cui_ctx *ui);
+/* The open suggestion list's popup, which leaves its field focused. */
+extern cui_id kest_suggest_popup;
+void kest_suggest_close(cui_ctx *ui, const char *key);
+void kest_consume_click(cui_ctx *ui);
+/* The focused field types Tab next frame (a list under it takes Tab). */
+void kest_keep_tab(cui_ctx *ui, cui_id id);
+void kest_tooltip_for(cui_ctx *ui, cui_id anchor, const char *text);

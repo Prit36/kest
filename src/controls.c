@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include "cui_internal.h"
 #include "kest_edit.h"
+
+/* The suggestion list under a field: it never takes the field's keys. */
+cui_id kest_suggest_popup;
+#define suggest_popup kest_suggest_popup
 void kest_focus(cui_ctx *ui, const char *id) { ui->focus = cui_make_id(ui, id); }
 void kest_input_select_all(cui_ctx *ui, const char *key, int length) {
     if (ui->focus != cui_make_id(ui, key) || !ui->edit) return;
@@ -370,7 +374,7 @@ int kest_tab_navigation(cui_ctx *ui, const char *const *keys, int count, int sel
     for (int i = 0; i < ui->popup_count; i++)
         if (ui->popups[i].id == ui->current_layer) layer_z = ui->popups[i].z;
     for (int i = 0; i < ui->popup_count; i++)
-        if (ui->popups[i].open && ui->popups[i].z > layer_z) return selected;
+        if (ui->popups[i].open && ui->popups[i].z > layer_z && ui->popups[i].id != suggest_popup) return selected;
     if (ui->modal_layer && ui->modal_layer != ui->current_layer) return selected;
     if (ui->prev_modal_layer && ui->prev_modal_layer != ui->current_layer) return selected;
     int focused = -1;
@@ -615,6 +619,7 @@ cui_path_bar_result kest_path_bar_ex(cui_ctx *ui, const char *key, const char *c
     return result;
 }
 
+static void apply_marks(cui_ctx *ui, cui_id id, int first);
 int kest_flat_input(cui_ctx *ui, const char *key, char *buf, size_t cap, const cui_input_opts *opts, bool cell) {
     cui_id id = cui_make_id(ui, key);
     if (opts && opts->autofocus) ui->focus = id;
@@ -622,6 +627,7 @@ int kest_flat_input(cui_ctx *ui, const char *key, char *buf, size_t cap, const c
     kest_edit_menu_owned = cell;   /* a cell's right-click opens its row menu */
     int flags = cui__text_field(ui, id, buf, cap, opts, false, 1, NULL);
     kest_a11y_label_id(ui, id, KEST_A11Y_EDIT, opts ? (opts->label ? opts->label : opts->placeholder) : NULL, buf);
+    apply_marks(ui, id, first);
     cui_node *n = &ui->nodes[first];
     n->min_w = 1;
     n->pad[1] = n->pad[3] = cell ? 10 : 8;
@@ -638,7 +644,7 @@ static bool table_keys_allowed(cui_ctx *ui) {
     if (ui->prev_modal_layer && ui->prev_modal_layer != ui->current_layer) return false;
     int z = 0;
     for (int i = 0; i < ui->popup_count; i++) if (ui->popups[i].id == ui->current_layer) z = ui->popups[i].z;
-    for (int i = 0; i < ui->popup_count; i++) if (ui->popups[i].open && ui->popups[i].z > z) return false;
+    for (int i = 0; i < ui->popup_count; i++) if (ui->popups[i].open && ui->popups[i].z > z && ui->popups[i].id != suggest_popup) return false;
     return true;
 }
 
@@ -1199,3 +1205,190 @@ void kest_document_rename_end(cui_ctx *ui) {
 }
 
 void kest_consume_key(cui_ctx *ui, cui_key key) { ui->kpressed[key] = 0; }
+
+/* ------------------------------------------------------------------------ */
+/* Variables in single-line fields, and suggestion lists                    */
+/* ------------------------------------------------------------------------ */
+
+/* The same layout as CUI's private cui__edit_paint (cui_textedit.c, pinned). */
+typedef struct {
+    const char *buf;
+    int len;
+    int cursor, anchor;
+    bool focused, password, multiline;
+    float scroll_x, scroll_y;
+    double caret_phase;
+    cui_font font;
+    float size;
+    const char *placeholder;
+    cui_color text, placeholder_color, caret, selection;
+    float line_h;
+    int line_count;
+    cui_text_layout_line *lines;
+} kest__edit_paint;
+
+typedef struct {
+    void (*paint)(cui_ctx *, cui_node *, void *);
+    void *data;
+    kest_mark *marks;
+    int count;
+} kest__marks_paint;
+
+#define KEST_FIELD_SIZE 0x51535A45u
+static void paint_marks(cui_ctx *ui, cui_node *n, void *data) {
+    kest__marks_paint *m = data;
+    kest__edit_paint *p = m->data;
+    bool unshaped = ui->text_unshaped;
+    ui->text_unshaped = true;
+    cui_rect r = n->rect;
+    float fh = cui__font_line_height(ui, p->font, p->size);
+    float x0 = r.x - p->scroll_x, y = r.y + (r.h - fh) * 0.5f;
+    cui_push_clip(ui, r);
+    for (int i = 0; i < m->count; i++) {
+        kest_mark k = m->marks[i];
+        if (k.start < 0 || k.end > p->len || k.end <= k.start) continue;
+        float a = cui__text_width(ui, p->font, p->size, p->buf, k.start, false);
+        float b = cui__text_width(ui, p->font, p->size, p->buf, k.end, false);
+        cui_color tint = k.known ? CUI_C(ui, ACCENT) : CUI_C(ui, WARNING);
+        cui_draw_rect(ui, (cui_rect){x0 + a - 1, y - 1, b - a + 2, fh + 2}, CUI_CORNERS(3), cui_alpha(tint, 0.13f));
+    }
+    cui_pop_clip(ui);
+    /* CUI draws selection, caret and placeholder; the text comes in pieces after. */
+    cui_color text = p->text;
+    if (p->len > 0) p->text.a = 0;
+    m->paint(ui, n, p);
+    p->text = text;
+    ui->text_unshaped = true;
+    if (p->len > 0) {
+        cui_push_clip(ui, r);
+        int at = 0;
+        for (int i = 0; i <= m->count; i++) {
+            bool last = i == m->count;
+            kest_mark k = last ? (kest_mark){p->len, p->len, 0} : m->marks[i];
+            if (k.start < at || k.end > p->len || k.end < k.start) continue;
+            if (k.start > at) {
+                float x = x0 + cui__text_width(ui, p->font, p->size, p->buf, at, false);
+                cui__draw_text_line(ui, p->font, p->size, x, y, text, p->buf + at, k.start - at, false);
+            }
+            if (last) break;
+            float x = x0 + cui__text_width(ui, p->font, p->size, p->buf, k.start, false);
+            cui__draw_text_line(ui, p->font, p->size, x, y, k.known ? CUI_C(ui, ACCENT) : CUI_C(ui, WARNING), p->buf + k.start, k.end - k.start, false);
+            at = k.end;
+        }
+        cui_pop_clip(ui);
+    }
+    ui->text_unshaped = unshaped;
+}
+
+/* Called by kest_flat_input after the field is built: remembers its text size. */
+static void apply_marks(cui_ctx *ui, cui_id id, int first) {
+    for (int i = first; i < ui->node_count; i++) {
+        cui_node *n = &ui->nodes[i];
+        if (n->id != (id ^ 0xED17u) || !n->paint_data) continue;
+        float *size = cui_state(ui, id ^ KEST_FIELD_SIZE, sizeof(float));
+        *size = ((kest__edit_paint *)n->paint_data)->size;
+        return;
+    }
+}
+
+void kest_input_marks(cui_ctx *ui, const char *key, const kest_mark *marks, int count) {
+    if (count <= 0) return;
+    cui_id area = cui_make_id(ui, key) ^ 0xED17u;
+    for (int i = ui->node_count - 1; i >= 0; i--) {
+        cui_node *n = &ui->nodes[i];
+        if (n->id != area || !n->paint_data || n->paint == paint_marks) continue;
+        kest__edit_paint *p = n->paint_data;
+        if (p->multiline || p->password) return;
+        kest__marks_paint *m = CUI_PAINT_DATA(ui, kest__marks_paint);
+        m->paint = n->paint; m->data = n->paint_data;
+        m->marks = cui__frame_alloc(ui, sizeof *marks * (size_t)count);
+        memcpy(m->marks, marks, sizeof *marks * (size_t)count);
+        m->count = count;
+        n->paint = paint_marks; n->paint_data = m;
+        return;
+    }
+}
+
+static float field_size(cui_ctx *ui, cui_id id) {
+    float *size = cui_state(ui, id ^ KEST_FIELD_SIZE, sizeof(float));
+    return *size > 0 ? *size : ui->theme.text_body * ui->theme.font_scale;
+}
+
+int kest_input_caret(cui_ctx *ui, const char *key, const char *buf, cui_vec2 *below) {
+    cui_id id = cui_make_id(ui, key);
+    if (ui->focus != id || !cui__has_prev_rect(ui, id ^ 0xED17u)) return -1;
+    cui_edit_state *e = cui_state(ui, id, sizeof *e);
+    int len = (int)strlen(buf);
+    int cursor = CUI_MIN(CUI_MAX(e->cursor, 0), len);
+    cui_rect area = cui__prev_rect(ui, id ^ 0xED17u);
+    bool unshaped = ui->text_unshaped;
+    ui->text_unshaped = true;
+    float x = cui__text_width(ui, CUI_FONT_BODY, field_size(ui, id), buf, cursor, false);
+    ui->text_unshaped = unshaped;
+    if (below) {
+        below->x = CUI_MAX(area.x, CUI_MIN(area.x + area.w, area.x + x - e->scroll_x)) - 10;
+        below->y = area.y + area.h + 8;
+    }
+    return cursor;
+}
+
+int kest_input_offset_at(cui_ctx *ui, const char *key, const char *buf) {
+    cui_id id = cui_make_id(ui, key);
+    if (ui->hot != id || !cui__has_prev_rect(ui, id ^ 0xED17u)) return -1;
+    cui_rect area = cui__prev_rect(ui, id ^ 0xED17u);
+    if (ui->mx < area.x || ui->mx > area.x + area.w || ui->my < area.y - 4 || ui->my > area.y + area.h + 4) return -1;
+    cui_edit_state *e = cui_state(ui, id, sizeof *e);
+    float size = field_size(ui, id);
+    float target = ui->mx - area.x + e->scroll_x;
+    int len = (int)strlen(buf);
+    bool unshaped = ui->text_unshaped;
+    ui->text_unshaped = true;
+    int result = -1;
+    float prev = 0;
+    for (int i = 0; i < len; i++) {
+        if (((unsigned char)buf[i] & 0xC0) == 0x80) continue;
+        int next = i + 1;
+        while (next < len && ((unsigned char)buf[next] & 0xC0) == 0x80) next++;
+        float w = cui__text_width(ui, CUI_FONT_BODY, size, buf, next, false);
+        if (target >= prev && target < w) { result = i; break; }
+        prev = w;
+    }
+    ui->text_unshaped = unshaped;
+    return result;
+}
+
+void kest_input_set_caret(cui_ctx *ui, const char *key, int pos) {
+    cui_id id = cui_make_id(ui, key);
+    cui_edit_state *e = cui_state(ui, id, sizeof *e);
+    e->cursor = e->anchor = pos;
+    e->selecting = false;
+    ui->focus = id;
+    cui_request_redraw(ui);
+}
+
+bool kest_suggest_begin(cui_ctx *ui, const char *key, cui_vec2 at, float width) {
+    cui_id pid = cui_make_id(ui, key);
+    suggest_popup = pid;
+    cui_popup *p = cui__popup_get(ui, pid, true);
+    if (!p) return false;
+    if (!p->open) cui__popup_set(ui, pid, true);
+    p = cui__popup_get(ui, pid, false);
+    if (!p) return false;
+    p->at_mouse = true;
+    p->mouse = at;
+    return cui__popup_begin(ui, pid, 0, CUI_PLACE_BOTTOM_START, width, 4, 0, false);
+}
+void kest_suggest_end(cui_ctx *ui) { cui__popup_end(ui); }
+void kest_suggest_close(cui_ctx *ui, const char *key) {
+    cui_id pid = cui_make_id(ui, key);
+    cui_popup *p = cui__popup_get(ui, pid, false);
+    if (p && p->open) cui__popup_set(ui, pid, false);
+}
+void kest_consume_click(cui_ctx *ui) { ui->mpressed[CUI_MOUSE_LEFT] = 0; }
+void kest_keep_tab(cui_ctx *ui, cui_id id) { if (ui->focus == id) ui->tab_owner = id; }
+void kest_tooltip_for(cui_ctx *ui, cui_id anchor, const char *text) {
+    cui_id last = ui->last_id;
+    ui->last_id = anchor;
+    cui_tooltip(ui, text);
+    ui->last_id = last;
+}
