@@ -220,6 +220,314 @@ fn hitTest(ui: *c.cui_ctx, g: Geo, tr: *const Tree, s: *const State, mouse: c.cu
     return target;
 }
 
+
+// ---- Text selection ------------------------------------------------------
+// Each row is one line of formatted JSON: an indent of two spaces a level,
+// `"key": `, the value and its comma. A collapsed container's line is its
+// brackets; copying it writes the whole container out.
+
+const Pos = @import("json_state.zig").Pos;
+
+fn prefixLen(depth: u16) u32 {
+    return @as(u32, @min(depth, 48)) * 2;
+}
+
+/// Where a row's value starts in its line: after the indent and `"key": `.
+fn valueCol(tr: *const Tree, node: u32) u32 {
+    const key = tr.key(node);
+    return prefixLen(tr.nodes.items[node].depth) + @as(u32, @intCast(key.len)) + @as(u32, if (key.len > 0) 2 else 0);
+}
+
+/// A container drawn as one line: collapsed, or with nothing inside.
+fn oneLine(tr: *const Tree, node: u32) bool {
+    return tr.isContainer(node) and (tr.childCount(node) == 0 or !tr.isOpen(node));
+}
+
+fn lineLen(tr: *const Tree, node: u32) u32 {
+    const n = tr.nodes.items[node];
+    var len = valueCol(tr, node);
+    if (n.kind != .close and tr.isContainer(node)) {
+        const close = tr.nodes.items[node + n.skip];
+        len += if (oneLine(tr, node)) 2 + @as(u32, @intFromBool(close.comma)) else 1;
+    } else len += n.val_len + @as(u32, @intFromBool(n.comma));
+    return len;
+}
+
+/// Row `node`'s line as shown: the text Copy takes from it.
+fn appendLine(a: std.mem.Allocator, out: *std.ArrayList(u8), tr: *const Tree, node: u32) !void {
+    const n = tr.nodes.items[node];
+    try out.appendNTimes(a, ' ', prefixLen(n.depth));
+    const key = tr.key(node);
+    if (key.len > 0) {
+        try out.appendSlice(a, key);
+        try out.appendSlice(a, ": ");
+    }
+    try out.appendSlice(a, tr.value(node));
+    if (n.kind != .close and tr.isContainer(node)) {
+        if (oneLine(tr, node)) {
+            try out.appendSlice(a, tr.value(node + n.skip));
+            if (tr.nodes.items[node + n.skip].comma) try out.append(a, ',');
+        }
+    } else if (n.comma) try out.append(a, ',');
+}
+
+/// Node `node` written out whole, every level open, indented as rows are.
+/// The comma after it, if any, is left off.
+pub fn appendExpanded(a: std.mem.Allocator, out: *std.ArrayList(u8), tr: *const Tree, node: u32) !void {
+    const end = node + if (tr.isContainer(node)) tr.nodes.items[node].skip else 0;
+    var j = node;
+    while (j <= end) : (j += 1) {
+        if (j > node) try out.append(a, '\n');
+        const n = tr.nodes.items[j];
+        try out.appendNTimes(a, ' ', prefixLen(n.depth));
+        const key = tr.key(j);
+        if (key.len > 0) {
+            try out.appendSlice(a, key);
+            try out.appendSlice(a, ": ");
+        }
+        try out.appendSlice(a, tr.value(j));
+        if (n.kind != .close and tr.isContainer(j)) {
+            if (tr.childCount(j) == 0) {
+                try out.appendSlice(a, tr.value(j + n.skip));
+                j += n.skip;
+                if (tr.nodes.items[j].comma and j != end) try out.append(a, ',');
+            }
+        } else if (n.comma and j != end) try out.append(a, ',');
+    }
+}
+
+/// The whole document as formatted JSON, folded parts included.
+pub fn formatted(a: std.mem.Allocator, tr: *const Tree) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    if (tr.nodes.items.len > 0) try appendExpanded(a, &out, tr, 0);
+    return out.toOwnedSlice(a);
+}
+
+/// The selected text, line by line; collapsed containers come out whole.
+pub fn selectionText(a: std.mem.Allocator, tr: *const Tree, s: *const State) ![]u8 {
+    const r = s.range();
+    const rows = tr.rows.items;
+    var out: std.ArrayList(u8) = .empty;
+    var line: std.ArrayList(u8) = .empty;
+    var i = std.sort.lowerBound(u32, rows, r[0].node, order);
+    var first = true;
+    while (i < rows.len and rows[i] <= r[1].node) : (i += 1) {
+        const node = rows[i];
+        line.clearRetainingCapacity();
+        const len = lineLen(tr, node);
+        const from = if (node == r[0].node) @min(r[0].col, len) else 0;
+        const to = if (node == r[1].node) @min(r[1].col, len) else len;
+        if (!first) try out.append(a, '\n');
+        first = false;
+        const n = tr.nodes.items[node];
+        if (tr.isContainer(node) and n.kind != .close and !tr.isOpen(node) and tr.childCount(node) > 0 and to > valueCol(tr, node)) {
+            try appendExpanded(a, &line, tr, node);
+            // A comma after the container ends its last line, as shown.
+            if (tr.nodes.items[node + n.skip].comma) try line.append(a, ',');
+            const stop = if (to == len) line.items.len else @min(to, line.items.len);
+            try out.appendSlice(a, line.items[@min(from, stop)..stop]);
+        } else {
+            try appendLine(a, &line, tr, node);
+            const stop = @min(to, line.items.len);
+            try out.appendSlice(a, line.items[@min(from, stop)..stop]);
+        }
+    }
+    return out.toOwnedSlice(a);
+}
+
+fn selectAll(tr: *const Tree, s: *State) void {
+    const rows = tr.rows.items;
+    if (rows.len == 0) return;
+    s.sel_anchor = .{ .node = rows[0], .col = 0 };
+    s.sel_caret = .{ .node = rows[rows.len - 1], .col = lineLen(tr, rows[rows.len - 1]) };
+    s.selecting = false;
+}
+
+fn round(x: f32) u32 {
+    return @intFromFloat(@max(0, @round(x)));
+}
+
+/// The place in the text under `mouse`; past the last row is its end.
+fn posAt(ui: *c.cui_ctx, g: Geo, tr: *const Tree, s: *const State, mouse: c.cui_vec2) Pos {
+    const rows = tr.rows.items;
+    if (rows.len == 0) return .{};
+    const local_y = mouse.y - g.rect.y + g.scroll_y;
+    const row = g.rowAt(local_y) orelse {
+        if (local_y < pad_y) return .{ .node = rows[0], .col = 0 };
+        return .{ .node = rows[rows.len - 1], .col = lineLen(tr, rows[rows.len - 1]) };
+    };
+    const node = rows[row];
+    return .{ .node = node, .col = colAt(ui, g, tr, s, node, row, mouse) };
+}
+
+fn colAt(ui: *c.cui_ctx, g: Geo, tr: *const Tree, s: *const State, node: u32, row: usize, mouse: c.cui_vec2) u32 {
+    const n = tr.nodes.items[node];
+    const parts = measure(ui, g, tr, s, node);
+    const cw = g.char_w;
+    const prefix = prefixLen(n.depth);
+    const len = lineLen(tr, node);
+    if (mouse.x < parts.x) return @min(prefix, round((mouse.x - g.rect.x - pad_x) / cw));
+    const key = tr.key(node);
+    if (key.len > 0 and mouse.x < parts.value_x) {
+        const k = fit(ui, cw, key, mouse.x - parts.x + cw / 2);
+        if (k < key.len) return prefix + @as(u32, @intCast(k));
+        return prefix + @as(u32, @intCast(key.len)) + @min(2, round((mouse.x - parts.x - advance(ui, cw, key)) / cw));
+    }
+    const vcol = valueCol(tr, node);
+    if (n.kind == .close or tr.isContainer(node)) {
+        if (mouse.x < parts.value_x + cw / 2) return vcol;
+        if (!oneLine(tr, node) and mouse.x < parts.value_x + cw * 1.5) return vcol + 1;
+        return len;
+    }
+    const full = tr.value(node);
+    var off: usize = 0;
+    if (parts.open) {
+        const want: usize = @intFromFloat(@max(0, @floor((mouse.y - g.screenTop(row)) / font.line())));
+        const room = g.right() - parts.value_x;
+        var rest = full;
+        var start: usize = 0;
+        var at: usize = 0;
+        while (true) : (at += 1) {
+            const step_len = nextLine(ui, cw, rest, room);
+            if (at == want or step_len >= rest.len) {
+                const k = fit(ui, cw, rest[0..step_len], mouse.x - parts.value_x + cw / 2);
+                // The end of a wrapped line is the start of the next.
+                off = start + if (k == step_len and step_len < rest.len) k -| 1 else k;
+                break;
+            }
+            start += step_len;
+            rest = rest[step_len..];
+        }
+    } else if (parts.long) {
+        const k = fit(ui, cw, parts.shown, mouse.x - parts.value_x + cw / 2);
+        off = if (k < parts.shown.len) k else full.len;
+    } else off = fit(ui, cw, full, mouse.x - parts.value_x + cw / 2);
+    if (off >= full.len) return if (n.comma and mouse.x > parts.value_end + cw / 2) len else vcol + @as(u32, @intCast(full.len));
+    return vcol + @as(u32, @intCast(off));
+}
+
+/// Where the row's drawing ends: after any count chip, ellipsis and comma.
+fn lineEndX(ui: *c.cui_ctx, g: Geo, tr: *const Tree, node: u32, parts: Parts) f32 {
+    const n = tr.nodes.items[node];
+    const cw = g.char_w;
+    if (n.kind == .close) return parts.value_x + cw * @as(f32, if (n.comma) 2 else 1);
+    if (tr.isContainer(node)) {
+        const close = tr.nodes.items[node + n.skip];
+        const comma: f32 = if (close.comma) cw else 0;
+        if (tr.childCount(node) == 0) return parts.value_x + 2 * cw + comma;
+        if (tr.isOpen(node)) return parts.value_x + cw;
+        const label = summary(tr, node);
+        const lw = c.cui_measure_text(ui, c.CUI_FONT_BODY, c.KEST_TEXT_CAPTION, label.ptr, @intCast(label.len)).width;
+        return parts.value_x + cw + 4 + lw + 14 + cw + comma;
+    }
+    if (parts.chip) |chip| return chip.x + chip.w + 2 + @as(f32, if (n.comma) cw else 0);
+    return parts.value_end + @as(f32, if (n.comma) cw else 0);
+}
+
+/// The x of column `col` on a row's first line.
+fn colX(ui: *c.cui_ctx, g: Geo, tr: *const Tree, node: u32, parts: Parts, col: u32) f32 {
+    const n = tr.nodes.items[node];
+    const cw = g.char_w;
+    const prefix = prefixLen(n.depth);
+    if (col <= prefix) return g.rect.x + pad_x + @as(f32, @floatFromInt(col)) * cw;
+    const key = tr.key(node);
+    const kc = col - prefix;
+    if (key.len > 0 and kc <= key.len + 2) {
+        if (kc <= key.len) return parts.x + advance(ui, cw, key[0..kc]);
+        return parts.x + advance(ui, cw, key) + @as(f32, @floatFromInt(kc - key.len)) * cw;
+    }
+    const vc = col -| valueCol(tr, node);
+    if (n.kind == .close or tr.isContainer(node)) {
+        if (vc == 0) return parts.value_x;
+        if (oneLine(tr, node) and n.kind != .close) return lineEndX(ui, g, tr, node, parts);
+        return parts.value_x + @as(f32, @floatFromInt(@min(vc, 2))) * cw;
+    }
+    const full = tr.value(node);
+    if (parts.long and !parts.open) {
+        if (vc <= parts.shown.len) return parts.value_x + advance(ui, cw, parts.shown[0..vc]);
+        return lineEndX(ui, g, tr, node, parts);
+    }
+    if (vc <= full.len) return parts.value_x + advance(ui, cw, full[0..vc]);
+    return parts.value_end + cw;
+}
+
+/// Paints the part of row `row` that is selected.
+fn drawSelection(ui: *c.cui_ctx, p: *const Paint, g: Geo, row: usize, parts: Parts) void {
+    const sel = p.selection orelse return;
+    const tr = p.tree;
+    const node = tr.rows.items[row];
+    if (node < sel[0].node or node > sel[1].node) return;
+    const len = lineLen(tr, node);
+    const from = if (node == sel[0].node) @min(sel[0].col, len) else 0;
+    const to = if (node == sel[1].node) @min(sel[1].col, len) else len;
+    // A line break inside the selection shows as a little extra width.
+    const tail: f32 = if (node != sel[1].node) g.char_w * 0.6 else 0;
+    if (from >= to and tail == 0) return;
+    const tint = w.tinted(ui, c.CUI_TOKEN_ACCENT, if (p.focused) 0.28 else 0.16);
+    const y = g.screenTop(row);
+    const line_h = font.line();
+    if (!parts.open) {
+        const x0 = colX(ui, g, tr, node, parts, from);
+        const x1 = if (to == len) lineEndX(ui, g, tr, node, parts) + tail else colX(ui, g, tr, node, parts, to);
+        if (x1 > x0) c.cui_draw_rect(ui, .{ .x = x0, .y = y, .w = x1 - x0, .h = line_h }, .{}, tint);
+        return;
+    }
+    // A string shown whole: the key on the first line, then each line of text.
+    const vcol = valueCol(tr, node);
+    if (from < vcol) {
+        const x0 = colX(ui, g, tr, node, parts, from);
+        const x1 = colX(ui, g, tr, node, parts, @min(to, vcol));
+        if (x1 > x0) c.cui_draw_rect(ui, .{ .x = x0, .y = y, .w = x1 - x0, .h = line_h }, .{}, tint);
+    }
+    const cw = g.char_w;
+    const room = g.right() - parts.value_x;
+    var rest = tr.value(node);
+    var start: u32 = vcol;
+    var line_y = y;
+    while (rest.len > 0) : (line_y += line_h) {
+        const n_bytes = nextLine(ui, cw, rest, room);
+        const chunk = rest[0..n_bytes];
+        const end = start + @as(u32, @intCast(n_bytes));
+        const last = n_bytes >= rest.len;
+        const a = @min(@max(from, start), end);
+        const b = @max(a, if (last and to == len) end else @min(to, end));
+        if (b > a or (last and to == len and from <= end)) {
+            const x0 = parts.value_x + advance(ui, cw, chunk[0 .. a - start]);
+            var x1 = parts.value_x + advance(ui, cw, chunk[0 .. b - start]);
+            if (last and to == len) x1 += @as(f32, if (tr.nodes.items[node].comma) cw else 0) + tail;
+            if (x1 > x0 and line_y + line_h >= g.rect.y and line_y <= g.rect.y + g.rect.h) c.cui_draw_rect(ui, .{ .x = x0, .y = line_y, .w = x1 - x0, .h = line_h }, .{}, tint);
+        }
+        start = end;
+        rest = rest[n_bytes..];
+    }
+}
+
+/// Double-click on a key or a value selects it, without quotes.
+fn selectToken(tr: *const Tree, s: *State, node: u32, col: u32) bool {
+    const n = tr.nodes.items[node];
+    const prefix = prefixLen(n.depth);
+    const key = tr.key(node);
+    var from: u32 = undefined;
+    var to: u32 = undefined;
+    if (key.len >= 2 and col >= prefix and col <= prefix + key.len) {
+        from = prefix + 1;
+        to = prefix + @as(u32, @intCast(key.len)) - 1;
+    } else if (n.kind != .close and !tr.isContainer(node)) {
+        const vcol = valueCol(tr, node);
+        const full = tr.value(node);
+        if (n.kind == .string and full.len >= 2) {
+            from = vcol + 1;
+            to = vcol + @as(u32, @intCast(full.len)) - 1;
+        } else {
+            from = vcol;
+            to = vcol + @as(u32, @intCast(full.len));
+        }
+    } else return false;
+    s.sel_anchor = .{ .node = node, .col = from };
+    s.sel_caret = .{ .node = node, .col = to };
+    return true;
+}
+
 fn inside(r: c.cui_rect, m: c.cui_vec2) bool {
     return m.x >= r.x and m.x < r.x + r.w and m.y >= r.y and m.y < r.y + r.h;
 }
@@ -416,11 +724,19 @@ fn keys(ui: *c.cui_ctx, app: *App, tr: *Tree, s: *State, g: Geo, parts_of: anyty
     if (c.cui_key_pressed(ui, c.CUI_KEY_ENTER) or c.cui_key_pressed(ui, c.CUI_KEY_SPACE)) {
         if (s.selected == null) next = 0 else if (tr.isContainer(node) or parts.long) toggleNode(app, tr, s, node);
     }
-    if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_C)) copyValue(ui, tr, node);
+    if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_C)) {
+        if (s.hasSelection()) w.copy(ui, selectionText(w.arena.allocator(), tr, s) catch "") else copyValue(ui, tr, node);
+    }
+    if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY, c.CUI_KEY_A)) selectAll(tr, s);
     if (c.cui_shortcut(ui, c.CUI_MOD_PRIMARY | c.CUI_MOD_SHIFT, c.CUI_KEY_C)) w.copy(ui, tr.path(w.arena.allocator(), node) catch "");
     if (mods & c.CUI_MOD_ALT != 0) levelKeys(ui, app, tr);
-    if (c.cui_key_pressed(ui, c.CUI_KEY_ESCAPE) and s.find_open) closeFind(ui, app, tr, s);
-    if (next) |r| select(s, tr.rows.items[@min(r, tr.rows.items.len - 1)], true);
+    if (c.cui_key_pressed(ui, c.CUI_KEY_ESCAPE)) {
+        if (s.hasSelection()) s.clearSelection() else if (s.find_open) closeFind(ui, app, tr, s);
+    }
+    if (next) |r| {
+        s.clearSelection();
+        select(s, tr.rows.items[@min(r, tr.rows.items.len - 1)], true);
+    }
 }
 
 fn levelKeys(ui: *c.cui_ctx, app: *App, tr: *Tree) void {
@@ -450,32 +766,49 @@ fn copyValue(ui: *c.cui_ctx, tr: *const Tree, node: u32) void {
 fn menu(ui: *c.cui_ctx, app: *App, tr: *Tree, s: *State, anchor: c.cui_id, long: bool, open: bool) void {
     if (!c.kest_context_menu_begin(ui, "json-menu", anchor)) return;
     defer c.cui_context_menu_end(ui);
+    const selection = s.hasSelection();
+    if (selection and c.cui_menu_item_ex(ui, "Copy", &.{ .shortcut = "Ctrl C" })) w.copy(ui, selectionText(w.arena.allocator(), tr, s) catch "");
+    var node_items = false;
     if (s.selected) |node| if (tr.nodes.items[node].kind != .close) {
+        node_items = true;
         const key = tr.key(node);
-        const string = tr.nodes.items[node].kind == .string;
-        if (c.cui_menu_item_ex(ui, "Copy value", &.{ .shortcut = "Ctrl C" })) copyValue(ui, tr, node);
-        if (string and w.menuItem(ui, "Copy as JSON")) w.copy(ui, tr.sourceOf(node));
+        const container = tr.isContainer(node) and tr.childCount(node) > 0;
+        if (c.cui_menu_item_ex(ui, "Copy value", &.{ .shortcut = if (selection) null else "Ctrl C" })) copyValue(ui, tr, node);
         if (key.len >= 2 and w.menuItem(ui, "Copy key")) w.copy(ui, json_tree.unescape(w.arena.allocator(), key) catch tr.innerKey(node));
         if (c.cui_menu_item_ex(ui, "Copy path", &.{ .shortcut = "Ctrl Shift C" })) w.copy(ui, tr.path(w.arena.allocator(), node) catch "");
+        if (container or long) c.cui_menu_separator(ui);
+        if (container and w.menuItem(ui, if (tr.isOpen(node)) "Collapse" else "Expand")) toggleNode(app, tr, s, node);
         if (long and w.menuItem(ui, if (open) "Shorten string" else "Show whole string")) s.toggleString(app.gpa, node, open_limit);
-        if (tr.isContainer(node) and tr.childCount(node) > 0) {
-            c.cui_menu_separator(ui);
-            if (w.menuItem(ui, "Expand children")) tr.setSubtree(app.gpa, node, false) catch {};
-            if (w.menuItem(ui, "Collapse children")) tr.setSubtree(app.gpa, node, true) catch {};
-        }
-        c.cui_menu_separator(ui);
     };
-    levelItems(ui, app, tr);
-    c.cui_menu_separator(ui);
+    if (selection or node_items) c.cui_menu_separator(ui);
     if (c.cui_menu_item_ex(ui, "Find in JSON", &.{ .shortcut = "Ctrl F" })) openFind(s);
+    if (c.cui_menu_item_ex(ui, "Select all", &.{ .shortcut = "Ctrl A" })) selectAll(tr, s);
+    if (w.submenu(ui, "More", null)) {
+        if (s.selected) |node| if (tr.nodes.items[node].kind != .close) {
+            if (tr.nodes.items[node].kind == .string and w.menuItem(ui, "Copy as JSON string")) w.copy(ui, tr.sourceOf(node));
+            if (tr.isContainer(node) and w.menuItem(ui, "Copy formatted")) {
+                var out: std.ArrayList(u8) = .empty;
+                appendExpanded(w.arena.allocator(), &out, tr, node) catch {};
+                w.copy(ui, out.items);
+            }
+            if (tr.isContainer(node) and tr.childCount(node) > 0) {
+                if (w.menuItem(ui, "Expand everything inside")) tr.setSubtree(app.gpa, node, false) catch {};
+                if (w.menuItem(ui, "Collapse everything inside")) tr.setSubtree(app.gpa, node, true) catch {};
+            }
+            c.cui_menu_separator(ui);
+        };
+        levelItems(ui, app, tr);
+        w.submenuEnd(ui);
+    }
 }
 
 /// Expand all, Collapse all and levels between, for menus.
 pub fn levelItems(ui: *c.cui_ctx, app: *App, tr: *Tree) void {
     if (c.cui_menu_item_ex(ui, "Expand all", &.{ .shortcut = "Alt 0" })) tr.setAll(app.gpa, false) catch {};
     if (c.cui_menu_item_ex(ui, "Collapse all", &.{ .shortcut = "Alt 1" })) tr.setAll(app.gpa, true) catch {};
-    if (tr.max_depth >= 2 and c.cui_menu_item_ex(ui, "Expand to level 2", &.{ .shortcut = "Alt 2" })) tr.setLevel(app.gpa, 2) catch {};
-    if (tr.max_depth >= 3 and c.cui_menu_item_ex(ui, "Expand to level 3", &.{ .shortcut = "Alt 3" })) tr.setLevel(app.gpa, 3) catch {};
+    inline for (.{ 2, 3, 4 }) |level| {
+        if (tr.max_depth >= level and c.cui_menu_item_ex(ui, std.fmt.comptimePrint("Expand to level {d}", .{level}), &.{ .shortcut = std.fmt.comptimePrint("Alt {d}", .{level}) })) tr.setLevel(app.gpa, level) catch {};
+    }
 }
 
 const PartsOf = struct {
@@ -499,6 +832,8 @@ const Paint = struct {
     /// Plain text to highlight; empty for a JSONPath.
     query: []const u8,
     case_sensitive: bool,
+    /// The selected text's ends, in order; null when nothing is selected.
+    selection: ?[2]Pos,
 };
 
 pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, tr: *Tree) void {
@@ -518,7 +853,14 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, tr: *Tree) void {
     const target = if (over) hitTest(ui, before, tr, s, mouse) else null;
     var long = false;
     var open = false;
-    if (c.kest_right_pressed(ui, identity)) if (target) |hit| if (hit.zone != .scrollbar) select(s, hit.node, false);
+    if (c.kest_right_pressed(ui, identity)) if (target) |hit| if (hit.zone != .scrollbar) {
+        // A right-click outside the selected text drops it.
+        if (s.hasSelection()) {
+            const r = s.range();
+            if (hit.node < r[0].node or hit.node > r[1].node) s.clearSelection();
+        }
+        select(s, hit.node, false);
+    };
     if (s.selected) |node| if (tr.rowOf(node) != null) {
         const parts = measure(ui, before, tr, s, node);
         long = parts.long;
@@ -533,6 +875,20 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, tr: *Tree) void {
             s.scroll_y = std.math.clamp((mouse.y - sb.track.y - s.drag_offset) / @max(1, sb.track.h - sb.thumb.h), 0, 1) * before.maxScroll();
         }
     }
+    if (s.selecting) {
+        if (!c.cui_mouse_down(ui, c.CUI_MOUSE_LEFT)) {
+            s.selecting = false;
+        } else if (prev.w > 0) {
+            s.sel_caret = posAt(ui, before, tr, s, mouse);
+            // Dragging past the top or bottom edge scrolls, faster further out.
+            const above = prev.y - mouse.y;
+            const below = mouse.y - (prev.y + prev.h);
+            if (above > 0) s.scroll_y -= @min(above, 80) / 2;
+            if (below > 0) s.scroll_y += @min(below, 80) / 2;
+            if (above > 0 or below > 0) c.cui_request_redraw(ui);
+        }
+    }
+    if (target) |hit| if (!s.dragging and (hit.zone == .value or hit.zone == .row)) c.kest_set_cursor(ui, c.CUI_CURSOR_TEXT);
     if (focused and !s.dragging) keys(ui, app, tr, s, before, PartsOf{ .ui = ui, .g = before, .tr = tr, .s = s });
     var wheel = c.kest_editor_scroll_axes(ui, identity);
     if (font.ctrlWheel(c.cui_key_mods(ui) & c.CUI_MOD_PRIMARY != 0, wheel.y)) wheel = .{};
@@ -565,6 +921,7 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *Tab, tr: *Tree) void {
         .card = card,
         .query = if (s.find_open and !json_path.isPath(query)) query else "",
         .case_sensitive = s.case_sensitive,
+        .selection = if (s.hasSelection()) s.range() else null,
     };
     _ = c.cui_canvas(ui, canvas_id, w.fill, w.fill, draw, &paint, @sizeOf(Paint));
     c.kest_editor_register(ui, identity);
@@ -581,9 +938,41 @@ fn press(ui: *c.cui_ctx, app: *App, tr: *Tree, s: *State, g: Geo, hit: Target, m
     }
     select(s, hit.node, false);
     switch (hit.zone) {
-        .arrow => toggleNode(app, tr, s, hit.node),
-        .chip => s.toggleString(app.gpa, hit.node, open_limit),
-        else => if (c.kest_click_count(ui) >= 2 and (tr.isContainer(hit.node) or hit.long)) toggleNode(app, tr, s, hit.node),
+        .arrow => {
+            s.clearSelection();
+            toggleNode(app, tr, s, hit.node);
+        },
+        .chip => {
+            s.clearSelection();
+            s.toggleString(app.gpa, hit.node, open_limit);
+        },
+        else => {
+            const clicks = c.kest_click_count(ui);
+            const at = posAt(ui, g, tr, s, mouse);
+            if (clicks >= 3) {
+                // Triple-click: the whole line.
+                s.sel_anchor = .{ .node = hit.node, .col = 0 };
+                s.sel_caret = .{ .node = hit.node, .col = lineLen(tr, hit.node) };
+                s.selecting = false;
+            } else if (clicks == 2) {
+                // Double-click: a key or a short value is selected; a
+                // container or a long string opens or closes, as before.
+                s.selecting = false;
+                const on_key = tr.key(hit.node).len > 0 and at.col < valueCol(tr, hit.node);
+                const scalar = !tr.isContainer(hit.node) and tr.nodes.items[hit.node].kind != .close and !hit.long;
+                if ((on_key or scalar) and selectToken(tr, s, hit.node, at.col)) return;
+                s.clearSelection();
+                if (tr.isContainer(hit.node) or hit.long) toggleNode(app, tr, s, hit.node);
+            } else {
+                if (c.cui_key_mods(ui) & c.CUI_MOD_SHIFT != 0) {
+                    s.sel_caret = at;
+                } else {
+                    s.sel_anchor = at;
+                    s.sel_caret = at;
+                }
+                s.selecting = true;
+            }
+        },
     }
 }
 
@@ -704,7 +1093,7 @@ fn drawRow(ui: *c.cui_ctx, p: *const Paint, g: Geo, row: usize) void {
     const band: c.cui_rect = .{ .x = g.rect.x, .y = y, .w = g.rect.w - bar, .h = height };
     const fg = w.color(c.CUI_TOKEN_FOREGROUND);
     const cw = g.char_w;
-    if (s.selected == node) {
+    if (s.selected == node and p.selection == null) {
         c.cui_draw_rect(ui, band, .{}, if (p.focused) w.color(c.CUI_TOKEN_ACCENT_SUBTLE) else w.color(c.CUI_TOKEN_SURFACE_MUTED));
     } else if (tr.hits.items.len > 0 and p.query.len == 0 and tr.hit_set.isSet(node)) {
         // JSONPath results are whole rows.
@@ -719,6 +1108,7 @@ fn drawRow(ui: *c.cui_ctx, p: *const Paint, g: Geo, row: usize) void {
         c.cui_draw_line(ui, .{ .x = gx, .y = y }, .{ .x = gx, .y = y + height }, 1, w.color(c.CUI_TOKEN_BORDER_SUBTLE));
     }
     const parts = measure(ui, g, tr, s, node);
+    drawSelection(ui, p, g, row, parts);
     const ty = y + 1;
     var x = parts.x;
     const container = tr.isContainer(node) and n.kind != .close;

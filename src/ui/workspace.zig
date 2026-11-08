@@ -12,6 +12,8 @@ const response = @import("response.zig");
 pub const Layout = @import("../storage/workspace_store.zig").EditorLayout;
 pub var layout: Layout = .auto;
 pub var column_ratio: f32 = 0.42;
+/// The width the column layout gives the response this frame; 0 otherwise.
+pub var response_share: f32 = 0;
 var revealed_document: u64 = 0;
 var revealed_width: f32 = 0;
 var revealed_tab_width: f32 = 0;
@@ -42,6 +44,11 @@ pub fn view(ui: *c.cui_ctx, app: *App) void {
         c.cui_split_begin(ui, "editors-columns", &column_ratio, &.{ .min_first = w.design.geometry.request_min, .min_second = w.design.geometry.response_min, .width = w.fill, .height = w.fill });
         request.view(ui, app, t);
         c.kest_split_next(ui, "editors-columns", false);
+        // The response's share of the split. Its bar sizes itself to this, not
+        // to last frame's rect, which its own fixed-width buttons can widen.
+        const split = c.cui_get_rect(ui, c.cui_make_id(ui, "editors-columns"));
+        response_share = if (split.w > 0) @max(w.design.geometry.response_min, split.w * (1 - column_ratio) - 1) else 0;
+        defer response_share = 0;
         response.view(ui, app, t);
         c.cui_split_end(ui);
         if (before != column_ratio) {
@@ -230,15 +237,24 @@ fn layoutMenu(ui: *c.cui_ctx, app: *App) void {
 }
 
 fn actions(ui: *c.cui_ctx, app: *App, t: *Tab) void {
-    if (w.menuItem(ui, "Rename")) @import("rename.zig").begin(app, .{ .rename_tab = t }, t.name);
-    if (c.cui_menu_item_ex(ui, "Save", &.{ .icon = c.CUI_ICON_SAVE, .shortcut = "Ctrl S" })) commands.save(app, t);
+    if (c.cui_menu_item_ex(ui, "Save", &.{ .shortcut = "Ctrl S" })) commands.save(app, t);
     if (w.menuItem(ui, "Save as...")) commands.beginSaveAs(app, t);
-    if (c.cui_menu_item_ex(ui, "Duplicate", &.{ .icon = c.CUI_ICON_COPY, .shortcut = "Ctrl D" })) commands.duplicateTab(app, t);
-    if (w.menuItem(ui, "Copy as cURL")) {
-        if (t.toRequest(w.arena.allocator()) catch null) |req| w.copy(ui, @import("../import_export/curl.zig").generate(w.arena.allocator(), req) catch "");
+    if (c.cui_menu_item_ex(ui, "Duplicate", &.{ .shortcut = "Ctrl D" })) commands.duplicateTab(app, t);
+    if (w.menuItem(ui, "Rename")) @import("rename.zig").begin(app, .{ .rename_tab = t }, t.name);
+    c.cui_menu_separator(ui);
+    if (w.menuItem(ui, "Copy as cURL")) copyCurl(ui, app, t);
+    if (w.submenu(ui, "More", null)) {
+        if (w.menuItem(ui, "Encode URL")) commands.encodeUrl(app, t);
+        if (w.menuItem(ui, "Decode URL")) commands.decodeUrl(app, t);
+        w.submenuEnd(ui);
     }
-    if (w.menuItem(ui, "Encode URL")) commands.encodeUrl(app, t);
-    if (w.menuItem(ui, "Decode URL")) commands.decodeUrl(app, t);
+}
+
+/// Copies the request as a cURL command and says so.
+fn copyCurl(ui: *c.cui_ctx, app: *App, t: *Tab) void {
+    const req = (t.toRequest(w.arena.allocator()) catch null) orelse return;
+    w.copy(ui, @import("../import_export/curl.zig").generate(w.arena.allocator(), req) catch return);
+    app.toast(.success, "Copied as cURL", "");
 }
 
 /// Shows `node` in the collection browser, opening the sidebar if needed.
@@ -277,25 +293,25 @@ fn tabMenu(ui: *c.cui_ctx, app: *App) void {
     const t = app.tabs.items[i];
     if (!c.kest_context_menu_begin(ui, "tab-menu", c.cui_make_id(ui, documentTitle(t)))) return;
     const count = app.tabs.items.len;
+    var close: enum { none, this, others, right, all } = .none;
+    if (c.cui_menu_item_ex(ui, "Save", &.{ .shortcut = "Ctrl S" })) commands.save(app, t);
+    if (c.cui_menu_item_ex(ui, "Duplicate", &.{ .shortcut = "Ctrl D" })) commands.duplicateTab(app, t);
+    if (w.menuItem(ui, "Rename")) @import("rename.zig").begin(app, .{ .rename_tab = t }, t.name);
+    if (w.menuItem(ui, "Copy as cURL")) copyCurl(ui, app, t);
+    const node = savedNode(app, t);
+    if (c.cui_menu_item_ex(ui, "Reveal in collection", &.{ .disabled = node == null })) if (node) |n| revealNode(ui, app, n);
+    c.cui_menu_separator(ui);
     if (w.menuItem(ui, if (t.pinned) "Unpin tab" else "Pin tab")) commands.togglePin(app, t);
-    var close: enum { none, this, others, right } = .none;
+    c.cui_menu_separator(ui);
     if (c.cui_menu_item_ex(ui, "Close", &.{ .shortcut = "Ctrl W" })) close = .this;
     if (c.cui_menu_item_ex(ui, "Close others", &.{ .disabled = count < 2 })) close = .others;
     if (c.cui_menu_item_ex(ui, "Close tabs to the right", &.{ .disabled = i + 1 >= count })) close = .right;
-    c.cui_menu_separator(ui);
-    if (c.cui_menu_item_ex(ui, "Save", &.{ .icon = c.CUI_ICON_SAVE, .shortcut = "Ctrl S" })) commands.save(app, t);
-    if (c.cui_menu_item_ex(ui, "Duplicate", &.{ .icon = c.CUI_ICON_COPY, .shortcut = "Ctrl D" })) commands.duplicateTab(app, t);
-    if (w.menuItem(ui, "Rename")) @import("rename.zig").begin(app, .{ .rename_tab = t }, t.name);
-    if (w.menuItem(ui, "Copy as cURL")) {
-        if (t.toRequest(w.arena.allocator()) catch null) |req| w.copy(ui, @import("../import_export/curl.zig").generate(w.arena.allocator(), req) catch "");
-    }
-    const node = savedNode(app, t);
-    if (c.cui_menu_item_ex(ui, "Reveal in collection", &.{ .disabled = node == null })) if (node) |n| revealNode(ui, app, n);
+    if (c.cui_menu_item_ex(ui, "Close all", &.{ .disabled = count < 2 })) close = .all;
     c.cui_context_menu_end(ui);
     switch (close) {
         .none => {},
         .this => commands.requestClose(app, t),
-        .others, .right => {
+        .others, .right, .all => {
             // Close from the end so earlier indexes stay valid; tabs with
             // edits stay open rather than asking once per tab.
             var kept: usize = 0;
@@ -308,7 +324,9 @@ fn tabMenu(ui: *c.cui_ctx, app: *App) void {
                 if (commands.closeIfSaved(app, other)) closed += 1 else kept += 1;
             }
             if (kept > 0) app.toast(.info, "Unsaved tabs kept open", w.fmt("{d} tab{s} with unsaved changes stayed open. Close {s} to save or discard the changes.", .{ kept, if (kept == 1) "" else "s", if (kept == 1) "it" else "them" }))
-            else if (closed > 0) app.toastAction(.info, w.fmt("Closed {d} tab{s}", .{ closed, if (closed == 1) "" else "s" }), "", .{ .reopen = closed });
+            else if (closed > 0 and close != .all) app.toastAction(.info, w.fmt("Closed {d} tab{s}", .{ closed, if (closed == 1) "" else "s" }), "", .{ .reopen = closed });
+            // Last, the tab the menu is for; it asks first if it has edits.
+            if (close == .all and !t.pinned) commands.requestClose(app, t);
         },
     }
 }

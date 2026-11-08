@@ -4,6 +4,19 @@ const std = @import("std");
 const model = @import("model.zig");
 const Allocator = std.mem.Allocator;
 
+/// A place in the viewer's text: a node's row and a byte in that row's line
+/// as `json_view.lineText` writes it.
+pub const Pos = struct {
+    node: u32 = 0,
+    col: u32 = 0,
+    pub fn eql(a: Pos, b: Pos) bool {
+        return a.node == b.node and a.col == b.col;
+    }
+    pub fn before(a: Pos, b: Pos) bool {
+        return a.node < b.node or (a.node == b.node and a.col < b.col);
+    }
+};
+
 pub const State = struct {
     /// The tree this state belongs to; a new response starts over.
     owner: usize = 0,
@@ -36,6 +49,12 @@ pub const State = struct {
     /// Wheel scrolling on its way.
     glide: @import("glide.zig").Glide = .{},
     drag_offset: f32 = 0,
+    /// Text selected with the mouse or Ctrl+A, as row positions: where the
+    /// press began and where the pointer is. Equal means nothing selected.
+    sel_anchor: Pos = .{},
+    sel_caret: Pos = .{},
+    /// The left button went down on text and is still held.
+    selecting: bool = false,
 
     /// Forgets what belonged to the last response; the search text,
     /// options and whether the search bar is open carry over.
@@ -53,12 +72,28 @@ pub const State = struct {
         s.path.clearAndFree(gpa);
         s.hover = null;
         s.dragging = false;
+        s.clearSelection();
         s.glide.stop();
     }
 
     pub fn deinit(s: *State, gpa: Allocator) void {
         s.reset(gpa);
         s.query.deinit();
+    }
+
+    pub fn clearSelection(s: *State) void {
+        s.sel_anchor = .{};
+        s.sel_caret = .{};
+        s.selecting = false;
+    }
+
+    pub fn hasSelection(s: *const State) bool {
+        return !s.sel_anchor.eql(s.sel_caret);
+    }
+
+    /// The selection's ends in document order.
+    pub fn range(s: *const State) [2]Pos {
+        return if (s.sel_caret.before(s.sel_anchor)) .{ s.sel_caret, s.sel_anchor } else .{ s.sel_anchor, s.sel_caret };
     }
 
     pub fn isOpenString(s: *const State, node: u32) bool {

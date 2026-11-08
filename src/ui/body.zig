@@ -47,11 +47,17 @@ pub fn view(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
                 if (w.menuItem(ui, "Format JSON")) commands.formatBody(app, t, 2);
                 if (w.menuItem(ui, "Minify JSON")) commands.formatBody(app, t, 0);
             }
-            if (c.cui_menu_item_ex(ui, "Undo", &.{ .disabled = t.body.undo.items.len == 0 }) and t.body.undoEdit()) persist.touchTab(app, t);
-            if (c.cui_menu_item_ex(ui, "Redo", &.{ .disabled = t.body.redo.items.len == 0 }) and t.body.redoEdit()) persist.touchTab(app, t);
-            if (w.menuItem(ui, "Copy body")) w.copy(ui, t.body.text());
+            if (w.menuItem(ui, "Copy body")) {
+                w.copy(ui, t.body.text());
+                app.toast(.success, "Body copied", "");
+            }
             c.cui_menu_separator(ui);
-            if (c.cui_menu_item_ex(ui, "Tab moves focus (Ctrl M)", &.{ .checked = t.body.tab_moves_focus })) t.body.tab_moves_focus = !t.body.tab_moves_focus;
+            if (c.cui_menu_item_ex(ui, "Undo", &.{ .shortcut = "Ctrl Z", .disabled = t.body.undo.items.len == 0 }) and t.body.undoEdit()) persist.touchTab(app, t);
+            if (c.cui_menu_item_ex(ui, "Redo", &.{ .shortcut = "Ctrl Y", .disabled = t.body.redo.items.len == 0 }) and t.body.redoEdit()) persist.touchTab(app, t);
+            if (w.submenu(ui, "More", null)) {
+                if (c.cui_menu_item_ex(ui, "Tab key moves focus", &.{ .shortcut = "Ctrl M", .checked = t.body.tab_moves_focus })) t.body.tab_moves_focus = !t.body.tab_moves_focus;
+                w.submenuEnd(ui);
+            }
             c.cui_menu_end(ui);
         }
         w.end(ui);
@@ -89,16 +95,17 @@ const MenuContext = struct { app: *App, t: *tab.Tab };
 fn menuItems(ui: *c.cui_ctx, raw: *anyopaque) void {
     const ctx: *MenuContext = @ptrCast(@alignCast(raw));
     const t = ctx.t;
-    if (t.body_kind == .json) {
-        if (w.menuItem(ui, "Format JSON")) commands.formatBody(ctx.app, t, 2);
-        if (w.menuItem(ui, "Minify JSON")) commands.formatBody(ctx.app, t, 0);
-    }
     if (c.cui_menu_item_ex(ui, "Find in body", &.{ .shortcut = "Ctrl F" })) {
         t.body.search_open = true;
         t.body.query.focus();
     }
-    if (c.cui_menu_item_ex(ui, "Wrap lines", &.{ .checked = t.body.word_wrap })) {
-        t.body.word_wrap = !t.body.word_wrap;
-        t.body.reveal = true;
+    if (t.body_kind == .json and w.menuItem(ui, "Format JSON")) commands.formatBody(ctx.app, t, 2);
+    if (w.submenu(ui, "More", null)) {
+        if (t.body_kind == .json and w.menuItem(ui, "Minify JSON")) commands.formatBody(ctx.app, t, 0);
+        if (c.cui_menu_item_ex(ui, "Wrap lines", &.{ .checked = t.body.word_wrap })) {
+            t.body.word_wrap = !t.body.word_wrap;
+            t.body.reveal = true;
+        }
+        w.submenuEnd(ui);
     }
 }

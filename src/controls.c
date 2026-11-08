@@ -1493,3 +1493,86 @@ bool kest_hover_card_begin(cui_ctx *ui, const char *key, cui_id anchor, float wi
     ui->last_id = anchor;
     return cui_hover_card_begin(ui, key, &(cui_hover_card_opts){ .placement = CUI_PLACE_BOTTOM_END, .width = width, .delay = 0.5f });
 }
+
+typedef struct { float hover; } cui__item_state_kest;
+
+/* A cascading submenu inside an open menu: an item with a chevron that opens
+ * a second menu beside it on hover, click, Enter or Right. Left or Escape
+ * closes only the submenu; choosing one of its items closes every menu.
+ * Rarely used commands live here so the first level stays short. */
+bool kest_submenu_begin(cui_ctx *ui, const char *label, const char *icon) {
+    cui__popup_build *b = ui->pb_depth > 0 ? &ui->pb_stack[ui->pb_depth - 1] : NULL;
+    if (!b) return false;
+    cui_popup *parent = cui__popup_get(ui, b->id, false);
+    int index = b->item_index++;
+    cui__menu_nav *nav = cui_state(ui, b->id ^ 0x4E4156u, sizeof *nav);
+    nav->item_count++;
+    cui_id id = cui_make_id(ui, label);
+    cui_id pid = id ^ 0x5B3E40u;
+    cui_popup *p = cui__popup_get(ui, pid, false);
+    bool open = p && p->open;
+    /* A parent that closed takes its submenu with it. */
+    if (open && (!parent || !parent->open)) { p->open = false; open = false; }
+    bool disabled = cui_is_disabled(ui);
+    cui_interact r = cui__interact(ui, id, 0);
+    if (r.hovered && (ui->mx != ui->pmx || ui->my != ui->pmy || !nav->keyboard)) { nav->highlight = index; nav->keyboard = false; }
+    bool hl = nav->highlight == index && !disabled;
+    bool parent_top = parent && parent->open;
+    if (parent_top) for (int i = 0; i < ui->popup_count; i++) {
+        cui_popup *q = &ui->popups[i];
+        if (q != parent && q != p && q->open && q->opened_frame > parent->opened_frame) parent_top = false;
+    }
+    bool want = false, by_keys = false;
+    if (!disabled && parent_top && !open) {
+        if (r.clicked || (r.hovered && !nav->keyboard)) want = true;
+        if (hl && (cui_key_pressed(ui, CUI_KEY_ENTER) || cui_key_pressed(ui, CUI_KEY_RIGHT))) { want = true; by_keys = true; }
+    }
+    if (want) {
+        cui__popup_set(ui, pid, true);
+        p = cui__popup_get(ui, pid, false);
+        if (p) {
+            p->at_mouse = false;
+            cui__menu_nav *child = cui_state(ui, pid ^ 0x4E4156u, sizeof *child);
+            child->highlight = by_keys ? 0 : -1;
+            child->keyboard = by_keys;
+        }
+        ui->kpressed[CUI_KEY_ENTER] = 0;
+        ui->kpressed[CUI_KEY_RIGHT] = 0;
+        open = p && p->open;
+    }
+    /* Another item of the parent took the highlight: this submenu closes. */
+    if (open && nav->highlight != index && ui->hot_layer != pid) { p->open = false; open = false; }
+    cui__item_state_kest *st = cui_state(ui, id, sizeof *st);
+    cui__tween(ui, &st->hover, (hl || open) ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
+    int i = cui__node_new(ui, id);
+    cui_node *n = &ui->nodes[i];
+    n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 10;
+    n->h = CUI_PX(32);
+    n->pad[1] = 10; n->pad[3] = 8;
+    n->w = CUI_FILL;
+    n->self_align = CUI_ALIGN_STRETCH;
+    n->radius = CUI_CORNERS(CUI_MAX(6.0f, ui->theme.radius_panel - 6.0f));
+    n->bg = cui_alpha(CUI_C(ui, ACTIVE), st->hover);
+    n->opacity = disabled ? CUI__DISABLED : 1.0f;
+    cui__mark_interactive(ui, i, 0);
+    cui__open(ui, i);
+    if (icon) cui__icon_node(ui, icon, 16, CUI_C(ui, TEXT_SECONDARY));
+    int t = cui__text_node(ui, label, cui__display_len(label), CUI_FONT_BODY, ui->theme.text_body * ui->theme.font_scale, CUI_C(ui, FOREGROUND), false);
+    ui->nodes[t].line_height = 1.3f;
+    ui->nodes[t].w = CUI_FILL;
+    cui__icon_node(ui, CUI_ICON_CHEVRON_RIGHT, 14, CUI_C(ui, TEXT_MUTED));
+    cui__close(ui);
+    if (!p) return false;
+    bool shown = cui__popup_begin(ui, pid, id, CUI_PLACE_RIGHT_START, 0, 6, 0, true);
+    if (shown && p->open && cui_key_pressed(ui, CUI_KEY_LEFT)) {
+        bool top = true;
+        for (int k = 0; k < ui->popup_count; k++) {
+            cui_popup *q = &ui->popups[k];
+            if (q != p && q->open && q->opened_frame > p->opened_frame) top = false;
+        }
+        if (top) { p->open = false; ui->kpressed[CUI_KEY_LEFT] = 0; nav->highlight = index; nav->keyboard = true; }
+    }
+    return shown;
+}
+
+void kest_submenu_end(cui_ctx *ui) { cui__popup_end(ui); }

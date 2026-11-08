@@ -451,6 +451,9 @@ pub fn run(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]const
     try @import("response_test_support.zig").settle(ui, app, frame);
     try check(@src(), !present(ui, long_menu_tab, "###response-format"));
     try tap(@src(), ui, app, rect(ui, long_menu_tab, "response-actions"), click);
+    // In a window this short the menu may open over the pointer; keep the
+    // pointer off it so the keyboard starts from no highlighted item.
+    c.cui_input_mouse_move(ui, -20, -20);
     for (0..3) |_| frame(ui, app);
     c.cui_push_id_int(ui, @intCast(long_menu_tab.uid));
     const popup = c.cui_get_rect(ui, c.cui_make_id(ui, "Response actions") ^ 0x3e40);

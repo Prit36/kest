@@ -111,6 +111,17 @@ pub fn select(ui: *c.cui_ctx, id: [*:0]const u8, items: []const []const u8, inde
 pub fn menuItem(ui: *c.cui_ctx, label: []const u8) bool {
     return c.cui_menu_item_ex(ui, z(label), &.{});
 }
+pub fn iconItem(ui: *c.cui_ctx, label: []const u8, glyph: [*:0]const u8) bool {
+    return c.cui_menu_item_ex(ui, z(label), &.{ .icon = glyph });
+}
+/// A "More ▸" style cascading submenu inside an open menu; when it returns
+/// true, build its items and call `submenuEnd`.
+pub fn submenu(ui: *c.cui_ctx, label: []const u8, glyph: ?[*:0]const u8) bool {
+    return c.kest_submenu_begin(ui, z(label), glyph);
+}
+pub fn submenuEnd(ui: *c.cui_ctx) void {
+    c.kest_submenu_end(ui);
+}
 pub fn empty(ui: *c.cui_ctx, title: [*:0]const u8) void {
     c.cui_spacer(ui);
     column(ui, .{ .width = fill, .pad_x = 20, .@"align" = c.CUI_ALIGN_CENTER });

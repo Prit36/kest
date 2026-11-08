@@ -162,7 +162,8 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     cards_open = 0;
     const r: ?*Response = if (t.shown) |job| &job.resp else null;
     const bounds = c.cui_get_rect(ui, c.cui_make_id(ui, "response-panel"));
-    const width = if (bounds.w > 0) bounds.w else 360;
+    const share = @import("workspace.zig").response_share;
+    const width = if (bounds.w > 0) (if (share > 0) @min(bounds.w, share) else bounds.w) else 360;
     const preview = r != null and previewSupported(r.?);
     if (t.response.pane == .preview and !preview) t.response.pane = t.response.body_pane;
     const header_label = if (r) |resp| w.fmt("Headers ({d})", .{resp.headers.items.len}) else "Headers";
@@ -174,6 +175,13 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
     const body_view = t.response.pane == .pretty or t.response.pane == .raw;
     const inline_format = r != null and r.?.preview.items.len > 0 and body_view and room >= 100;
     if (inline_format) room -= 100;
+    // Copy, Find and Save sit in the bar when there is room, as one-click
+    // actions; the ... menu keeps them otherwise.
+    const has_body = r != null and r.?.preview.items.len > 0;
+    const tools = has_body and r.?.class() != .binary and r.?.class() != .image and room >= 3 * 30;
+    const save_tool = r != null and (r.?.status > 0 or has_body) and room >= (if (tools) @as(f32, 3 * 30) else 30);
+    if (tools) room -= 2 * 30;
+    if (save_tool) room -= 30;
     const show_duration = data != null and room >= textWidth(ui, data.?.duration, false) + 12;
     if (show_duration) room -= textWidth(ui, data.?.duration, false) + 12;
     const show_size = data != null and room >= textWidth(ui, data.?.size, false) + 12;
@@ -229,6 +237,24 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
         }
         c.kest_popup_track(ui, "###response-format");
     }
+    if (tools) {
+        const copied = copiedRecently(ui, t);
+        if (w.action(ui, "response-copy", "", if (copied) c.CUI_ICON_CHECK else c.CUI_ICON_COPY, false, 28, 28, 3)) {
+            w.copy(ui, shownText(t, r.?));
+            copied_tab = t.uid;
+            copied_at = c.cui_time(ui);
+            c.kest_wake_after(ui, copied_for + 0.05);
+        }
+        c.kest_tooltip(ui, if (copied) "Copied" else if (t.response.pane == .headers) "Copy headers" else "Copy response");
+        if (t.response.pane != .headers) {
+            if (w.action(ui, "response-find", "", c.CUI_ICON_SEARCH, false, 28, 28, 3)) find(t);
+            c.kest_tooltip(ui, "Find in response (Ctrl F)");
+        }
+    }
+    if (save_tool) {
+        if (w.action(ui, "response-save", "", c.CUI_ICON_DOWNLOAD, false, 28, 28, 3)) @import("response.zig").save(app, r.?);
+        c.kest_tooltip(ui, "Save response to a file");
+    }
     var clear = false;
     if (data != null) {
         w.row(ui, .{ .id = "response-actions", .width = w.px(28), .height = w.px(28) });
@@ -237,28 +263,34 @@ pub fn navigation(ui: *c.cui_ctx, app: *App, t: *tab.Tab) void {
             if (item(ui, "Execution details", .{}, true)) c.cui_popover_open(ui, "response-details");
             if (r) |resp| if (resp.status > 0 or resp.preview.items.len > 0) {
                 if (!inline_format and resp.preview.items.len > 0) {
-                    formatItems(ui, t, resp, true);
                     c.cui_menu_separator(ui);
+                    formatItems(ui, t, resp, true);
                 }
-                if (resp.preview.items.len > 0 and resp.class() != .binary and resp.class() != .image) {
+                const textual = resp.preview.items.len > 0 and resp.class() != .binary and resp.class() != .image;
+                c.cui_menu_separator(ui);
+                if (textual) {
+                    if (item(ui, "Copy response", .{}, true)) w.copy(ui, shownText(t, resp));
+                    if (item(ui, "Find in response", .{ .shortcut = "Ctrl F" }, true)) find(t);
                     const text_mode = t.response.pane == .raw or (t.response.pane == .pretty and !(resp.class() == .json and t.response.pretty_mode == .tree)) or (t.response.pane == .preview and (resp.class() == .html or resp.preview.items.len > 256 * 1024));
                     if (text_mode and item(ui, "Wrap lines", .{ .checked = t.response.wrap_response }, true)) t.response.wrap_response = !t.response.wrap_response;
-                    if (item(ui, "Find in response", .{ .icon = c.CUI_ICON_SEARCH, .shortcut = "Ctrl F" }, true)) find(t);
-                    if (item(ui, if (resp.isPartial()) "Copy raw body prefix" else "Copy raw body", .{}, true)) w.copy(ui, resp.preview.items);
-                    // The formatted text is offered only once prepared for the
-                    // view being shown, so the copy matches what is on screen.
-                    if (resp.class() == .json and t.response.pane == .pretty and t.response.pretty_mode != .tree and t.response.formatted_mode == t.response.pretty_mode) if (t.response.formatted) |formatted| {
-                        if (item(ui, if (t.response.pretty_mode == .minified) "Copy minified JSON" else "Copy formatted JSON", .{}, true)) w.copy(ui, formatted);
-                    };
                 }
-                if (resp.headers.items.len > 0 and item(ui, if (@import("../core/header_text.zig").clipboardSafe(resp.raw_headers)) "Copy response headers" else "Copy escaped response headers", .{}, true)) @import("response_headers.zig").copyAll(ui, resp);
                 if (item(ui, if (resp.spill_failed) "Save available response..." else "Save response...", .{}, true)) @import("response.zig").save(app, resp);
-                if (resp.class() == .json and t.response.pane == .pretty and t.response.pretty_mode == .tree) if (t.response.tree) |*tr| {
-                    c.cui_menu_separator(ui);
-                    if (item(ui, "Expand all", .{ .shortcut = "Alt 0" }, true)) tr.setAll(app.gpa, false) catch {};
-                    if (item(ui, "Collapse all", .{ .shortcut = "Alt 1" }, true)) tr.setAll(app.gpa, true) catch {};
-                    if (tr.max_depth >= 2 and item(ui, "Expand to level 2", .{ .shortcut = "Alt 2" }, true)) tr.setLevel(app.gpa, 2) catch {};
-                    if (tr.max_depth >= 3 and item(ui, "Expand to level 3", .{ .shortcut = "Alt 3" }, true)) tr.setLevel(app.gpa, 3) catch {};
+                const tree = if (resp.class() == .json and t.response.pane == .pretty and t.response.pretty_mode == .tree) t.response.tree else null;
+                if (textual or resp.headers.items.len > 0 or tree != null) if (w.submenu(ui, "More", null)) {
+                    if (textual) {
+                        if (w.menuItem(ui, if (resp.isPartial()) "Copy raw body prefix" else "Copy raw body")) w.copy(ui, resp.preview.items);
+                        // The formatted text is offered only once prepared for the
+                        // view being shown, so the copy matches what is on screen.
+                        if (resp.class() == .json and t.response.formatted_mode == .minified) if (t.response.formatted) |formatted| {
+                            if (w.menuItem(ui, "Copy minified JSON")) w.copy(ui, formatted);
+                        };
+                    }
+                    if (resp.headers.items.len > 0 and w.menuItem(ui, if (@import("../core/header_text.zig").clipboardSafe(resp.raw_headers)) "Copy response headers" else "Copy escaped response headers")) @import("response_headers.zig").copyAll(ui, resp);
+                    if (t.response.tree) |*tr| if (tree != null) {
+                        c.cui_menu_separator(ui);
+                        @import("json_view.zig").levelItems(ui, app, tr);
+                    };
+                    w.submenuEnd(ui);
                 };
             };
             c.cui_menu_separator(ui);
@@ -313,6 +345,31 @@ fn details(ui: *c.cui_ctx, t: *tab.Tab) void {
     c.cui_scroll_end(ui);
     _ = w.menuItem(ui, "Close");
     c.cui_menu_end(ui);
+}
+
+/// The copy button shows a check this long after copying.
+const copied_for = 1.5;
+var copied_tab: u64 = 0;
+var copied_at: f64 = -10;
+fn copiedRecently(ui: *c.cui_ctx, t: *const tab.Tab) bool {
+    return copied_tab == t.uid and c.cui_time(ui) - copied_at < copied_for;
+}
+
+/// What Copy takes: the headers on the Headers tab, otherwise the body as
+/// it is shown (formatted JSON, minified JSON or the original text).
+fn shownText(t: *tab.Tab, r: *Response) []const u8 {
+    if (t.response.pane == .headers) {
+        var out: std.ArrayList(u8) = .empty;
+        for (r.headers.items) |h| out.print(w.arena.allocator(), "{s}: {s}\n", .{ h.name, h.value }) catch break;
+        return out.items;
+    }
+    if (r.class() == .json and t.response.pane == .pretty) {
+        if (t.response.pretty_mode == .tree and !t.response.tree_failed) if (t.response.tree) |*tr| {
+            return @import("json_view.zig").formatted(w.arena.allocator(), tr) catch r.preview.items;
+        };
+        if (t.response.formatted_mode == t.response.pretty_mode) if (t.response.formatted) |formatted| return formatted;
+    }
+    return r.preview.items;
 }
 
 pub fn find(t: *tab.Tab) void {

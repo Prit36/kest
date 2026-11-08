@@ -59,7 +59,7 @@ pub fn run(app: *App, test_mode: bool, snapshot: ?[]const u8, width: f32, height
         try tests(ui, app);
         try workspaceUx(ui, app, sw, snapshot);
         try @import("ui_interaction_tests.zig").run(ui, app, frame, click, chord);
-        try integration(ui, app);
+        try integration(ui, app, sw, snapshot);
         try @import("sidebar_tests.zig").run(ui, app, sw, snapshot, frame, click);
         try @import("geometry_tests.zig").run(ui, app, frame, click);
         try @import("document_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
@@ -318,7 +318,7 @@ fn workspaceUx(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]c
     std.debug.print("CUI workspace UX: instant themes, joined composer, direct row entry, continuous typing, Tab to value, URL sync, two visible rows at 640px, response focus, adaptive columns, collection navigation passed\n", .{});
 }
 
-fn integration(ui: *c.cui_ctx, app: *App) !void {
+fn integration(ui: *c.cui_ctx, app: *App, sw: *c.cui_sw_renderer, snapshot: ?[]const u8) !void {
     var server: @import("test_server").Server = undefined;
     try server.start(app.io);
     defer server.stop();
@@ -332,6 +332,7 @@ fn integration(ui: *c.cui_ctx, app: *App) !void {
     try expect(@src(), t.shown != null and t.shown.?.resp.status == 200);
     try expect(@src(), std.mem.indexOf(u8, t.shown.?.resp.preview.items, "needle") != null);
     try @import("ui_interaction_tests.zig").response(ui, app, frame, click);
+    try @import("ux_polish_tests.zig").run(ui, app, sw, snapshot, frame, click, chord);
     t.response.pretty_mode = .tree;
     inline for (std.meta.tags(@import("app/tab.zig").ResponsePane)) |pane| {
         t.response.pane = pane;

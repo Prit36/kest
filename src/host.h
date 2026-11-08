@@ -82,6 +82,8 @@ bool kest_request_button(cui_ctx *ui, const char *label, const cui_button_opts *
 bool kest_request_enter(cui_ctx *ui);
 bool kest_request_shortcut(cui_ctx *ui);
 bool kest_dropdown_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts);
+bool kest_submenu_begin(cui_ctx *ui, const char *label, const char *icon);
+void kest_submenu_end(cui_ctx *ui);
 bool kest_reveal(cui_ctx *ui, cui_id scroll_id, cui_id target, bool horizontal);
 void kest_focus(cui_ctx *ui, const char *id);
 void kest_input_select_all(cui_ctx *ui, const char *id, int length);

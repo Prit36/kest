@@ -393,29 +393,43 @@ fn nodeMenu(ui: *c.cui_ctx, app: *App, n: *col.Node) void {
             app.modal = .move_to;
             app.modal_open = true;
         }
-        if (w.menuItem(ui, "Export selected Postman")) imports.exportSelection(app, .postman);
-        if (w.menuItem(ui, "Export selected Kest")) imports.exportSelection(app, .native);
+        if (w.submenu(ui, "Export selected", null)) {
+            if (w.menuItem(ui, "Postman collection v2.1")) imports.exportSelection(app, .postman);
+            if (w.menuItem(ui, "Kest (.kest.json)")) imports.exportSelection(app, .native);
+            w.submenuEnd(ui);
+        }
+        c.cui_menu_separator(ui);
         if (c.cui_menu_item_ex(ui, "Delete selected", &.{ .danger = true })) deleteSelection(app);
         return;
     }
+    // Everyday commands first; reordering by one step, the description and
+    // export formats wait in submenus (rows also drag to reorder).
+    if (n.kind == .request and w.menuItem(ui, "Open")) commands.openRequest(app, n);
     if (w.menuItem(ui, "New request")) dialogs.askName(app, .{ .new_request = tree.containerOf(n) }, "");
     if (w.menuItem(ui, "New folder")) dialogs.askName(app, .{ .new_folder = tree.containerOf(n) }, "");
+    c.cui_menu_separator(ui);
     if (w.menuItem(ui, "Rename")) @import("rename.zig").begin(app, .{ .rename_node = n }, n.name);
-    if (w.menuItem(ui, "Description")) dialogs.askName(app, .{ .describe_node = n }, n.description);
     if (w.menuItem(ui, "Duplicate")) tree.duplicate(app, n);
-    if (n.kind != .collection) {
-        if (w.menuItem(ui, "Move up")) tree.reorder(app, n, -1);
-        if (w.menuItem(ui, "Move down")) tree.reorder(app, n, 1);
-        if (w.menuItem(ui, "Move to...")) {
-            app.move_node = n;
-            tree.collectTargets(app, n);
-            app.modal = .move_to;
-            app.modal_open = true;
+    if (n.kind != .collection and w.menuItem(ui, "Move to...")) {
+        app.move_node = n;
+        tree.collectTargets(app, n);
+        app.modal = .move_to;
+        app.modal_open = true;
+    }
+    if (w.submenu(ui, "Export", null)) {
+        if (w.menuItem(ui, "Postman collection v2.1")) imports.exportCollection(app, n, .postman);
+        if (w.menuItem(ui, "Kest (.kest.json)")) imports.exportCollection(app, n, .native);
+        w.submenuEnd(ui);
+    }
+    if (w.submenu(ui, "More", null)) {
+        if (w.menuItem(ui, if (n.description.len > 0) "Edit description" else "Add description")) dialogs.askName(app, .{ .describe_node = n }, n.description);
+        if (n.kind != .collection) {
+            if (w.menuItem(ui, "Move up")) tree.reorder(app, n, -1);
+            if (w.menuItem(ui, "Move down")) tree.reorder(app, n, 1);
         }
+        w.submenuEnd(ui);
     }
     c.cui_menu_separator(ui);
-    if (w.menuItem(ui, "Export Postman")) imports.exportCollection(app, n, .postman);
-    if (w.menuItem(ui, "Export Kest")) imports.exportCollection(app, n, .native);
     if (c.cui_menu_item_ex(ui, "Delete", &.{ .danger = true })) tree.deleteNode(app, n);
 }
 

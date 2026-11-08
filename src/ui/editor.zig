@@ -82,9 +82,9 @@ pub fn editItems(ui: *c.cui_ctx, s: *State, source: []const u8, read_only: bool)
             const clip = c.kest_clipboard(ui);
             if (clip != null) s.replaceSelection(std.mem.span(clip), false);
         }
-        if (menuItem(ui, "Delete", "Del", selected)) s.replaceSelection("", false);
     }
-    c.cui_menu_separator(ui);
+    // Delete lives in the Edit menu and on the key; the context menu keeps
+    // to the commands people reach for with the mouse.
     if (menuItem(ui, "Select all", "Ctrl A", source.len > 0)) {
         _ = s.command(.select_all, source, read_only);
         s.precise_goal = null;
@@ -198,20 +198,23 @@ pub fn contextMenu(ui: *c.cui_ctx, id: [*:0]const u8, s: *State, source: []const
     const caret = s.caret;
     const anchor = s.anchor;
     editItems(ui, s, source, read_only);
-    if (!read_only and s.folds.regions.items.len > 0) {
-        c.cui_menu_separator(ui);
-        const here = s.folds.regionAround(&s.index, s.caret);
-        const folded_here = if (here) |r| s.folds.isFolded(r.open) else false;
-        if (menuItem(ui, if (folded_here) "Unfold" else "Fold", "Ctrl Shift -", here != null)) toggleFoldAtCaret(s);
-        if (menuItem(ui, "Fold all", "", true)) {
-            s.folds.foldAll(s.gpa);
-            keepCaretShown(s);
-        }
-        if (menuItem(ui, "Unfold all", "", s.folds.anyFolded())) s.folds.unfoldAll();
-    }
     if (extra) |menu| {
         c.cui_menu_separator(ui);
         menu.items(ui, menu.ctx);
+    }
+    if (!read_only and s.folds.regions.items.len > 0) {
+        if (extra == null) c.cui_menu_separator(ui);
+        if (w.submenu(ui, "Folding", null)) {
+            const here = s.folds.regionAround(&s.index, s.caret);
+            const folded_here = if (here) |r| s.folds.isFolded(r.open) else false;
+            if (menuItem(ui, if (folded_here) "Unfold" else "Fold", "Ctrl Shift -", here != null)) toggleFoldAtCaret(s);
+            if (menuItem(ui, "Fold all", "", true)) {
+                s.folds.foldAll(s.gpa);
+                keepCaretShown(s);
+            }
+            if (menuItem(ui, "Unfold all", "", s.folds.anyFolded())) s.folds.unfoldAll();
+            w.submenuEnd(ui);
+        }
     }
     c.cui_context_menu_end(ui);
     const chosen = v0 != s.version or caret != s.caret or anchor != s.anchor;
