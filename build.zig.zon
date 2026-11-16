@@ -1,12 +1,12 @@
 .{
     .name = .kest_cui,
-    .version = "0.0.2",
+    .version = "0.0.3",
     .fingerprint = 0x0f100764558b273f,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .cui = .{
-            .url = "https://codeload.github.com/yappologistic/CUI/tar.gz/d0383c4d3c00b7769f6b11cefdf581e1800f2da3",
-            .hash = "N-V-__8AAAvIzwGFmvWNs5W_gYNnIwAZQ2XyiKLakN74-QB-",
+            .url = "https://codeload.github.com/yappologistic/CUI/tar.gz/5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5",
+            .hash = "N-V-__8AAPzJcQIueZvO3tmqD98w4mPceW94y0mu1h3pKn2d",
         },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src", "tests", "assets", "docs", "tools", "README.md", "LICENSE" },

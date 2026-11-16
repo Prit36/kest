@@ -603,5 +603,5 @@ fn nativeEditorSample(app: *App, payload: []const u8) !void {
         slot.* = @intCast(start.untilNow(app.io).raw.toNanoseconds());
     }
     std.mem.sort(u64, &times, {}, std.sort.asc(u64));
-    std.debug.print("CUI 1.1 native editor, isolated 4 MiB single line: median {d:.3} ms (8 frames)\n", .{@as(f64, @floatFromInt(times[4])) / 1e6});
+    std.debug.print("CUI {s} native editor, isolated 4 MiB single line: median {d:.3} ms (8 frames)\n", .{ c.CUI_VERSION_STRING, @as(f64, @floatFromInt(times[4])) / 1e6 });
 }

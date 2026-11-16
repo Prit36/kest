@@ -89,7 +89,7 @@ collections are never touched.
 ## Build from source
 
 Requires [Zig](https://ziglang.org/download/) 0.17.0 on Windows x64. The first build
-downloads the pinned [CUI](https://github.com/yappologistic/CUI) source; no CMake,
+downloads the pinned [CUI 1.4.0](https://github.com/yappologistic/CUI/releases/tag/v1.4.0) source; no CMake,
 C compiler or Node is needed.
 
 ```sh

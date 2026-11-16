@@ -1,4 +1,4 @@
-/* Vendored from CUI d0383c4d (MIT; see CUI-LICENSE). Local changes add
+/* Vendored from CUI 1.4.0 (5a9c12b4) (MIT; see CUI-LICENSE). Local changes add
  * DirectWrite coverage and release its font faces before freeing font data.
  * Fonts and text: TrueType rasterization with stb_truetype, a glyph atlas
  * with subpixel positioning, kerning, font fallback (icons live in their own
@@ -333,6 +333,24 @@ void cui__fonts_shutdown(cui_ctx *ui) {
     ui->atlas_tex = 0;
 }
 
+/* ---- outlines for color layer emoji fonts (cui_emoji.c) ---- */
+
+struct cui__tt { stbtt_fontinfo info; };
+cui__tt *cui__tt_open(cui_ctx *ui, const unsigned char *data, int offset) {
+    cui__tt *t = cui__alloc(ui, sizeof *t);
+    if (!t) return NULL;
+    if (!stbtt_InitFont(&t->info, data, offset)) { cui__free(ui, t); return NULL; }
+    return t;
+}
+void cui__tt_vmetrics(cui__tt *t, int *ascent, int *descent) { int gap; stbtt_GetFontVMetrics(&t->info, ascent, descent, &gap); }
+bool cui__tt_box(cui__tt *t, int gid, float scale, int *x0, int *y0, int *x1, int *y1) {
+    stbtt_GetGlyphBitmapBox(&t->info, gid, scale, scale, x0, y0, x1, y1);
+    return *x1 > *x0 && *y1 > *y0;
+}
+void cui__tt_render(cui__tt *t, int gid, float scale, unsigned char *out, int w, int h, int stride) {
+    stbtt_MakeGlyphBitmap(&t->info, out, w, h, stride, scale, scale, gid);
+}
+
 /* ---- glyph lookup with fallback ---- */
 
 static int cui__glyph_index(cui_font_data *fd, uint32_t cp) {
@@ -620,7 +638,8 @@ int cui__text_wrap(cui_ctx *ui, cui_font font, float size, const char *text, int
     if (cui__text_needs_shaping(ui, text, len)) {
         font = cui__resolve_font(ui, font);
         if (font < 0) return 0;
-        int requested = -1;
+        cui_direction direction = ui->text_direction ? ui->text_direction : ui->direction;
+        int requested = direction == CUI_DIRECTION_RTL ? 1 : direction == CUI_DIRECTION_LTR ? 0 : -1;
         cui_shaped_paragraph *p = cui__paragraph(ui, text, len, requested);
         if (p && p->wrap_lines && p->wrap_font == font && p->wrap_size == size && p->wrap_width == width) {
             if (lines && max_lines > 0)
@@ -769,7 +788,7 @@ static cui_glyph *cui__glyph_get(cui_ctx *ui, cui_font font, int gi, float px_si
     uint32_t h = cui__hash(key, sizeof key, 77) & 4095;
     for (int i = ui->glyph_buckets[h]; i >= 0; i = ui->glyphs[i].next) {
         cui_glyph *g = &ui->glyphs[i];
-        if (g->key_cp == (uint32_t)gi && g->font == font && g->size_q == sq && g->subpx == subpx) return g;
+        if (g->key_cp == (uint32_t)gi && g->font == font && g->size_q == sq && g->subpx == subpx) { g->stamp = (uint32_t)ui->frame; return g; }
     }
     if (!cui__gamma_ready) {
         for (int i = 0; i < 256; i++) cui__gamma_lut[i] = (uint8_t)(powf(i / 255.0f, 0.82f) * 255.0f + 0.5f);
@@ -825,7 +844,7 @@ static cui_glyph *cui__glyph_get(cui_ctx *ui, cui_font font, int gi, float px_si
     free(native_pixels);
     CUI__GROW(ui, ui->glyphs, ui->glyph_count, ui->glyph_cap, 1);
     cui_glyph *g = &ui->glyphs[ui->glyph_count];
-    g->key_cp = (uint32_t)gi; g->font = (uint16_t)font; g->size_q = sq; g->subpx = (uint8_t)subpx;
+    g->key_cp = (uint32_t)gi; g->font = (uint16_t)font; g->size_q = sq; g->subpx = (uint8_t)subpx; g->stamp = (uint32_t)ui->frame;
     g->x0 = (int16_t)x0; g->y0 = (int16_t)y0; g->w = (uint16_t)CUI_MAX(w, 0); g->h = (uint16_t)CUI_MAX(hgt, 0);
     g->ax = (uint16_t)ax; g->ay = (uint16_t)ay;
     g->next = ui->glyph_buckets[h];
@@ -833,7 +852,78 @@ static cui_glyph *cui__glyph_get(cui_ctx *ui, cui_font font, int gi, float px_si
     return &ui->glyphs[ui->glyph_count++];
 }
 
+/* The atlas grows when it fills up, and the glyphs of sizes no longer shown
+ * (after a zoom, a change of display scale, a page that is gone) would keep it
+ * big. Every few seconds, before anything is drawn, the glyphs drawn in the
+ * last five seconds move into the smallest atlas they fill no more than half
+ * of, and the rest are dropped; they are drawn again if they come back. */
+#define CUI__ATLAS_KEEP 300   /* frames */
+typedef struct { uint16_t h; int i; } cui__glyph_ord;
+static int cui__glyph_ord_cmp(const void *a, const void *b) {
+    const cui__glyph_ord *x = a, *y = b;
+    return x->h != y->h ? (int)y->h - (int)x->h : x->i - y->i;
+}
+static void cui__atlas_compact(cui_ctx *ui) {
+    uint32_t now = (uint32_t)ui->frame;
+    size_t area = 0;
+    int live = 0;
+    for (int i = 0; i < ui->glyph_count; i++) {
+        cui_glyph *g = &ui->glyphs[i];
+        if (now - g->stamp > CUI__ATLAS_KEEP) continue;
+        area += (size_t)(g->w + 1) * (size_t)(g->h + 1);
+        live++;
+    }
+    int nw = ui->atlas_w;
+    while (nw > CUI_ATLAS_MIN && area * 2 <= (size_t)(nw / 2) * (size_t)(nw / 2)) nw /= 2;
+    if (nw == ui->atlas_w) return;
+    cui__glyph_ord *ord = cui__alloc(ui, sizeof *ord * (size_t)CUI_MAX(live, 1));
+    cui_glyph *ng = cui__alloc(ui, sizeof *ng * (size_t)CUI_MAX(live, 1));
+    uint8_t *na = cui__alloc(ui, (size_t)nw * (size_t)nw * CUI__ATLAS_BPP);
+    if (!ord || !ng || !na) { cui__free(ui, ord); cui__free(ui, ng); cui__free(ui, na); return; }
+    int n = 0;
+    for (int i = 0; i < ui->glyph_count; i++)
+        if (now - ui->glyphs[i].stamp <= CUI__ATLAS_KEEP) ord[n++] = (cui__glyph_ord){ ui->glyphs[i].h, i };
+    qsort(ord, (size_t)n, sizeof *ord, cui__glyph_ord_cmp);   /* tall first: shelves waste less */
+    memset(na, 0, (size_t)nw * (size_t)nw * CUI__ATLAS_BPP);
+    int px = 1, py = 1, row = 0;
+    for (int k = 0; k < n; k++) {
+        cui_glyph g = ui->glyphs[ord[k].i];
+        if (g.w > 0 && g.h > 0) {
+            if (px + g.w + 1 > nw) { px = 1; py += row + 1; row = 0; }
+            if (py + g.h + 1 > nw) { cui__free(ui, ord); cui__free(ui, ng); cui__free(ui, na); return; }   /* does not fit after all */
+            for (int y = 0; y < g.h; y++)
+                memcpy(na + ((size_t)(py + y) * (size_t)nw + (size_t)px) * CUI__ATLAS_BPP,
+                       ui->atlas + ((size_t)(g.ay + y) * (size_t)ui->atlas_w + g.ax) * CUI__ATLAS_BPP,
+                       (size_t)g.w * CUI__ATLAS_BPP);
+            g.ax = (uint16_t)px; g.ay = (uint16_t)py;
+            px += g.w + 1;
+            if (g.h > row) row = g.h;
+        }
+        ng[k] = g;
+    }
+    cui__free(ui, ord);
+    cui__free(ui, ui->glyphs);
+    cui__free(ui, ui->atlas);
+    ui->glyphs = ng; ui->glyph_count = n; ui->glyph_cap = CUI_MAX(n, 1);
+    ui->atlas = na; ui->atlas_w = ui->atlas_h = nw;
+    ui->pack_x = px; ui->pack_y = py; ui->pack_row_h = row;
+    for (int i = 0; i < 4096; i++) ui->glyph_buckets[i] = -1;
+    for (int i = 0; i < n; i++) {
+        cui_glyph *g = &ui->glyphs[i];
+        uint32_t key[3] = { g->key_cp, (uint32_t)g->font | ((uint32_t)g->size_q << 16), (uint32_t)g->subpx };
+        uint32_t h = cui__hash(key, sizeof key, 77) & 4095;
+        g->next = ui->glyph_buckets[h];
+        ui->glyph_buckets[h] = i;
+    }
+    ui->atlas_dirty = true;
+    ui->dirty_x0 = 0; ui->dirty_y0 = 0; ui->dirty_x1 = nw; ui->dirty_y1 = nw;
+}
+
 void cui__fonts_begin_frame(cui_ctx *ui) {
+    if (!ui->atlas_reset_pending && ui->atlas_w > CUI_ATLAS_MIN && ui->frame - ui->atlas_check_frame >= CUI__ATLAS_KEEP) {
+        ui->atlas_check_frame = ui->frame;
+        cui__atlas_compact(ui);
+    }
     if (!ui->atlas_reset_pending) return;
     ui->atlas_reset_pending = false;
     ui->glyph_count = 0;
@@ -893,7 +983,8 @@ static float cui__shape_run(cui_ctx *ui, cui_font font, float size, const char *
         while (pe < plen && paragraph[pe] != '\n') pe++;
         paragraph += ps; plen = pe - ps; line_start -= ps;
     }
-    int requested = -1;
+    cui_direction direction = ui->text_direction ? ui->text_direction : ui->direction;
+    int requested = direction == CUI_DIRECTION_RTL ? 1 : direction == CUI_DIRECTION_LTR ? 0 : -1;
     cui_shaped_paragraph *p = cui__paragraph(ui, paragraph, plen, requested);
     if (!p) return 0;
     cui_shaped_line *cached = p->lines;
@@ -1109,10 +1200,20 @@ void cui__draw_text_ellipsis(cui_ctx *ui, cui_font font, float size, float x, fl
         cut_w = it.x;
     }
     while (cut > 0 && text[cut - 1] == ' ') { cut--; cut_w = cui__text_width(ui, font, size, text, cut, tabular); }
-    cui__draw_run(ui, font, size, x, y, color, text, cut, tabular, 1e30f);
+    /* right-to-left text ends on the left, so its ellipsis goes there */
+    bool rtl = false;
+#ifdef CUI_TEXT_SHAPING
+    for (int at = 0; at < len;) {
+        uint32_t cp;
+        at += cui__utf8_decode(text + at, len - at, &cp);
+        int dir = cui__bidi_strong_direction(cp);
+        if (dir >= 0) { rtl = dir == 1; break; }
+    }
+#endif
+    cui__draw_run(ui, font, size, rtl ? x + ew : x, y, color, text, cut, tabular, 1e30f);
     cui__text_fx_fn fx = ui->text_fx;
     ui->text_fx = NULL;   /* the ellipsis is not part of the text */
-    cui__draw_run(ui, font, size, x + cut_w, y, color, ell, 3, false, 1e30f);
+    cui__draw_run(ui, font, size, rtl ? x : x + cut_w, y, color, ell, 3, false, 1e30f);
     ui->text_fx = fx;
 }
 

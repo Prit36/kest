@@ -114,6 +114,7 @@ struct cui_gl_renderer {
     GLuint_ program, vao, vbo, ebo;
     GLint_ u_viewport, u_tex, u_gamma, u_text;
     bool es;
+    bool software;   /* the driver draws on the CPU (llvmpipe, SwiftShader, ...) */
     struct { GLuint_ id; cui_texture_format fmt; int w, h; } *tex;
     int tex_count, tex_cap;
 };
@@ -265,6 +266,11 @@ cui_gl_renderer *cui_gl_create(cui_gl_loader loader) {
         return NULL;
     }
     const char *ver = (const char *)r->gl.GetString(GL_VERSION_);
+    const char *rend = (const char *)r->gl.GetString(0x1F01 /* GL_RENDERER */);
+    if (rend) {
+        static const char *const soft[] = { "llvmpipe", "softpipe", "swrast", "SwiftShader", "Software Rasterizer", "GDI Generic", "Apple Software Renderer", "Microsoft Basic Render" };
+        for (size_t i = 0; i < sizeof soft / sizeof *soft; i++) if (strstr(rend, soft[i])) r->software = true;
+    }
     r->es = ver && strstr(ver, "OpenGL ES") != NULL;
     if (ver && !r->es) {
         int major = 0, minor = 0;
@@ -382,6 +388,8 @@ static void cui__gl_tex_destroy(void *user, cui_texture tex) {
     r->gl.DeleteTextures(1, &r->tex[slot].id);
     r->tex[slot].id = 0;
 }
+
+bool cui_gl_is_software(const cui_gl_renderer *r) { return r && r->software; }
 
 cui_renderer_iface cui_gl_iface(cui_gl_renderer *r) {
     cui_renderer_iface i;

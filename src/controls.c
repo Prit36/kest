@@ -668,10 +668,23 @@ cui_path_bar_result kest_path_bar_ex(cui_ctx *ui, const char *key, const char *c
     int first = ui->node_count;
     cui_path_bar_result result = cui_path_bar_ex(ui, key, segments, count, opts);
     cui_id id = cui_make_id(ui, key);
+    int bar = -1;
     for (int i = first; i < ui->node_count; i++) if (ui->nodes[i].id == id) {
         ui->nodes[i].border = 0; ui->nodes[i].bg.a = 0;
         ui->nodes[i].radius = CUI_CORNERS(0);
+        /* Balance the row against the composer's 8px top gutter below it. */
+        ui->nodes[i].ty += 4;
+        bar = i;
         break;
+    }
+    /* Lower the breadcrumb labels to match the icons' visible center. Keep
+     * the icons at their native position and leave popup-menu content alone. */
+    if (bar >= 0) for (int i = bar + 1; i < ui->node_count; i++) {
+        cui_node *n = &ui->nodes[i];
+        if (!n->text || n->font == CUI_FONT_ICONS) continue;
+        int parent = n->parent;
+        while (parent >= 0 && parent != bar) parent = ui->nodes[parent].parent;
+        if (parent == bar) n->ty += 1;
     }
     return result;
 }

@@ -345,4 +345,4 @@ Native tabs retain request method/name, stable identity, unsaved state, close
 confirmation and overflow reveal, and add keyboard/mouse reordering. The path bar
 reveals collections and folders; layout choice and column divider position now
 persist. Markdown preview uses the new renderer within a 256 KiB bound. See
-[CUI 1.1 update](cui-1.1-update.md) for integration details and validation.
+[vendored modules](../src/vendor/README.md) for integration details.

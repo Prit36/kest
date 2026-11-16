@@ -1,6 +1,6 @@
 # Kest: verified coverage
 
-This checklist applies to Kest with CUI 1.1.0. The original application's checklist
+This checklist applies to Kest with CUI 1.4.0. The original application's checklist
 does not establish coverage for this interface.
 
 **T** = run in engine/HTTP tests. **U** = run through the CUI headless harness.

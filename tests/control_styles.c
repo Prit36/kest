@@ -247,7 +247,7 @@ static int table_checks(cui_ctx *ui, cui_sw_renderer *sw) {
     for (int i = 0; i < ui->node_count; i++) {
         cui_node *n = &ui->nodes[i];
         int root = i;
-        while (ui->nodes[root].parent >= 0) root = ui->nodes[root].parent;
+        while (ui->nodes[root].id != 0x7001718u && ui->nodes[root].parent >= 0) root = ui->nodes[root].parent;
         if (ui->nodes[root].id != 0x7001718u || !n->text) continue;
         CHECK(!strstr(n->text, value));
         if (strstr(n->text, "Row actions")) safe_hint = true;
@@ -269,7 +269,55 @@ static int table_checks(cui_ctx *ui, cui_sw_renderer *sw) {
     return 0;
 }
 
+/* CUI 1.4 compacts the glyph atlas after old sizes age out. Kest stores four
+ * coverage channels per pixel; shrinking must preserve every channel. */
+static int atlas_compaction_check(void) {
+    cui_ctx *ui = cui_create(NULL);
+    CHECK(ui);
+    cui_set_viewport(ui, 640, 240, 1);
+    cui_begin_frame(ui, 1.0f / 60);
+    cui_text(ui, "ClearType atlas");
+    cui_end_frame(ui);
+    CHECK(ui->glyph_count > 0);
+    cui_glyph glyph = ui->glyphs[0];
+    CHECK(glyph.w > 0 && glyph.h > 0);
+    size_t row_bytes = (size_t)glyph.w * 4;
+    unsigned char *expected = malloc(row_bytes * glyph.h);
+    CHECK(expected);
+    for (int y = 0; y < glyph.h; y++)
+        memcpy(expected + y * row_bytes, ui->atlas + ((size_t)(glyph.ay + y) * ui->atlas_w + glyph.ax) * 4, row_bytes);
+
+    /* Leave the glyphs in a larger atlas, as after displaying a large font. */
+    int old_width = ui->atlas_w, large_width = old_width * 2;
+    unsigned char *large = cui__alloc(ui, (size_t)large_width * large_width * 4);
+    CHECK(large);
+    memset(large, 0, (size_t)large_width * large_width * 4);
+    for (int y = 0; y < ui->atlas_h; y++)
+        memcpy(large + (size_t)y * large_width * 4, ui->atlas + (size_t)y * old_width * 4, (size_t)old_width * 4);
+    cui__free(ui, ui->atlas);
+    ui->atlas = large;
+    ui->atlas_w = ui->atlas_h = large_width;
+    ui->frame += 301;
+    for (int i = 0; i < ui->glyph_count; i++) ui->glyphs[i].stamp = (uint32_t)ui->frame;
+    cui__fonts_begin_frame(ui);
+    CHECK(ui->atlas_w < large_width);
+    bool found = false;
+    for (int i = 0; i < ui->glyph_count; i++) {
+        cui_glyph *g = &ui->glyphs[i];
+        if (g->key_cp != glyph.key_cp || g->font != glyph.font || g->size_q != glyph.size_q || g->subpx != glyph.subpx) continue;
+        CHECK(g->w == glyph.w && g->h == glyph.h);
+        for (int y = 0; y < g->h; y++)
+            CHECK(!memcmp(expected + y * row_bytes, ui->atlas + ((size_t)(g->ay + y) * ui->atlas_w + g->ax) * 4, row_bytes));
+        found = true;
+    }
+    CHECK(found);
+    free(expected);
+    cui_destroy(ui);
+    return 0;
+}
+
 int main(void) {
+    CHECK(atlas_compaction_check() == 0);
     cui_sw_renderer *sw = cui_sw_create();
     CHECK(sw);
     cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw) });

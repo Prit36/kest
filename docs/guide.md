@@ -226,8 +226,8 @@ rather than copied, and large response buffers built on workers (the body, its
 line index, text geometry and JSON tree) give back their growth slack once
 final (`src/utils/fit.zig`).
 
-See [verified coverage](supported_features.md). The [CUI 1.1 update](cui-1.1-update.md)
-records component choices, compatibility work and validation.
+See [verified coverage](supported_features.md) for tested behavior and
+[vendored modules](../src/vendor/README.md) for the CUI integration details.
 
 ## Icon
 

@@ -13,22 +13,26 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag != .windows) @panic("The CUI host is currently Windows-only; the Zig engine remains portable.");
     const dep = b.dependency("cui", .{});
     const bindings = b.addTranslateC(.{ .root_source_file = b.path("src/host.h"), .target = target, .optimize = optimize });
-    bindings.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/include"));
+    bindings.addIncludePath(dep.path("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/include"));
     const cui = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true });
-    cui.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/include"));
-    cui.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/src"));
-    cui.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/"));
-    cui.addCSourceFiles(.{ .root = dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/"), .files = &.{
-        "src/cui_core.c",         "src/cui_theme.c",
-        "src/cui_layout.c",       "src/cui_widgets.c",          "src/cui_controls.c",
-        "src/cui_data.c",             "src/cui_actions.c",
-        "src/cui_disclosure.c",   "src/cui_extras.c",
-        "src/cui_grid.c",         "src/cui_treetable.c",        "src/cui_markdown.c",
-        "src/cui_editor.c",       "src/cui_diff.c",             "src/cui_code.c",
-        "src/cui_tools.c",        "src/cui_hex.c",              "src/cui_chrome.c",
-        "src/cui_charts.c",       "src/cui_image.c",            "src/cui_font_data.c",
-        "src/cui_inflate.c",
-        "src/platform/cui_app.c", "src/platform/cui_dialogs.c", "src/platform/cui_app_win32.c",
+    cui.addIncludePath(dep.path("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/include"));
+    cui.addIncludePath(dep.path("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/src"));
+    cui.addIncludePath(dep.path("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/"));
+    cui.addCSourceFiles(.{ .root = dep.path("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/"), .files = &.{
+        "src/cui_core.c",               "src/cui_theme.c",
+        "src/cui_layout.c",             "src/cui_widgets.c",
+        "src/cui_controls.c",           "src/cui_data.c",
+        "src/cui_actions.c",            "src/cui_disclosure.c",
+        "src/cui_extras.c",             "src/cui_grid.c",
+        "src/cui_treetable.c",          "src/cui_markdown.c",
+        "src/cui_editor.c",             "src/cui_diff.c",
+        "src/cui_code.c",               "src/cui_tools.c",
+        "src/cui_hex.c",                "src/cui_chrome.c",
+        "src/cui_charts.c",             "src/cui_image.c",
+        "src/cui_font_data.c",          "src/cui_inflate.c",
+        "src/cui_strings.c",            "src/cui_instrument.c",
+        "src/platform/cui_app.c",       "src/platform/cui_dialogs.c",
+        "src/platform/cui_app_win32.c",
     }, .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_text.c"), .flags = c_flags });
     cui.addCSourceFile(.{ .file = b.path("src/vendor/cui_textedit.c"), .flags = c_flags });
@@ -50,10 +54,10 @@ pub fn build(b: *std.Build) void {
     const exe = appExecutable(b, "kest", target, optimize, cui_lib, cui_bindings, diagnostics);
     b.installArtifact(exe);
     b.getInstallStep().dependOn(&b.addInstallFile(b.path("LICENSE"), "licenses/Kest-MIT.txt").step);
-    b.getInstallStep().dependOn(&b.addInstallFile(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/LICENSE"), "licenses/CUI-MIT.txt").step);
-    b.getInstallStep().dependOn(&b.addInstallFile(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/THIRD_PARTY.md"), "licenses/CUI-THIRD-PARTY.md").step);
+    b.getInstallStep().dependOn(&b.addInstallFile(dep.path("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/LICENSE"), "licenses/CUI-MIT.txt").step);
+    b.getInstallStep().dependOn(&b.addInstallFile(dep.path("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/THIRD_PARTY.md"), "licenses/CUI-THIRD-PARTY.md").step);
     for ([_][]const u8{ "Inter", "Geist", "Lucide" }) |font|
-        b.getInstallStep().dependOn(&b.addInstallFile(dep.path(b.fmt("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/assets/fonts/LICENSE-{s}.txt", .{font})), b.fmt("licenses/LICENSE-{s}.txt", .{font})).step);
+        b.getInstallStep().dependOn(&b.addInstallFile(dep.path(b.fmt("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/assets/fonts/LICENSE-{s}.txt", .{font})), b.fmt("licenses/LICENSE-{s}.txt", .{font})).step);
     const run = b.addRunArtifact(exe);
     run.addPassthruArgs();
     b.step("run", "Open Kest").dependOn(&run.step);
@@ -70,7 +74,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     }) });
     chrome_test.root_module.addIncludePath(b.path("src"));
-    chrome_test.root_module.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/include"));
+    chrome_test.root_module.addIncludePath(dep.path("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/include"));
     chrome_test.root_module.addCSourceFile(.{ .file = b.path("tests/window_chrome.c"), .flags = c_flags });
     chrome_test.root_module.linkLibrary(cui_lib);
     const chrome_run = b.addRunArtifact(chrome_test);
@@ -82,7 +86,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     }) });
     geometry_test.root_module.addIncludePath(b.path("src"));
-    geometry_test.root_module.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/include"));
+    geometry_test.root_module.addIncludePath(dep.path("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/include"));
     geometry_test.root_module.addCSourceFile(.{ .file = b.path("tests/window_geometry.c"), .flags = c_flags });
     geometry_test.root_module.linkLibrary(cui_lib);
     const geometry_run = b.addRunArtifact(geometry_test);
@@ -94,8 +98,8 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     }) });
     control_test.root_module.addIncludePath(b.path("src"));
-    control_test.root_module.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/include"));
-    control_test.root_module.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/src"));
+    control_test.root_module.addIncludePath(dep.path("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/include"));
+    control_test.root_module.addIncludePath(dep.path("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/src"));
     control_test.root_module.addCSourceFile(.{ .file = b.path("tests/control_styles.c"), .flags = c_flags });
     control_test.root_module.linkLibrary(cui_lib);
     const control_run = b.addRunArtifact(control_test);
@@ -107,7 +111,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     }) });
     text_test.root_module.addIncludePath(b.path("src"));
-    text_test.root_module.addIncludePath(dep.path("CUI-d0383c4d3c00b7769f6b11cefdf581e1800f2da3/"));
+    text_test.root_module.addIncludePath(dep.path("CUI-5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5/"));
     text_test.root_module.addCSourceFile(.{ .file = b.path("tests/text_rendering.c"), .flags = c_flags });
     text_test.root_module.linkLibrary(cui_lib);
     test_step.dependOn(&b.addRunArtifact(text_test).step);

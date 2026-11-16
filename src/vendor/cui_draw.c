@@ -496,3 +496,10 @@ void cui__draw_triangles(cui_ctx *ui, const cui_cvert *src, int nv, const uint32
     uint32_t *ix = cui__idx(ui, ni);
     for (int i = 0; i < ni; i++) ix[i] = base + idx[i];
 }
+
+void cui__draw_text_at(cui_ctx *ui, cui_font font, float size, float x, float y, cui__text_anchor anchor, cui_color color, const char *s, bool tab) {
+    float w = cui__text_width(ui, font, size, s, -1, tab);
+    float fh = cui__font_line_height(ui, font, size);
+    float tx = anchor == CUI__AT_CENTER ? x - w * 0.5f : anchor == CUI__AT_RIGHT ? x - w : x;
+    cui__draw_text_line(ui, font, size, tx, y - fh * 0.5f, color, s, -1, tab);
+}

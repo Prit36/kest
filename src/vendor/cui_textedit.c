@@ -4,7 +4,6 @@
 #include "cui_internal.h"
 #include "kest_edit.h"
 
-static float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 
 /* cui_edit_state and CUI__UNDO_MAX live in cui_internal.h (the code editor shares them) */
 
@@ -52,16 +51,28 @@ static float cui__x_at(cui_ctx *ui, const cui__edit_paint *p, const char *line, 
 
 static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
     bool unshaped = ui->text_unshaped;
-    ui->text_unshaped = true;
     cui__edit_paint *p = data;
     cui_rect r = n->rect;
     cui_push_clip(ui, r);
     float fh = cui__font_line_height(ui, p->font, p->size);
     int s0 = CUI_MIN(p->cursor, p->anchor), s1 = CUI_MAX(p->cursor, p->anchor);
-    if (p->len == 0 && p->placeholder) {
+    if (p->len == 0 && p->placeholder) {   /* shaped like any label: no caret goes in it */
         float y = r.y + (p->multiline ? (p->line_h - fh) * 0.5f : (r.h - fh) * 0.5f);
-        cui__draw_text_ellipsis(ui, p->font, p->size, r.x, y, r.w, p->placeholder_color, p->placeholder, (int)strlen(p->placeholder), false);
+        /* A placeholder is static display text; editing retains its original path. */
+        ui->text_unshaped = unshaped;
+#ifdef CUI_TEXT_SHAPING
+        cui_direction direction = ui->text_direction;
+        ui->text_direction = n->rtl ? CUI_DIRECTION_RTL : CUI_DIRECTION_LTR;
+#endif
+        float w = cui__text_width(ui, p->font, p->size, p->placeholder, -1, false);
+        float x = n->rtl ? r.x + CUI_MAX(0, r.w - w) : r.x;
+        cui__draw_text_ellipsis(ui, p->font, p->size, x, y, r.w, p->placeholder_color, p->placeholder, (int)strlen(p->placeholder), false);
+#ifdef CUI_TEXT_SHAPING
+        ui->text_direction = direction;
+#endif
+        ui->text_unshaped = true;
     }
+    ui->text_unshaped = true;   /* the text being edited: caret positions follow the glyphs one by one */
     if (!p->multiline) {
         float y = r.y + (r.h - fh) * 0.5f;
         float x = r.x - p->scroll_x;
@@ -305,7 +316,257 @@ static int cui__line_of(const cui_text_layout_line *lines, int n, int pos) {
 
 typedef struct { bool focused, changed, submitted, blurred, gained; } cui__edit_result;
 
-/* The core of every text field. `area` is the node that shows the text. */
+/* One frame of editing a focused field: what the phases below share. */
+typedef struct {
+    cui_ctx *ui;
+    cui_edit_state *e;
+    char *buf; size_t cap; int len;
+    bool multiline, password, read_only;
+    cui_rect area;                       /* the text area, last frame */
+    cui_font font; float size, line_h;
+    cui_text_layout_line *lines; int nlines;   /* wrapped lines, text areas only */
+    cui__edit_paint measure;             /* font, size and masking, for cui__x_at */
+    bool shift, word_mod, line_mod, prim;
+    bool moved, edited, vertical;
+    bool right;
+    int command;
+} cui__edit_frame;
+
+/* the caret goes to `to`; without Shift the selection collapses onto it */
+static void cui__edit_move(cui__edit_frame *c, int to) {
+    c->e->cursor = to;
+    if (!c->shift) c->e->anchor = to;
+    c->moved = true;
+}
+
+/* replace the selection with `text` (n bytes) and put the caret after it */
+static void cui__edit_replace_selection(cui__edit_frame *c, const char *text, int n, bool newlines) {
+    cui_edit_state *e = c->e;
+    int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
+    cui__delete_range(c->buf, &c->len, s0, s1);
+    e->cursor = e->anchor = s0;
+    int m = cui__insert(c->buf, &c->len, c->cap, e->cursor, text, n, newlines);
+    e->cursor += m; e->anchor = e->cursor;
+    c->edited = true;
+}
+
+/* the pointer: place the caret, select by dragging, words on a double click, all on a triple */
+static void cui__edit_pointer(cui__edit_frame *c, cui_interact r) {
+    cui_ctx *ui = c->ui;
+    cui_edit_state *e = c->e;
+    const char *buf = c->buf;
+    int len = c->len;
+    if (!((r.active && (ui->mdown[0] || ui->mpressed[0])) || c->right) || c->area.w <= 0) return;
+    int pos;
+    if (!c->multiline) {
+        float x = ui->mx - c->area.x + e->scroll_x;
+        if (c->password) {
+            /* walk code points */
+            int p = 0, best = 0;
+            float bestd = 1e9f;
+            for (;;) {
+                float px = cui__x_at(ui, &c->measure, buf, len, p);
+                float dd = fabsf(px - x);
+                if (dd < bestd) { bestd = dd; best = p; }
+                if (p >= len) break;
+                p = cui__utf8_next(buf, len, p);
+            }
+            pos = best;
+        } else pos = cui__text_hit(ui, c->font, c->size, buf, len, x);
+    } else {
+        float y = ui->my - c->area.y + e->scroll_y;
+        int ln = (int)floorf(y / c->line_h);
+        ln = CUI_CLAMP(ln, 0, c->nlines - 1);
+        cui_text_layout_line *L = &c->lines[ln];
+        pos = L->start + cui__text_hit(ui, c->font, c->size, buf + L->start, L->end - L->start, ui->mx - c->area.x);
+        if (pos > L->end) pos = L->end;
+        if (ln < c->nlines - 1 && pos == L->end && L->end == c->lines[ln + 1].start && pos > L->start) pos = cui__utf8_prev(buf, pos);
+    }
+    if (c->right) {
+        /* A right-click inside the selection keeps it for the menu. */
+        int a0 = CUI_MIN(e->cursor, e->anchor), a1 = CUI_MAX(e->cursor, e->anchor);
+        if (a0 == a1 || pos < a0 || pos > a1) e->cursor = e->anchor = pos;
+    } else if (ui->mpressed[0]) {
+        if (r.double_clicked || ui->click_count >= 2) {
+            e->anchor = cui__word_left(buf, pos);
+            if (pos < len && cui__is_word((unsigned char)buf[pos])) e->anchor = cui__word_left(buf, pos + 1);
+            e->cursor = cui__word_right(buf, len, pos);
+            if (ui->click_count >= 3) { e->anchor = 0; e->cursor = len; }
+        } else {
+            e->cursor = pos;
+            if (!(ui->mods & CUI_MOD_SHIFT)) e->anchor = pos;
+        }
+        e->selecting = true;
+    } else if (e->selecting && ui->click_count < 2) {
+        e->cursor = pos;
+    }
+    ui->caret_time = ui->time;
+    e->preferred_x = -1;
+}
+
+/* arrows, Home, End and select all */
+static void cui__edit_move_keys(cui__edit_frame *c) {
+    cui_ctx *ui = c->ui;
+    cui_edit_state *e = c->e;
+    const char *buf = c->buf;
+    int len = c->len;
+    bool shift = c->shift, word_mod = c->word_mod, line_mod = c->line_mod;
+    int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
+    for (int rep = cui_key_pressed(ui, CUI_KEY_LEFT) ? ui->kpressed[CUI_KEY_LEFT] : 0; rep > 0; rep--) {
+        if (!shift && s1 > s0 && !word_mod) { e->cursor = e->anchor = s0; c->moved = true; continue; }
+        cui__edit_move(c, line_mod ? 0 : word_mod ? cui__word_left(buf, e->cursor) : cui__utf8_prev(buf, e->cursor));
+    }
+    for (int rep = cui_key_pressed(ui, CUI_KEY_RIGHT) ? ui->kpressed[CUI_KEY_RIGHT] : 0; rep > 0; rep--) {
+        if (!shift && s1 > s0 && !word_mod) { e->cursor = e->anchor = s1; c->moved = true; continue; }
+        cui__edit_move(c, line_mod ? len : word_mod ? cui__word_right(buf, len, e->cursor) : cui__utf8_next(buf, len, e->cursor));
+    }
+    c->vertical = c->multiline && (cui_key_pressed(ui, CUI_KEY_UP) || cui_key_pressed(ui, CUI_KEY_DOWN));
+    if (c->vertical) {
+        cui_text_layout_line *lines = c->lines;
+        int nlines = c->nlines;
+        int ln = cui__line_of(lines, nlines, e->cursor);
+        cui_text_layout_line *L = &lines[ln];
+        float x = e->preferred_x >= 0 ? e->preferred_x : cui__text_width(ui, c->font, c->size, buf + L->start, e->cursor - L->start, false);
+        int dir = cui_key_pressed(ui, CUI_KEY_UP) ? -1 : 1;
+        int target = ln + dir;
+        if (target < 0) cui__edit_move(c, 0);
+        else if (target >= nlines) cui__edit_move(c, len);
+        else {
+            cui_text_layout_line *T = &lines[target];
+            int pos = T->start + cui__text_hit(ui, c->font, c->size, buf + T->start, T->end - T->start, x);
+            if (target < nlines - 1 && pos == T->end && T->end == lines[target + 1].start && pos > T->start) pos = cui__utf8_prev(buf, pos);
+            cui__edit_move(c, pos);
+        }
+        e->preferred_x = x;
+    }
+    if (cui_key_pressed(ui, CUI_KEY_HOME)) {
+        if (c->multiline && !c->prim) { int ln = cui__line_of(c->lines, c->nlines, e->cursor); cui__edit_move(c, c->lines[ln].start); }
+        else cui__edit_move(c, 0);
+    }
+    if (cui_key_pressed(ui, CUI_KEY_END)) {
+        if (c->multiline && !c->prim) {
+            cui_text_layout_line *lines = c->lines;
+            int ln = cui__line_of(lines, c->nlines, e->cursor);
+            int end = lines[ln].end;
+            if (ln < c->nlines - 1 && end == lines[ln + 1].start && end > lines[ln].start && buf[end - 1] == ' ') end--;
+            cui__edit_move(c, end);
+        } else cui__edit_move(c, len);
+    }
+    if ((c->prim && cui_key_pressed(ui, CUI_KEY_A)) || c->command == KEST_EDIT_SELECT_ALL) { e->anchor = 0; e->cursor = len; c->moved = true; }
+}
+
+/* copy, cut and paste */
+static void cui__edit_clipboard(cui__edit_frame *c) {
+    cui_ctx *ui = c->ui;
+    cui_edit_state *e = c->e;
+    int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
+    bool key_copy = (c->prim && cui_key_pressed(ui, CUI_KEY_C)) || c->command == KEST_EDIT_COPY;
+    bool key_cut = (c->prim && cui_key_pressed(ui, CUI_KEY_X)) || c->command == KEST_EDIT_CUT;
+    bool key_paste = (c->prim && cui_key_pressed(ui, CUI_KEY_V)) || c->command == KEST_EDIT_PASTE;
+    if ((key_copy || key_cut) && s1 > s0 && !c->password) {
+        if (ui->platform.set_clipboard) {
+            char *tmpc = cui__frame_strdup(ui, c->buf + s0, s1 - s0);
+            ui->platform.set_clipboard(ui->platform.user, tmpc);
+        }
+        if (key_cut && !c->read_only) {
+            cui__undo_push(ui, e, c->buf);
+            cui__delete_range(c->buf, &c->len, s0, s1);
+            e->cursor = e->anchor = s0;   /* the selection is gone; a paste in the same frame inserts at the caret */
+            c->edited = true;
+        }
+    }
+    if (!c->read_only && c->command == KEST_EDIT_DELETE && e->cursor != e->anchor) {
+        cui__undo_push(ui, e, c->buf);
+        cui__edit_replace_selection(c, "", 0, c->multiline);
+    }
+    if (!c->read_only && key_paste && ui->platform.get_clipboard) {
+        const char *clip = ui->platform.get_clipboard(ui->platform.user);
+        if (clip && *clip) {
+            cui__undo_push(ui, e, c->buf);
+            cui__edit_replace_selection(c, clip, (int)strlen(clip), c->multiline);
+            e->last_edit = 0;
+        }
+    }
+}
+
+/* undo and redo, Backspace, Delete, Enter in a text area, and typed text */
+static void cui__edit_typing(cui__edit_frame *c, cui__edit_result *res) {
+    cui_ctx *ui = c->ui;
+    cui_edit_state *e = c->e;
+    char *buf = c->buf;
+    int s0, s1;
+    bool undo = (c->prim && cui_key_pressed(ui, CUI_KEY_Z) && !c->shift) || c->command == KEST_EDIT_UNDO;
+    bool redo = (c->prim && ((c->shift && cui_key_pressed(ui, CUI_KEY_Z)) || cui_key_pressed(ui, CUI_KEY_Y))) || c->command == KEST_EDIT_REDO;
+    if ((undo || redo) && cui__edit_undo_step(ui, e, buf, c->cap, !undo)) {
+        c->len = (int)strlen(buf);
+        res->changed = true;
+    }
+    for (int rep = ui->kpressed[CUI_KEY_BACKSPACE]; rep > 0; rep--) {
+        s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
+        cui__undo_push_kind(ui, e, buf, s1 > s0 ? 3 : 2);
+        if (s1 > s0) { cui__delete_range(buf, &c->len, s0, s1); e->cursor = e->anchor = s0; }
+        else if (e->cursor > 0) {
+            int to = c->word_mod ? cui__word_left(buf, e->cursor) : c->line_mod ? 0 : cui__utf8_prev(buf, e->cursor);
+            cui__delete_range(buf, &c->len, to, e->cursor);
+            e->cursor = e->anchor = to;
+        }
+        c->edited = true;
+    }
+    for (int rep = ui->kpressed[CUI_KEY_DELETE]; rep > 0; rep--) {
+        s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
+        cui__undo_push_kind(ui, e, buf, s1 > s0 ? 3 : 2);
+        if (s1 > s0) { cui__delete_range(buf, &c->len, s0, s1); e->cursor = e->anchor = s0; }
+        else if (e->cursor < c->len) {
+            int to = c->word_mod ? cui__word_right(buf, c->len, e->cursor) : cui__utf8_next(buf, c->len, e->cursor);
+            cui__delete_range(buf, &c->len, e->cursor, to);
+        }
+        c->edited = true;
+    }
+    if (c->multiline && cui_key_pressed(ui, CUI_KEY_ENTER) && !c->prim) {
+        cui__undo_push(ui, e, buf);
+        cui__edit_replace_selection(c, "\n", 1, true);
+    }
+    /* Tab is left to focus navigation, in text areas too */
+    if (ui->text_in_len > 0 && !(c->prim && !(ui->mods & CUI_MOD_ALT))) {
+        s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
+        cui__undo_push_kind(ui, e, buf, s1 > s0 ? 3 : 1);
+        cui__edit_replace_selection(c, ui->text_in, ui->text_in_len, c->multiline);
+    }
+}
+
+/* scroll so the caret stays in view, and tell the input method where it is */
+static void cui__edit_follow_caret(cui__edit_frame *c, const cui__edit_result *res) {
+    cui_ctx *ui = c->ui;
+    cui_edit_state *e = c->e;
+    cui_rect area = c->area;
+    int len = c->len = (int)strlen(c->buf);
+    if (!c->multiline) {
+        float cx = cui__x_at(ui, &c->measure, c->buf, len, e->cursor);
+        float full = cui__x_at(ui, &c->measure, c->buf, len, len);
+        if (area.w > 0) {
+            if (cx - e->scroll_x > area.w - 2) e->scroll_x = cx - area.w + 2;
+            if (cx - e->scroll_x < 0) e->scroll_x = cx;
+            if (full - e->scroll_x < area.w - 2) e->scroll_x = CUI_MAX(0, full - area.w + 2);
+        }
+    } else if (area.h > 0) {
+        if (res->changed) c->nlines = cui__edit_lines(ui, c->font, c->size, c->buf, len, area.w, &c->lines);
+        if (res->changed || c->moved || e->selecting) {   /* follow the caret only when it moved */
+            int ln = cui__line_of(c->lines, c->nlines, e->cursor);
+            float cy = ln * c->line_h;
+            if (cy - e->scroll_y > area.h - c->line_h) e->scroll_y = cy - area.h + c->line_h;
+            if (cy - e->scroll_y < 0) e->scroll_y = cy;
+        }
+        float total = c->nlines * c->line_h;
+        if (e->scroll_y > total - area.h) e->scroll_y = CUI_MAX(0, total - area.h);
+    }
+    if (ui->platform.set_text_input_rect) {
+        cui_rect cr = area;
+        if (!c->multiline) cr.x = area.x + cui__x_at(ui, &c->measure, c->buf, len, e->cursor) - e->scroll_x;
+        cr.w = 1;
+        ui->platform.set_text_input_rect(ui->platform.user, cr);
+    }
+}
+
 static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *e, char *buf, size_t cap,
                                         bool multiline, bool password, bool read_only, cui_rect area,
                                         cui_font font, float size, float line_h, cui_interact r, bool right) {
@@ -324,240 +585,44 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
     }
     res.focused = true;
     ui->edit = e;
-    int command = kest__edit_take(ui, id);
 
-    cui_text_layout_line *lines = NULL;
-    int nlines = 0;
-    if (multiline) nlines = cui__edit_lines(ui, font, size, buf, len, area.w, &lines);
+    cui__edit_frame c;
+    memset(&c, 0, sizeof c);
+    c.ui = ui; c.e = e; c.buf = buf; c.cap = cap; c.len = len;
+    c.right = right; c.command = kest__edit_take(ui, id);
+    c.multiline = multiline; c.password = password; c.read_only = read_only;
+    c.area = area; c.font = font; c.size = size; c.line_h = line_h;
+    c.measure.font = font; c.measure.size = size; c.measure.password = password;
+    if (multiline) c.nlines = cui__edit_lines(ui, font, size, buf, len, area.w, &c.lines);
 
-    /* mouse */
-    cui__edit_paint tmp;
-    memset(&tmp, 0, sizeof tmp);
-    tmp.font = font; tmp.size = size; tmp.password = password;
-    if (((r.active && (ui->mdown[0] || ui->mpressed[0])) || right) && area.w > 0) {
-        int pos;
-        if (!multiline) {
-            float x = ui->mx - area.x + e->scroll_x;
-            if (password) {
-                /* walk code points */
-                int p = 0, best = 0;
-                float bestd = 1e9f;
-                for (;;) {
-                    float px = cui__x_at(ui, &tmp, buf, len, p);
-                    float dd = fabsf(px - x);
-                    if (dd < bestd) { bestd = dd; best = p; }
-                    if (p >= len) break;
-                    p = cui__utf8_next(buf, len, p);
-                }
-                pos = best;
-            } else pos = cui__text_hit(ui, font, size, buf, len, x);
-        } else {
-            float y = ui->my - area.y + e->scroll_y;
-            int ln = (int)floorf(y / line_h);
-            ln = CUI_CLAMP(ln, 0, nlines - 1);
-            cui_text_layout_line *L = &lines[ln];
-            pos = L->start + cui__text_hit(ui, font, size, buf + L->start, L->end - L->start, ui->mx - area.x);
-            if (pos > L->end) pos = L->end;
-            if (ln < nlines - 1 && pos == L->end && L->end == lines[ln + 1].start && pos > L->start) pos = cui__utf8_prev(buf, pos);
-        }
-        if (right) {
-            /* a right-click inside the selection keeps it for the menu */
-            int a0 = CUI_MIN(e->cursor, e->anchor), a1 = CUI_MAX(e->cursor, e->anchor);
-            if (a0 == a1 || pos < a0 || pos > a1) e->cursor = e->anchor = pos;
-        } else if (ui->mpressed[0]) {
-            if (r.double_clicked || ui->click_count >= 2) {
-                e->anchor = cui__word_left(buf, pos);
-                if (pos < len && cui__is_word((unsigned char)buf[pos])) e->anchor = cui__word_left(buf, pos + 1);
-                e->cursor = cui__word_right(buf, len, pos);
-                if (ui->click_count >= 3) { e->anchor = 0; e->cursor = len; }
-            } else {
-                e->cursor = pos;
-                if (!(ui->mods & CUI_MOD_SHIFT)) e->anchor = pos;
-            }
-            e->selecting = true;
-        } else if (e->selecting && ui->click_count < 2) {
-            e->cursor = pos;
-        }
-        ui->caret_time = ui->time;
-        e->preferred_x = -1;
-    }
+    cui__edit_pointer(&c, r);
     if (!ui->mdown[0]) e->selecting = false;
 
-    /* keyboard */
     int mods = ui->mods;
-    bool shift = (mods & CUI_MOD_SHIFT) != 0;
+    c.shift = (mods & CUI_MOD_SHIFT) != 0;
 #if defined(__APPLE__)
-    bool word_mod = (mods & CUI_MOD_ALT) != 0;
-    bool line_mod = (mods & CUI_MOD_SUPER) != 0;
+    c.word_mod = (mods & CUI_MOD_ALT) != 0;     /* Option+arrow moves by word, Command+arrow to the line's end */
+    c.line_mod = (mods & CUI_MOD_SUPER) != 0;
 #else
-    bool word_mod = (mods & CUI_MOD_CTRL) != 0;
-    bool line_mod = false;
+    c.word_mod = (mods & CUI_MOD_CTRL) != 0;
+    c.line_mod = false;
 #endif
-    bool prim = (mods & CUI_MOD_PRIMARY) != 0;
-    bool moved = false, edited = false;
-    int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
+    c.prim = (mods & CUI_MOD_PRIMARY) != 0;
 
-#define CUI__MOVE(to) do { e->cursor = (to); if (!shift) e->anchor = e->cursor; moved = true; } while (0)
-    for (int rep = cui_key_pressed(ui, CUI_KEY_LEFT) ? ui->kpressed[CUI_KEY_LEFT] : 0; rep > 0; rep--) {
-        if (!shift && s1 > s0 && !word_mod) { e->cursor = e->anchor = s0; moved = true; continue; }
-        CUI__MOVE(line_mod ? 0 : word_mod ? cui__word_left(buf, e->cursor) : cui__utf8_prev(buf, e->cursor));
-    }
-    for (int rep = cui_key_pressed(ui, CUI_KEY_RIGHT) ? ui->kpressed[CUI_KEY_RIGHT] : 0; rep > 0; rep--) {
-        if (!shift && s1 > s0 && !word_mod) { e->cursor = e->anchor = s1; moved = true; continue; }
-        CUI__MOVE(line_mod ? len : word_mod ? cui__word_right(buf, len, e->cursor) : cui__utf8_next(buf, len, e->cursor));
-    }
-    bool vertical = multiline && (cui_key_pressed(ui, CUI_KEY_UP) || cui_key_pressed(ui, CUI_KEY_DOWN));
-    if (vertical) {
-        int ln = cui__line_of(lines, nlines, e->cursor);
-        cui_text_layout_line *L = &lines[ln];
-        float x = e->preferred_x >= 0 ? e->preferred_x : cui__text_width(ui, font, size, buf + L->start, e->cursor - L->start, false);
-        int dir = cui_key_pressed(ui, CUI_KEY_UP) ? -1 : 1;
-        int target = ln + dir;
-        if (target < 0) CUI__MOVE(0);
-        else if (target >= nlines) CUI__MOVE(len);
-        else {
-            cui_text_layout_line *T = &lines[target];
-            int pos = T->start + cui__text_hit(ui, font, size, buf + T->start, T->end - T->start, x);
-            if (target < nlines - 1 && pos == T->end && T->end == lines[target + 1].start && pos > T->start) pos = cui__utf8_prev(buf, pos);
-            CUI__MOVE(pos);
-        }
-        e->preferred_x = x;
-    }
-    if (cui_key_pressed(ui, CUI_KEY_HOME)) {
-        if (multiline && !prim) { int ln = cui__line_of(lines, nlines, e->cursor); CUI__MOVE(lines[ln].start); }
-        else CUI__MOVE(0);
-    }
-    if (cui_key_pressed(ui, CUI_KEY_END)) {
-        if (multiline && !prim) {
-            int ln = cui__line_of(lines, nlines, e->cursor);
-            int end = lines[ln].end;
-            if (ln < nlines - 1 && end == lines[ln + 1].start && end > lines[ln].start && buf[end - 1] == ' ') end--;
-            CUI__MOVE(end);
-        } else CUI__MOVE(len);
-    }
-    bool key_copy = (prim && cui_key_pressed(ui, CUI_KEY_C)) || command == KEST_EDIT_COPY;
-    bool key_cut = (prim && cui_key_pressed(ui, CUI_KEY_X)) || command == KEST_EDIT_CUT;
-    bool key_paste = (prim && cui_key_pressed(ui, CUI_KEY_V)) || command == KEST_EDIT_PASTE;
-    if ((prim && cui_key_pressed(ui, CUI_KEY_A)) || command == KEST_EDIT_SELECT_ALL) { e->anchor = 0; e->cursor = len; moved = true; }
-    s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-    if ((key_copy || key_cut) && s1 > s0 && !password) {
-        if (ui->platform.set_clipboard) {
-            char *tmpc = cui__frame_strdup(ui, buf + s0, s1 - s0);
-            ui->platform.set_clipboard(ui->platform.user, tmpc);
-        }
-        if (key_cut && !read_only) {
-            cui__undo_push(ui, e, buf);
-            cui__delete_range(buf, &len, s0, s1);
-            e->cursor = e->anchor = s0;
-            s1 = s0;   /* the selection is gone; a paste in the same frame inserts at the caret */
-            edited = true;
-        }
-    }
-    if (!read_only) {
-        if (command == KEST_EDIT_DELETE && s1 > s0) {
-            cui__undo_push(ui, e, buf);
-            cui__delete_range(buf, &len, s0, s1);
-            e->cursor = e->anchor = s0;
-            s1 = s0;
-            edited = true;
-        }
-        if (key_paste && ui->platform.get_clipboard) {
-            const char *clip = ui->platform.get_clipboard(ui->platform.user);
-            if (clip && *clip) {
-                cui__undo_push(ui, e, buf);
-                cui__delete_range(buf, &len, s0, s1);
-                e->cursor = e->anchor = s0;
-                int m = cui__insert(buf, &len, cap, e->cursor, clip, (int)strlen(clip), multiline);
-                e->cursor += m; e->anchor = e->cursor;
-                edited = true;
-                e->last_edit = 0;
-            }
-        }
-        bool undo = (prim && cui_key_pressed(ui, CUI_KEY_Z) && !shift) || command == KEST_EDIT_UNDO;
-        bool redo = (prim && ((shift && cui_key_pressed(ui, CUI_KEY_Z)) || cui_key_pressed(ui, CUI_KEY_Y))) || command == KEST_EDIT_REDO;
-        if ((undo || redo) && cui__edit_undo_step(ui, e, buf, cap, !undo)) {
-            len = (int)strlen(buf);
-            res.changed = true;
-        }
-        for (int rep = ui->kpressed[CUI_KEY_BACKSPACE]; rep > 0; rep--) {
-            s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-            cui__undo_push_kind(ui, e, buf, s1 > s0 ? 3 : 2);
-            if (s1 > s0) { cui__delete_range(buf, &len, s0, s1); e->cursor = e->anchor = s0; }
-            else if (e->cursor > 0) {
-                int to = word_mod ? cui__word_left(buf, e->cursor) : line_mod ? 0 : cui__utf8_prev(buf, e->cursor);
-                cui__delete_range(buf, &len, to, e->cursor);
-                e->cursor = e->anchor = to;
-            }
-            edited = true;
-        }
-        for (int rep = ui->kpressed[CUI_KEY_DELETE]; rep > 0; rep--) {
-            s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-            cui__undo_push_kind(ui, e, buf, s1 > s0 ? 3 : 2);
-            if (s1 > s0) { cui__delete_range(buf, &len, s0, s1); e->cursor = e->anchor = s0; }
-            else if (e->cursor < len) {
-                int to = word_mod ? cui__word_right(buf, len, e->cursor) : cui__utf8_next(buf, len, e->cursor);
-                cui__delete_range(buf, &len, e->cursor, to);
-            }
-            edited = true;
-        }
-        if (multiline && cui_key_pressed(ui, CUI_KEY_ENTER) && !prim) {
-            s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-            cui__undo_push(ui, e, buf);
-            cui__delete_range(buf, &len, s0, s1);
-            e->cursor = e->anchor = s0;
-            int m = cui__insert(buf, &len, cap, e->cursor, "\n", 1, true);
-            e->cursor += m; e->anchor = e->cursor;
-            edited = true;
-        }
-        if (multiline && cui_key_pressed(ui, CUI_KEY_TAB)) { /* keep tab for focus navigation */ }
-        if (ui->text_in_len > 0 && !(prim && !(mods & CUI_MOD_ALT))) {
-            s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-            cui__undo_push_kind(ui, e, buf, s1 > s0 ? 3 : 1);
-            cui__delete_range(buf, &len, s0, s1);
-            e->cursor = e->anchor = s0;
-            int m = cui__insert(buf, &len, cap, e->cursor, ui->text_in, ui->text_in_len, multiline);
-            e->cursor += m; e->anchor = e->cursor;
-            edited = true;
-        }
-    }
-    if ((!multiline || prim) && cui_key_pressed(ui, CUI_KEY_ENTER)) res.submitted = true;
+    cui__edit_move_keys(&c);
+    cui__edit_clipboard(&c);
+    if (!read_only) cui__edit_typing(&c, &res);
+    if ((!multiline || c.prim) && cui_key_pressed(ui, CUI_KEY_ENTER)) res.submitted = true;
     if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
         if (e->cursor != e->anchor) e->anchor = e->cursor;
         else { ui->focus = 0; res.blurred = true; }
     }
-#undef CUI__MOVE
-    if (edited) res.changed = true;
-    if (edited || moved) ui->caret_time = ui->time;
-    if (edited) e->last_cursor = e->cursor;
-    if ((edited || moved) && !vertical) e->preferred_x = -1;
+    if (c.edited) res.changed = true;
+    if (c.edited || c.moved) ui->caret_time = ui->time;
+    if (c.edited) e->last_cursor = e->cursor;
+    if ((c.edited || c.moved) && !c.vertical) e->preferred_x = -1;
 
-    /* keep the caret visible */
-    len = (int)strlen(buf);
-    if (!multiline) {
-        float cx = cui__x_at(ui, &tmp, buf, len, e->cursor);
-        float full = cui__x_at(ui, &tmp, buf, len, len);
-        if (area.w > 0) {
-            if (cx - e->scroll_x > area.w - 2) e->scroll_x = cx - area.w + 2;
-            if (cx - e->scroll_x < 0) e->scroll_x = cx;
-            if (full - e->scroll_x < area.w - 2) e->scroll_x = CUI_MAX(0, full - area.w + 2);
-        }
-    } else if (area.h > 0) {
-        if (res.changed) nlines = cui__edit_lines(ui, font, size, buf, len, area.w, &lines);
-        if (res.changed || moved || e->selecting) {   /* follow the caret only when it moved */
-            int ln = cui__line_of(lines, nlines, e->cursor);
-            float cy = ln * line_h;
-            if (cy - e->scroll_y > area.h - line_h) e->scroll_y = cy - area.h + line_h;
-            if (cy - e->scroll_y < 0) e->scroll_y = cy;
-        }
-        float total = nlines * line_h;
-        if (e->scroll_y > total - area.h) e->scroll_y = CUI_MAX(0, total - area.h);
-    }
-    if (ui->platform.set_text_input_rect) {
-        cui_rect cr = area;
-        if (!multiline) cr.x = area.x + cui__x_at(ui, &tmp, buf, len, e->cursor) - e->scroll_x;
-        cr.w = 1;
-        ui->platform.set_text_input_rect(ui->platform.user, cr);
-    }
+    cui__edit_follow_caret(&c, &res);
     return res;
 }
 
@@ -710,7 +775,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     p->placeholder = o->placeholder;
     p->text = CUI_C(ui, FOREGROUND);
     p->placeholder_color = CUI_C(ui, TEXT_MUTED);
-    p->caret = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
+    p->caret = cui__emphasis(ui);
     p->selection = ui->accent == CUI_ACCENT_NEUTRAL ? cui_alpha(cui_oklch(0.6f, 0.13f, 250, 1), 0.28f) : cui_alpha(CUI_C(ui, ACCENT), 0.26f);
     p->line_h = line_h;
     if (multiline) {

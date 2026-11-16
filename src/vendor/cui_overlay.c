@@ -3,7 +3,6 @@
  * color picker and the command palette. */
 #include "cui_internal.h"
 
-static float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_input_opts *o, bool multiline, int style, const char *search_icon);
 void cui__paint_focus_ring_node(cui_ctx *ui, cui_node *n, void *data);
 
@@ -304,23 +303,6 @@ void cui_menu_label(cui_ctx *ui, const char *text) {
 
 typedef struct { float hover, focus; char query[96]; } cui__select_state;
 
-static bool cui__contains_ci(const char *hay, const char *needle) {
-    if (!needle || !*needle) return true;
-    size_t nl = strlen(needle);
-    for (const char *h = hay; *h; h++) {
-        size_t k = 0;
-        while (k < nl && h[k]) {
-            char a = h[k], b = needle[k];
-            if (a >= 'A' && a <= 'Z') a += 32;
-            if (b >= 'A' && b <= 'Z') b += 32;
-            if (a != b) break;
-            k++;
-        }
-        if (k == nl) return true;
-    }
-    return false;
-}
-
 bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, int count, int *index, const cui_select_opts *o) {
     cui_select_opts d;
     memset(&d, 0, sizeof d);
@@ -450,12 +432,12 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
 /* ------------------------------------------------------------------------ */
 
 typedef struct { char text[256]; cui_id anchor, shown; cui_spring t, ox, oy; double last_shown; bool visible, passive; float px, py; } cui__tooltip_state;
-static cui__tooltip_state *cui__tip(cui_ctx *ui) { return cui_state(ui, 0x7001717u, sizeof(cui__tooltip_state)); }
+static cui__tooltip_state *cui__tooltip_get(cui_ctx *ui) { return cui_state(ui, 0x7001717u, sizeof(cui__tooltip_state)); }
 
 void cui_tooltip(cui_ctx *ui, const char *text) {
     cui_id anchor = ui->last_id;
     if (!anchor || !text) return;
-    cui__tooltip_state *tt = cui__tip(ui);
+    cui__tooltip_state *tt = cui__tooltip_get(ui);
     bool hovered = ui->hot == anchor && ui->active == 0 && !ui->mdown[0];
     if (hovered) {
         if (ui->tooltip_id != anchor) {
@@ -480,7 +462,7 @@ void cui_tooltip(cui_ctx *ui, const char *text) {
 /* Like cui_tooltip, for a rect that is not interactive (a truncated label). A
  * widget's own tooltip wins if both ask in the same frame. */
 void cui__tooltip_passive(cui_ctx *ui, cui_id anchor, const char *text) {
-    cui__tooltip_state *tt = cui__tip(ui);
+    cui__tooltip_state *tt = cui__tooltip_get(ui);
     if (tt->visible && !tt->passive) return;
     if (ui->active != 0) return;
     /* callers test the pointer against a plain rect; a menu, popover or dialog
@@ -500,7 +482,7 @@ void cui__tooltip_passive(cui_ctx *ui, cui_id anchor, const char *text) {
 }
 
 static void cui__tooltip_render(cui_ctx *ui) {
-    cui__tooltip_state *tt = cui__tip(ui);
+    cui__tooltip_state *tt = cui__tooltip_get(ui);
     bool show = tt->visible && (tt->passive || ui->hot == tt->anchor);
     cui__spring(ui, &tt->t, show ? 1.0f : 0.0f, show ? 0.2f : 0.12f, 0.0f);
     if (show) tt->last_shown = ui->time;
@@ -1017,9 +999,6 @@ static int cui__weekday(int y, int m, int d) {
     return (w + 6) % 7;
 }
 
-static const char *cui__month_names[12] = { "January", "February", "March", "April", "May", "June", "July",
-                                            "August", "September", "October", "November", "December" };
-
 typedef struct { int view_y, view_m; bool init; } cui__cal_state;
 
 bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
@@ -1032,15 +1011,20 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
     }
     bool changed = false;
     cui_push_id(ui, id_str);
+    /* 34px day cells, down to 28 when the parent is narrow (phones) */
+    cui_rect cpr = cui__prev_rect(ui, id);
+    float cs = cpr.w > 0 ? floorf((cpr.w - 12) / 7) : 34;
+    cs = cs > 34 ? 34 : cs < 28 ? 28 : cs;
     int col = cui__node_new(ui, id);
     ui->nodes[col].gap = 8;
-    ui->nodes[col].w = CUI_PX(7 * 34 + 6 * 2);
-    ui->nodes[col].self_align = CUI__ALIGN_NOSTRETCH;
+    cui__soft_width(&ui->nodes[col], CUI_FIT, 7 * 34 + 6 * 2);
+    ui->nodes[col].min_w = 7 * 28 + 6 * 2;
+    ui->nodes[col].flags |= CUI_NF_ADAPTIVE;
     cui__open(ui, col);
     int head = cui__node_new(ui, 0);
     ui->nodes[head].dir = CUI_ROW; ui->nodes[head].gap = 2; ui->nodes[head].pad[3] = 6;
     cui__open(ui, head);
-    int ht = cui__text_node(ui, cui__frame_printf(ui, "%s %d", cui__month_names[st->view_m - 1], st->view_y), -1,
+    int ht = cui__text_node(ui, cui__frame_printf(ui, "%s %d", cui__month_name(ui, st->view_m - 1), st->view_y), -1,
                             CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body + 1), CUI_C(ui, FOREGROUND), false);
     ui->nodes[ht].line_height = 1.3f;
     ui->nodes[ht].w = CUI_FILL;
@@ -1058,9 +1042,8 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
     int grid = cui__node_new(ui, 0);
     cui__apply_box(ui, &ui->nodes[grid], &gb);
     cui__open(ui, grid);
-    static const char *wd[7] = { "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su" };
     for (int k = 0; k < 7; k++) {
-        int t = cui__text_node(ui, wd[k], -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
+        int t = cui__text_node(ui, cui__weekday_min(ui, k), -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
         ui->nodes[t].text_align = CUI_TEXT_CENTER;
         ui->nodes[t].line_height = 2.0f;
     }
@@ -1077,15 +1060,14 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
         int key = y * 10000 + m * 100 + day;
         cui_id did = cui__hash(&key, sizeof key, id);
         cui_interact r = cui__interact(ui, did, CUI_IF_FOCUSABLE);
-        float *hv = cui_state(ui, did, sizeof(float));
-        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+        float hv_v = cui__hover_fade(ui, did, r.hovered, CUI__T_HOVER), *hv = &hv_v;
         bool sel = value && value->year == y && value->month == m && value->day == day;
         bool is_today = today.year == y && today.month == m && today.day == day;
         int c = cui__node_new(ui, did);
         cui_node *cn = &ui->nodes[c];
-        cn->h = CUI_PX(34);
+        cn->h = CUI_PX(cs);
         cn->dir = CUI_ROW; cn->align = CUI_ALIGN_CENTER; cn->justify = CUI_JUSTIFY_CENTER;
-        cn->radius = CUI_CORNERS(17);
+        cn->radius = CUI_CORNERS(cs / 2);
         cn->bg = sel ? CUI_C(ui, CONTROL_ON) : cui_alpha(CUI_C(ui, HOVER), *hv * 1.4f);
         if (is_today && !sel) { cn->border = 1; cn->border_color = CUI_C(ui, BORDER_STRONG); }
         cui__mark_interactive(ui, c, CUI_IF_FOCUSABLE);
@@ -1126,8 +1108,7 @@ bool cui_date_picker_ex(cui_ctx *ui, const char *id_str, cui_date *value, const 
     cui_popup *p = cui__popup_get(ui, pid, true);
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     if (r.clicked && p) { cui__popup_set(ui, pid, !p->open); p->at_mouse = false; }
-    float *hv = cui_state(ui, id, sizeof(float));
-    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    float hv_v = cui__hover_fade(ui, id, r.hovered, CUI__T_HOVER), *hv = &hv_v;
     int col = -1;
     if (o->label) {
         col = cui__node_new(ui, 0);
@@ -1154,7 +1135,7 @@ bool cui_date_picker_ex(cui_ctx *ui, const char *id_str, cui_date *value, const 
     cui__open(ui, i);
     cui__icon_node(ui, CUI_ICON_CALENDAR, 16, CUI_C(ui, TEXT_MUTED));
     bool has = value && value->year > 0;
-    const char *txt = has ? cui__frame_printf(ui, "%.3s %d, %d", cui__month_names[(value->month - 1) % 12], value->day, value->year)
+    const char *txt = has ? cui__frame_printf(ui, "%s %d, %d", cui__month_short(ui, value->month - 1), value->day, value->year)
                           : (o->placeholder ? o->placeholder : "Pick a date");
     int t = cui__text_node(ui, txt, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), has ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_MUTED), false);
     ui->nodes[t].line_height = 1.3f;
@@ -1501,6 +1482,7 @@ int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int co
     ui->nodes[sep2].bg = CUI_C(ui, BORDER);
     int foot = cui__node_new(ui, 0);
     ui->nodes[foot].dir = CUI_ROW; ui->nodes[foot].gap = 16;
+    ui->nodes[foot].flags |= CUI_NF_ROW_WRAP;   /* a phone: the hints take two lines rather than cut to "Na..." */
     ui->nodes[foot].pad[0] = ui->nodes[foot].pad[2] = 10; ui->nodes[foot].pad[3] = ui->nodes[foot].pad[1] = 14;
     ui->nodes[foot].bg = CUI_C(ui, SURFACE_MUTED);
     ui->nodes[foot].radius.bl = ui->nodes[foot].radius.br = ui->theme.radius_panel - 1;
@@ -1535,10 +1517,10 @@ void cui__widgets_begin_frame(cui_ctx *ui) {
     ui->acc_depth = 0;
     ui->tree_depth = 0;
     ui->button_group_depth = 0;
-    ui->reorder = NULL;
+    ui->building.reorder = NULL;
     ui->dialog_depth = 0;
-    ui->split = NULL;
-    ui->table = NULL;
+    ui->building.split = NULL;
+    ui->building.table = NULL;
 }
 
 void cui__widgets_end_frame(cui_ctx *ui) {

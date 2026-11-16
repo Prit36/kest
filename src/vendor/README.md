@@ -1,7 +1,7 @@
 # CUI vendored modules
 
-These files are MIT-licensed modules from the pinned CUI commit
-`d0383c4d3c00b7769f6b11cefdf581e1800f2da3`; the license is in `CUI-LICENSE`.
+These files are MIT-licensed modules from CUI 1.4.0 at the pinned commit
+`5a9c12b433d4501bc2f5632ead3a1cc05e5b1ee5`; the license is in `CUI-LICENSE`.
 The build compiles them instead of the dependency's copies; the downloaded
 package cache is never modified.
 
@@ -16,7 +16,8 @@ CUI's bundled fonts as their fallbacks. The Windows font files are mapped
 read-only (`kest_file_map`) rather than read into memory, and unmapped when the
 context's fonts are destroyed. Font metrics, kerning, layout, icons and
 cache keys remain CUI's. If a native face or glyph cannot be rendered, the
-original stb rasterization is used.
+original stb rasterization is used. CUI's atlas compaction also uses four bytes
+per pixel, preserving every coverage channel when old glyph sizes age out.
 
 ## `cui_textedit.c`
 
